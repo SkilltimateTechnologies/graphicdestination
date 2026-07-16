@@ -1,0 +1,18 @@
+# Railway Configuration
+
+[build]
+builder = "NIXPACKS"
+
+# Main App
+[services.app]
+path = "client"
+buildCommand = "npm install && npm run build"
+startCommand = "node ../server/index.js"
+healthcheckPath = "/"
+
+# Remotion Worker
+[services.remotion-worker]
+path = "remotion-worker"
+buildCommand = "npm install"
+startCommand = "npm start"
+healthcheckPath = "/"
