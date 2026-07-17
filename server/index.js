@@ -184,6 +184,88 @@ app.delete("/api/projects/:id", requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
+/* ---------------- asset library ----------------
+ * Owner-scoped image uploads. Payloads arrive as data URLs and are stored as
+ * base64 text in the assets table (the remote-only Turso client binds no
+ * BLOBS); GET /api/assets/:id decodes and serves the raw bytes. Same-origin
+ * URLs plus the CSP's `img-src 'self' data:` keep these usable in <img> tags.
+ */
+
+const ASSET_MIMES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+const MAX_ASSET_BYTES = 3 * 1024 * 1024; // 3 MB decoded
+// Test hook: GD_ASSET_QUOTA overrides the default 50-assets-per-user limit.
+const ASSET_QUOTA = Math.max(1, Number.parseInt(process.env.GD_ASSET_QUOTA || "50", 10) || 50);
+const DATA_URL_RE = /^data:([^;,]+);base64,([\s\S]*)$/;
+const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
+
+const assetMeta = (row) => ({
+  id: row.id,
+  name: row.name,
+  mime: row.mime,
+  size: row.size,
+  url: `/api/assets/${row.id}`,
+  createdAt: row.created_at,
+});
+
+app.post("/api/assets", requireAuth, async (req, res) => {
+  const { name, mime, dataUrl } = req.body || {};
+  if (typeof name !== "string" || name.length < 1 || name.length > 120) {
+    return res.status(400).json({ error: "name must be 1-120 characters" });
+  }
+  if (typeof mime !== "string" || typeof dataUrl !== "string") {
+    return res.status(400).json({ error: "mime and dataUrl required" });
+  }
+  if (!ASSET_MIMES.has(mime)) {
+    return res.status(415).json({ error: "Unsupported image type (allowed: image/png, image/jpeg, image/webp, image/gif)" });
+  }
+  const m = DATA_URL_RE.exec(dataUrl);
+  if (!m || m[1] !== mime || !m[2] || m[2].length % 4 !== 0 || !BASE64_RE.test(m[2])) {
+    return res.status(400).json({ error: "Malformed dataUrl (expected data:<mime>;base64,<data>)" });
+  }
+  const buf = Buffer.from(m[2], "base64");
+  if (buf.length > MAX_ASSET_BYTES) {
+    return res.status(413).json({ error: "Image too large (max 3 MB)" });
+  }
+  const count = await db.execute({ sql: "SELECT COUNT(*) AS n FROM assets WHERE owner_id = ?", args: [req.user.sub] });
+  if (Number(count.rows[0].n) >= ASSET_QUOTA) {
+    return res.status(409).json({ error: `Asset limit reached (${ASSET_QUOTA})` });
+  }
+  const result = await db.execute({
+    sql: "INSERT INTO assets (owner_id, name, mime, data, size) VALUES (?, ?, ?, ?, ?)",
+    args: [req.user.sub, name, mime, m[2], buf.length],
+  });
+  const created = await db.execute({ sql: "SELECT * FROM assets WHERE id = ?", args: [result.lastInsertRowid] });
+  res.status(201).json(assetMeta(created.rows[0]));
+});
+
+app.get("/api/assets", requireAuth, async (req, res) => {
+  const result = await db.execute({
+    sql: "SELECT id, name, mime, size, created_at FROM assets WHERE owner_id = ? ORDER BY id DESC",
+    args: [req.user.sub],
+  });
+  res.json(result.rows.map(assetMeta));
+});
+
+app.get("/api/assets/:id", requireAuth, async (req, res) => {
+  const result = await db.execute({
+    sql: "SELECT * FROM assets WHERE id = ? AND owner_id = ?",
+    args: [req.params.id, req.user.sub],
+  });
+  const row = result.rows[0];
+  if (!row) return res.status(404).json({ error: "Not found" });
+  const buf = Buffer.from(row.data, "base64");
+  res.setHeader("Content-Type", row.mime);
+  res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
+  res.setHeader("Content-Length", String(buf.length));
+  res.end(buf);
+});
+
+app.delete("/api/assets/:id", requireAuth, async (req, res) => {
+  const result = await db.execute({ sql: "DELETE FROM assets WHERE id = ? AND owner_id = ?", args: [req.params.id, req.user.sub] });
+  if (result.rowsAffected === 0) return res.status(404).json({ error: "Not found" });
+  res.json({ ok: true });
+});
+
 /* ---------------- HyperFrames export ---------------- */
 
 app.post("/api/render/compile", requireAuth, async (req, res) => {

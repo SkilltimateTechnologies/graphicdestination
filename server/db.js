@@ -50,6 +50,18 @@ export async function initSchema() {
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       )`,
       `CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_id)`,
+      // Asset library: user-uploaded images stored as base64 text (keeps the
+      // remote-only Turso client usable -- it has no BLOB binding support).
+      `CREATE TABLE IF NOT EXISTS assets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id INTEGER NOT NULL REFERENCES users(id),
+        name TEXT NOT NULL,
+        mime TEXT NOT NULL,
+        data TEXT NOT NULL,
+        size INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_assets_owner ON assets(owner_id)`,
     ],
     "write"
   );

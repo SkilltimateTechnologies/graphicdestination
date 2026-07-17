@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import ExportDialog from "./ExportDialog";
+import { api } from "../api";
+import { prepareImageFile } from "../lib/imagePrep";
 import { EASE, EASE_LABEL, clamp01 } from "../engine/easing.js";
 import { SHAPE_DEFS, SHAPE_IDS, ptsToStr, pathSamples, pointOnPath, morphPtsAt } from "../engine/shapes.js";
 import { valueAt, colorAt, lerpColor, posOf, clipLocalTime, clipTransition } from "../engine/keyframes.js";
@@ -266,6 +268,14 @@ const STAGE_PRESETS = [
 ];
 const DEFAULT_BRAND = { id: "b1", name: "Graphic Destination", colors: ["#FFB224", "#FF6B6B", "#5B8CFF", "#6EE7B7", "#F9F9F9"], headFont: "Space Grotesk", bodyFont: "Inter" };
 
+/* map /api/assets failures (and image-prep rejections) to panel-friendly copy */
+function assetErrorText(err) {
+  if (err?.status === 413) return "That image is too large for the server — try a smaller one.";
+  if (err?.status === 415) return "That file type isn't supported. Use PNG, JPEG, WebP or GIF.";
+  if (err?.status === 409) return "Your asset storage is full — delete some assets to make room.";
+  return err?.message || "Something went wrong — please try again.";
+}
+
 /* ============================================================
    APP
    ============================================================ */
@@ -290,6 +300,11 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   const [tlDragging, setTlDragging] = useState(false);
   const [shapesOpen, setShapesOpen] = useState(false);
   const [mapsOpen, setMapsOpen] = useState(false);
+  const [imagesOpen, setImagesOpen] = useState(false);
+  const [assets, setAssets] = useState(null); /* null = not fetched yet; [] = fetched, empty */
+  const [assetsBusy, setAssetsBusy] = useState(false);
+  const [assetErr, setAssetErr] = useState("");
+  const [assetUploading, setAssetUploading] = useState(false);
   const [shapeQ, setShapeQ] = useState("");
   const [morphQ, setMorphQ] = useState("");
   const [overflowShow, setOverflowShow] = useState(true);
@@ -310,6 +325,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   const stageScrollRef = useRef(null);
   const rulerRef = useRef(null);
   const fileRef = useRef(null);
+  const assetFileRef = useRef(null);
   const zoomModeRef = useRef("fit");
   zoomModeRef.current = zoomMode;
 
@@ -649,6 +665,46 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
       img.src = rd.result;
     };
     rd.readAsDataURL(f);
+  };
+
+  /* ---------- asset library (uploads + reusable images) ---------- */
+  /* adds an image layer through the SAME addObject("image") path as
+     onPickImage above — props { src, w, h } scaled to fit 460px */
+  const addImageLayer = (src, natW, natH) => {
+    const s = Math.min(1, 460 / Math.max(natW, natH));
+    addObject("image", { props: { src, w: Math.round(natW * s), h: Math.round(natH * s) } });
+  };
+  const refreshAssets = useCallback(async () => {
+    setAssetsBusy(true);
+    try { setAssets(await api.listAssets()); setAssetErr(""); }
+    catch (err) { setAssetErr(assetErrorText(err)); }
+    finally { setAssetsBusy(false); }
+  }, []);
+  useEffect(() => { if (imagesOpen && assets === null) refreshAssets(); }, [imagesOpen, assets, refreshAssets]);
+  const onPickAsset = async (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    setAssetUploading(true); setAssetErr("");
+    try {
+      const prep = await prepareImageFile(f);
+      const asset = await api.uploadAsset({ name: prep.name, mime: prep.mime, dataUrl: prep.dataUrl });
+      addImageLayer(asset.url, prep.width, prep.height);
+      refreshAssets();
+    } catch (err) { setAssetErr(assetErrorText(err)); }
+    finally { setAssetUploading(false); }
+  };
+  const addAssetLayer = (asset) => {
+    const img = new Image();
+    img.onload = () => addImageLayer(asset.url, img.naturalWidth || 320, img.naturalHeight || 220);
+    img.onerror = () => addImageLayer(asset.url, 320, 220);
+    img.src = asset.url;
+  };
+  const onDeleteAsset = async (asset) => {
+    if (!window.confirm(`Delete "${asset.name}" from your assets? Layers already using it will lose the image.`)) return;
+    setAssetErr("");
+    try { await api.deleteAsset(asset.id); refreshAssets(); }
+    catch (err) { setAssetErr(assetErrorText(err)); }
   };
 
   const applyPreset = (preset) => {
@@ -1016,6 +1072,8 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
         .gd-kfc:hover{transform:translate(-50%,-50%) scale(1.3) !important}
         @keyframes gdPanelIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
         .gd-panel{animation:gdPanelIn 160ms ease-out}
+        .gd-asset{transition:border-color 120ms ease-out}
+        .gd-asset:hover{border-color:${C.amber} !important}
         .gd-name-input{background:transparent;border:1px solid transparent;border-radius:6px;color:${C.txt};padding:4px 8px;font-size:12.5px;font-weight:600;font-family:inherit;outline:none;transition:border-color 120ms ease-out,background 120ms ease-out}
         .gd-name-input:hover{border-color:${C.line}}
         .gd-name-input:focus{border-color:${C.amber};background:${C.bg2}}
@@ -1024,6 +1082,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
         .gd-tl-handle.gd-dragging .gd-tl-handle-line{opacity:1}
       `}</style>
       <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onPickImage} />
+      <input ref={assetFileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" style={{ display: "none" }} onChange={onPickAsset} />
 
       {/* ============ TOP BAR ============ */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 14px", height: 44, background: C.bg1, borderBottom: `1px solid ${C.line}`, flexShrink: 0 }}>
@@ -1061,7 +1120,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
         <div style={{ width: 76, background: C.bg1, borderRight: `1px solid ${C.line}`, display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 12, gap: 9, flexShrink: 0, zIndex: 20, overflowY: "auto" }}>
           <RailBtn label="Shapes" active={shapesOpen} onClick={() => setShapesOpen(!shapesOpen)} glyph={<svg width="19" height="19" viewBox="0 0 100 100"><polygon points={ptsToStr(SHAPE_DEFS.star.pts)} fill={C.dim} /></svg>} />
           <RailBtn label="Text" onClick={() => addObject("text")} glyph={<div style={{ color: C.dim, fontWeight: 800, fontSize: 15 }}>T</div>} />
-          <RailBtn label="Image" onClick={() => fileRef.current?.click()} glyph={<div style={{ width: 18, height: 14, border: `2px solid ${C.dim}`, borderRadius: 3, position: "relative", overflow: "hidden" }}><div style={{ position: "absolute", width: 7, height: 7, background: C.dim, transform: "rotate(45deg)", bottom: -4, left: 3 }} /></div>} />
+          <RailBtn label="Image" active={imagesOpen} onClick={() => setImagesOpen(!imagesOpen)} glyph={<div style={{ width: 18, height: 14, border: `2px solid ${C.dim}`, borderRadius: 3, position: "relative", overflow: "hidden" }}><div style={{ position: "absolute", width: 7, height: 7, background: C.dim, transform: "rotate(45deg)", bottom: -4, left: 3 }} /></div>} />
           <RailBtn label="Number" onClick={() => addObject("number")} glyph={<div style={{ color: C.dim, fontWeight: 800, fontSize: 12.5, fontFamily: "'JetBrains Mono'" }}>123</div>} />
           <RailBtn label="Charts" onClick={() => addObject("chart")} glyph={<div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 16 }}><div style={{ width: 4, height: 8, background: C.dim, borderRadius: 1 }} /><div style={{ width: 4, height: 15, background: C.dim, borderRadius: 1 }} /><div style={{ width: 4, height: 11, background: C.dim, borderRadius: 1 }} /></div>} />
           <RailBtn label="Maps" active={mapsOpen} onClick={() => setMapsOpen(!mapsOpen)} glyph={<svg width="19" height="19" viewBox="0 0 100 102"><path d={ringsToPath(MAPS.IND.rings)} fill="none" stroke={C.dim} strokeWidth="5" /></svg>} />
@@ -1109,8 +1168,43 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
           </div>
         )}
 
+        {/* images drawer: upload + your asset library */}
+        {imagesOpen && (
+          <div className="gd-panel" style={{ position: "absolute", left: 84, top: 12, width: 240, background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 8, padding: 12, zIndex: 30, boxShadow: "0 12px 40px rgba(0,0,0,.5)" }}>
+            <button className="gd-btn-accent" onClick={() => assetFileRef.current?.click()} disabled={assetUploading}
+              style={{ width: "100%", background: C.amber, color: "#1A1405", border: "none", borderRadius: 6, padding: "8px 0", cursor: assetUploading ? "default" : "pointer", fontWeight: 700, fontSize: 12.5, opacity: assetUploading ? 0.65 : 1 }}>
+              {assetUploading ? "Uploading…" : "Upload image"}
+            </button>
+            {assetErr && <div style={{ color: C.danger, fontSize: 11.5, lineHeight: 1.5, marginTop: 9 }}>{assetErr}</div>}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "13px 0 8px" }}>
+              <div style={sectionLabel}>Your assets</div>
+              {assetsBusy && <div style={{ fontSize: 10.5, color: C.faint }}>Loading…</div>}
+            </div>
+            {assets === null ? (
+              assetErr
+                ? <button className="gd-btn" onClick={refreshAssets} style={{ ...chipStyle, cursor: "pointer" }}>Retry</button>
+                : <div style={{ color: C.faint, fontSize: 12 }}>Loading…</div>
+            ) : assets.length === 0 ? (
+              <div style={{ color: C.faint, fontSize: 12, lineHeight: 1.6 }}>Upload your logo or image to use it in videos</div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 48px)", gap: 8, maxHeight: 264, overflowY: "auto" }}>
+                {assets.map((a) => (
+                  <div key={a.id} style={{ position: "relative", width: 48, height: 48 }}>
+                    <button className="gd-asset" title={`${a.name} — click to add`} onClick={() => addAssetLayer(a)}
+                      style={{ width: 48, height: 48, padding: 0, background: C.bg3, border: `1px solid ${C.line}`, borderRadius: 6, cursor: "pointer", overflow: "hidden", display: "block" }}>
+                      <img src={a.url} alt={a.name} draggable={false} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", pointerEvents: "none" }} />
+                    </button>
+                    <button title={`Delete ${a.name}`} aria-label={`Delete ${a.name}`} onClick={() => onDeleteAsset(a)}
+                      style={{ position: "absolute", top: 2, right: 2, width: 15, height: 15, borderRadius: "50%", background: "rgba(10,12,16,0.88)", border: `1px solid ${C.lineStrong}`, color: C.dim, fontSize: 10, lineHeight: 1, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ---- stage ---- */}
-        <div ref={stageWrapRef} onPointerDown={() => { setSelIds([]); setSelKf(null); setShapesOpen(false); setMapsOpen(false); }}
+        <div ref={stageWrapRef} onPointerDown={() => { setSelIds([]); setSelKf(null); setShapesOpen(false); setMapsOpen(false); setImagesOpen(false); }}
           style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: C.bg0, minWidth: 0, position: "relative", overflow: "hidden", pointerEvents: tlDragging ? "none" : undefined }}>
           {/* manual zoom: inner scroller pans the padded canvas area (margin:auto centers until larger than the viewport);
               floating overlays stay pinned because the scroller is a sibling. fit mode: display:contents = zero layout change */}

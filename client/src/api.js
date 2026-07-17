@@ -29,4 +29,8 @@ export const api = {
   createProject: (name, data) => request("/api/projects", { method: "POST", body: JSON.stringify({ name, data }) }),
   updateProject: (id, patch) => request(`/api/projects/${id}`, { method: "PUT", body: JSON.stringify(patch) }),
   deleteProject: (id) => request(`/api/projects/${id}`, { method: "DELETE" }),
+
+  listAssets: () => request("/api/assets"),
+  uploadAsset: ({ name, mime, dataUrl }) => request("/api/assets", { method: "POST", body: JSON.stringify({ name, mime, dataUrl }) }),
+  deleteAsset: (id) => request(`/api/assets/${id}`, { method: "DELETE" }),
 };

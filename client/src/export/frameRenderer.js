@@ -89,13 +89,17 @@ async function inlineRemoteImages(layers, warn) {
   for (const o of layers || []) {
     if (o.type === "clip") {
       await inlineRemoteImages(o.children, warn);
-    } else if (o.type === "image" && /^https?:/i.test(o.props?.src || "")) {
+    } else if (o.type === "image" && o.props?.src && !/^data:/i.test(o.props.src)) {
       try {
-        const res = await fetch(o.props.src, { mode: "cors", credentials: "omit" });
+        // Resolve relative URLs (e.g. /api/assets/3) against the app origin;
+        // same-origin requests need the session cookie (asset API is auth'd).
+        const abs = new URL(o.props.src, window.location.origin);
+        const sameOrigin = abs.origin === window.location.origin;
+        const res = await fetch(abs.href, { mode: "cors", credentials: sameOrigin ? "include" : "omit" });
         if (!res.ok) throw new Error("http " + res.status);
         o.props = { ...o.props, src: await blobToDataURL(await res.blob()) };
       } catch {
-        warn(`Image layer "${o.name}": remote image could not be fetched (CORS/network) — it may render blank in the export.`);
+        warn(`Image layer "${o.name}": image could not be fetched (network/auth) — it may render blank in the export.`);
       }
     }
   }
