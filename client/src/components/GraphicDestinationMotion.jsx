@@ -6,6 +6,7 @@ import { makeAudioTrack, audioToJson, audioFromJson, audioGainAt, audioWithinAt,
 import { clamp01 } from "../engine/easing.js";
 import { SHAPE_DEFS } from "../engine/shapes.js";
 import { valueAt, posOf, clipLocalTime } from "../engine/keyframes.js";
+import { cameraAt, cameraTransform, cameraFromJson, cameraToJson, clampZoom } from "../engine/camera.js";
 import { MAPS, WORLD_H, CONTINENTS, WORLD_EXT, mapBox, normHi } from "../engine/maps.js";
 import { FONT_IMPORT } from "../engine/fx.js";
 import { C, KF_PROPS, STAGE_PRESETS, kfAt, layerOut } from "./editor/model";
@@ -30,6 +31,7 @@ export { EASE, clamp01 } from "../engine/easing.js";
 export { mulberry32 } from "../engine/random.js";
 export { lerpPts, shapePtsOf, morphPtsAt, pointOnPath } from "../engine/shapes.js";
 export { valueAt, colorAt, lerpColor, posOf, fxDuration, clipLocalTime, clipTransition } from "../engine/keyframes.js";
+export { CAM_DEFAULTS, CAM_ZOOM_MIN, CAM_ZOOM_MAX, CAM_DEPTH_MIN, CAM_DEPTH_MAX, CAM_PROPS, clampZoom, clampDepth, depthFactor, cameraAt, cameraTransform, camIsIdentity, camTransformCss, cameraFromJson, cameraToJson, cameraKeyCount } from "../engine/camera.js";
 export { FONT_IMPORT, charFx, numberValue, numberColumns, confettiParticles, parseChart, highlightFlick, worldCameraAt } from "../engine/fx.js";
 
 /* ============================================================
@@ -269,6 +271,11 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   /* project-level audio track: { src, name, startT, volume, fadeIn, fadeOut } | null — all times engine ms */
   const [audioTrack, setAudioTrack] = useState(null);
   const [audioSel, setAudioSel] = useState(false); /* audio lane selected → inspector shows audio props */
+  /* 2.5D scene camera: null = absent (identity — old projects) · { tracks:{x,y,zoom} }.
+     Keyframes are evaluated with the same valueAt machinery as object props (engine/camera.js). */
+  const [camera, setCamera] = useState(null);
+  const [cameraSel, setCameraSel] = useState(false); /* camera lane selected → inspector shows camera props */
+  const [selCamKf, setSelCamKf] = useState(null); /* {prop, t} — selected camera keyframe (easing card) */
   const [audioOpen, setAudioOpen] = useState(false);
   const [audioErr, setAudioErr] = useState("");
   const [audioUploading, setAudioUploading] = useState(false);
@@ -327,6 +334,45 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     if (next.length) tracks[prop] = next; else delete tracks[prop];
     return { ...o, tracks };
   }), [patchObject]);
+
+  /* ---------- scene camera (project-level, root timeline) ----------
+     The camera is a pseudo-object: keyframes live on camera.tracks.x/y/zoom
+     and evaluate with the same valueAt/withKeyframe machinery. It exists
+     lazily — null until the first camera edit, so old projects keep their
+     exact JSON (field omitted) and renders (no wrapper). */
+  const patchCamera = useCallback((fn) => setCamera((c) => fn(c || { tracks: { x: [], y: [], zoom: [] } })), []);
+  const setCameraKeyframe = useCallback((prop, t, v, ease) => {
+    const T = Math.max(0, Math.min(compDur, t)); /* camera keyframes live on the root timeline */
+    const V = prop === "zoom" ? clampZoom(v) : v;
+    patchCamera((c) => ({ ...c, tracks: { ...c.tracks, [prop]: withKeyframe(c.tracks[prop], T, V, ease) } }));
+    return Math.round(T / 10) * 10;
+  }, [patchCamera, compDur]);
+  const removeCameraKeyframe = useCallback((prop, t) => patchCamera((c) => {
+    const next = (c.tracks[prop] || []).filter((k) => Math.abs(k.t - t) > 5);
+    const tracks = { ...c.tracks };
+    if (next.length) tracks[prop] = next; else delete tracks[prop];
+    return { ...c, tracks };
+  }), [patchCamera]);
+  const resetCamera = useCallback(() => { setCamera(null); setSelCamKf(null); }, []);
+  const setCameraSegmentEase = useCallback((prop, aT, ease) => patchCamera((c) => ({ ...c, tracks: { ...c.tracks, [prop]: (c.tracks[prop] || []).map((k) => (Math.abs(k.t - aT) <= 5 ? { ...k, ease } : k)) } })), [patchCamera]);
+  const cameraKfNav = (prop, dir) => {
+    const tr = camera?.tracks?.[prop] || [];
+    const t = timeRef.current;
+    const cand = dir > 0 ? tr.find((k) => k.t > t + 5) : [...tr].reverse().find((k) => k.t < t - 5);
+    if (cand) { setTime(cand.t); setSelCamKf({ prop, t: cand.t }); }
+  };
+  /* camera prop edit (inspector sliders): Animate ON → ◆ at the playhead; no
+     track yet → a single ◆ (a lone keyframe is a constant everywhere, which
+     doubles as "set a static camera value"); Animate OFF + existing track →
+     shift the whole track by the delta — mirrors editProp for objects. */
+  const editCameraProp = (prop, v) => {
+    const V = prop === "zoom" ? clampZoom(v) : v;
+    const tr = camera?.tracks?.[prop];
+    if (autokey || !tr?.length) { setCameraKeyframe(prop, timeRef.current, V); return; }
+    const dv = V - cameraAt(camera, timeRef.current)[prop];
+    patchCamera((c) => ({ ...c, tracks: { ...c.tracks, [prop]: c.tracks[prop].map((k) => ({ ...k, v: k.v + dv })) } }));
+  };
+  const selectCamera = useCallback(() => { setCameraSel(true); setAudioSel(false); setSelIds([]); setSelKf(null); }, []);
 
   const editProp = useCallback((id, prop, v) => {
     const obj = ctxLayers.find((o) => o.id === id);
@@ -490,8 +536,10 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
       if (e.key === "Escape") {
         if (menu) setMenu(null);
         else if (selKf) setSelKf(null);
+        else if (selCamKf) setSelCamKf(null);
         else if (selIds.length) setSelIds([]);
         else if (audioSel) setAudioSel(false);
+        else if (cameraSel) setCameraSel(false);
         else if (path.length) exitToDepth(path.length - 1);
       }
       if (e.key === "Delete" || e.key === "Backspace") {
@@ -743,11 +791,11 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
 
   /* ---------- audio track (project-level, main timeline) ---------- */
   const patchAudio = useCallback((patch) => setAudioTrack((a) => (a ? { ...a, ...patch } : a)), []);
-  const selectAudio = useCallback(() => { setAudioSel(true); setSelIds([]); setSelKf(null); }, []);
+  const selectAudio = useCallback(() => { setAudioSel(true); setCameraSel(false); setSelIds([]); setSelKf(null); }, []);
   /* attach an asset-library audio file with the schema defaults */
   const attachAudioAsset = useCallback((asset) => {
     setAudioTrack(makeAudioTrack({ src: asset.url, name: asset.name }));
-    setAudioSel(true); setSelIds([]); setSelKf(null);
+    setAudioSel(true); setCameraSel(false); setSelIds([]); setSelKf(null);
   }, []);
   const detachAudio = useCallback(() => { setAudioTrack(null); setAudioSel(false); }, []);
   const onPickAudioAsset = async (e) => {
@@ -796,8 +844,10 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   };
 
   /* ---------- save / load ---------- */
-  /* optional top-level "audio" field — OMITTED entirely when no track is attached (export-team contract) */
-  const projectJson = () => JSON.stringify({ app: "graphic-destination-motion", v: 5, stage: { ...stage, dur: compDur, bg: stageBg }, brands, brandId, objects, ...(audioToJson(audioTrack) ? { audio: audioToJson(audioTrack) } : {}) }, null, 2);
+  /* optional top-level "audio" + "camera" fields — each OMITTED entirely when
+     unset (audio: no track attached · camera: no camera keyframes), so old
+     projects keep byte-identical JSON. Both restore through sanitizers on load. */
+  const projectJson = () => JSON.stringify({ app: "graphic-destination-motion", v: 5, stage: { ...stage, dur: compDur, bg: stageBg }, brands, brandId, objects, ...(audioToJson(audioTrack) ? { audio: audioToJson(audioTrack) } : {}), ...(cameraToJson(camera) ? { camera: cameraToJson(camera) } : {}) }, null, 2);
   const copyProject = async () => {
     const txt = projectJson();
     try { await navigator.clipboard.writeText(txt); setIoCopied(true); }
@@ -820,6 +870,8 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
       if (Array.isArray(data.brands) && data.brands.length) { setBrands(data.brands); setBrandId(data.brandId || data.brands[0].id); }
       setAudioTrack(audioFromJson(data.audio)); /* restore attached audio (null when the field is absent) */
       setAudioSel(false);
+      setCamera(cameraFromJson(data.camera)); /* restore scene camera (null when the field is absent) */
+      setCameraSel(false); setSelCamKf(null);
       setPath([]); setSelIds([]); setSelKf(null); setTime(0); setImportErr(""); setIoOpen(false); setImportText("");
     } catch (err) { setImportErr("Couldn't parse that JSON: " + err.message); }
   };
@@ -843,10 +895,14 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     lastJsonRef.current = json;
     onChangeRef.current?.(json);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [objects, stage, compDur, stageBg, brands, brandId, audioTrack]);
+  }, [objects, stage, compDur, stageBg, brands, brandId, audioTrack, camera]);
 
   /* ---------- stage drag (group + path aware, lock aware, canvas-bounds clamped) ---------- */
   const dragRef = useRef(null);
+  /* on-screen scale of a layer under the scene camera (1 when the camera is off
+     or inside a clip). Pointer deltas divide by it so objects, resize grips and
+     path points track the pointer 1:1 even when the camera scales the layer. */
+  const camVisScale = (o) => (camera && path.length === 0 ? cameraTransform(camera, timeRef.current, o?.props?.depth).s : 1);
   const onObjectDown = (e, obj) => {
     e.stopPropagation();
     setSelKf(null); setShapesOpen(false); setMenu(null);
@@ -865,7 +921,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
         const { w, h } = objSize(o, t);
         const s = Math.max(0.05, valueAt(o, "scale", t) ?? 1);
         const [px, py] = o.props.path ? posOf(o, t) : [0, 0];
-        return { id: o.id, hasPath: !!o.props.path, pts: o.props.path ? o.props.path.pts.map((p) => p.slice()) : null, ox: valueAt(o, "x", t), oy: valueAt(o, "y", t), px, py, hw: (w * s) / 2, hh: (h * s) / 2 };
+        return { id: o.id, hasPath: !!o.props.path, pts: o.props.path ? o.props.path.pts.map((p) => p.slice()) : null, ox: valueAt(o, "x", t), oy: valueAt(o, "y", t), px, py, hw: (w * s) / 2, hh: (h * s) / 2, cs: camVisScale(o) };
       });
     if (!members.length) return;
     dragRef.current = { members, sx: e.clientX, sy: e.clientY, moved: false, live: {} };
@@ -875,6 +931,10 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
       const dx = (ev.clientX - d.sx) / stageScale, dy = (ev.clientY - d.sy) / stageScale;
       if (Math.abs(dx) + Math.abs(dy) > 2) d.moved = true;
       d.members.forEach((m) => {
+        /* divide by the layer's camera screen-scale: under a zoomed camera a
+           stage-px move covers more screen px, so the pointer delta shrinks
+           back to stage units (1 while the camera is off). */
+        const mdx = dx / m.cs, mdy = dy / m.cs;
         /* clamp AFTER rounding so the visible overlap stays >= DRAG_MIN_VISIBLE:
            center ∈ [MIN − half, stage − MIN + half] ⇔ [center−half, center+half]
            overlaps [0, stage] by at least MIN px on that axis — applied live,
@@ -882,12 +942,12 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
         const clX = (v) => Math.max(DRAG_MIN_VISIBLE - m.hw, Math.min(stage.w - DRAG_MIN_VISIBLE + m.hw, Math.round(v)));
         const clY = (v) => Math.max(DRAG_MIN_VISIBLE - m.hh, Math.min(stage.h - DRAG_MIN_VISIBLE + m.hh, Math.round(v)));
         if (m.hasPath) {
-          const dxc = clX(m.px + dx) - m.px, dyc = clY(m.py + dy) - m.py;
+          const dxc = clX(m.px + mdx) - m.px, dyc = clY(m.py + mdy) - m.py;
           const npts = m.pts.map(([px, py]) => [Math.round(px + dxc), Math.round(py + dyc)]);
           d.live[m.id] = { pathPts: npts };
           patchPath(m.id, (p) => ({ ...p, pts: npts }));
         } else {
-          const nx = clX(m.ox + dx), ny = clY(m.oy + dy);
+          const nx = clX(m.ox + mdx), ny = clY(m.oy + mdy);
           d.live[m.id] = { x: nx, y: ny };
           patchProps(m.id, { x: nx, y: ny });
         }
@@ -909,6 +969,51 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     if (d && d.moved && d.live[obj.id] && d.live[obj.id][prop] !== undefined) return d.live[obj.id][prop];
     return valueAt(obj, prop, time);
   };
+  /* ---------- on-canvas camera control ----------
+     Empty-stage pointerdown clears the selection (unchanged behavior); when
+     NOTHING was selected and we're on the root timeline, the same gesture is
+     also a camera pan scrub: the camera follows the pointer (drag right = the
+     camera view moves right, the scene shifts left) and both axes record ◆ at
+     the playhead — the same write path the inspector sliders use. */
+  const onStageEmptyDown = (e) => {
+    setSelIds([]); setSelKf(null); setSelCamKf(null); setAudioSel(false); setCameraSel(false);
+    setShapesOpen(false); setMapsOpen(false); setImagesOpen(false); setAudioOpen(false);
+    if (e.button !== 0 || path.length > 0 || selIds.length > 0) return;
+    const t = timeRef.current;
+    const c0 = cameraAt(camera, t);
+    const sx = e.clientX, sy = e.clientY;
+    let moved = false;
+    const move = (ev) => {
+      const dx = (ev.clientX - sx) / stageScale, dy = (ev.clientY - sy) / stageScale;
+      if (!moved && Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+      if (!moved) return;
+      setCameraKeyframe("x", t, Math.round(c0.x + dx));
+      setCameraKeyframe("y", t, Math.round(c0.y + dy));
+    };
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  /* wheel = camera zoom, GATED so it never fights the stage zoom-to-fit
+     controls: it only records a zoom ◆ when the Camera lane is selected OR
+     Alt/Option is held (documented in the camera card + lane tooltip).
+     Attached non-passively so preventDefault keeps the page from scrolling. */
+  useEffect(() => {
+    const el = stageWrapRef.current;
+    if (!el) return;
+    const onWheel = (e) => {
+      if (path.length > 0) return;
+      /* gated: only when the Camera lane is effectively selected or Alt/Option is held */
+      if (!((cameraSel && !audioSel && selIds.length === 0) || e.altKey)) return;
+      e.preventDefault();
+      const t = timeRef.current;
+      const z0 = cameraAt(camera, t).zoom;
+      const z1 = clampZoom(z0 * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
+      setCameraKeyframe("zoom", t, Math.round(z1 * 100) / 100);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [camera, cameraSel, audioSel, selIds, path, setCameraKeyframe]);
   /* ---------- on-canvas direct manipulation: 8-way resize grips + rotation grip ----------
      Both write BASE PROPS through patchProps — the same live-update path the move-drag
      uses — so keyframe tracks stay untouched (exactly like the old Inspector inputs).
@@ -934,12 +1039,13 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     const hy = hid.includes("s") ? 1 : hid.includes("n") ? -1 : 0; /* grip's vertical side */
     const textual = obj.type === "text" || obj.type === "number"; /* fontSize-driven */
     const singleW = obj.type === "map" || obj.type === "continent" || obj.type === "world"; /* w-only, h derived */
+    const cs = camVisScale(obj); /* camera screen-scale of this layer (1 when camera off) */
     const sx = e.clientX, sy = e.clientY;
     const prevCursor = document.body.style.cursor;
     if (cursor) document.body.style.cursor = cursor;
     const move = (ev) => {
       /* pointer delta → stage units → the object's local axes (undo its rotation) → prop units (undo its scale) */
-      const dx = (ev.clientX - sx) / stageScale, dy = (ev.clientY - sy) / stageScale;
+      const dx = (ev.clientX - sx) / (stageScale * cs), dy = (ev.clientY - sy) / (stageScale * cs);
       const ddx = (dx * cos + dy * sin) / s0, ddy = (-dx * sin + dy * cos) / s0;
       let patch;
       if (textual) {
@@ -1005,10 +1111,11 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     const obj = ctxLayers.find((o) => o.id === objId);
     if (!obj || obj.locked) return;
     const start = obj.props.path.pts[idx].slice();
+    const cs = camVisScale(obj); /* path points live in the layer's camera space */
     const sx = e.clientX, sy = e.clientY;
     const move = (ev) => {
-      const nx = Math.round(start[0] + (ev.clientX - sx) / stageScale);
-      const ny = Math.round(start[1] + (ev.clientY - sy) / stageScale);
+      const nx = Math.round(start[0] + (ev.clientX - sx) / (stageScale * cs));
+      const ny = Math.round(start[1] + (ev.clientY - sy) / (stageScale * cs));
       patchPath(objId, (p) => ({ ...p, pts: p.pts.map((pt, i) => (i === idx ? [nx, ny] : pt)) }));
     };
     const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
@@ -1167,6 +1274,43 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
+  /* ---------- camera lane: click selects the camera; ◆ click seeks, drag retimes (root timeline only) ---------- */
+  const onCameraLaneDown = (e) => {
+    if (e.button === 2) return;
+    e.stopPropagation();
+    selectCamera();
+  };
+  const onCameraKfDown = (e, prop, k0) => {
+    if (e.button === 2) return;
+    e.stopPropagation();
+    selectCamera();
+    let moved = false;
+    let curT = k0.t;
+    const { v: kv, ease: ke } = k0;
+    const r = rulerRef.current.getBoundingClientRect();
+    const move = (ev) => {
+      const nt = Math.round(clamp01((ev.clientX - r.left) / r.width) * ctxDur / 10) * 10;
+      if (Math.abs(nt - k0.t) > 20) moved = true;
+      if (moved && nt !== curT) {
+        const prev = curT;
+        curT = nt;
+        patchCamera((c) => {
+          const track = (c.tracks[prop] || []).filter((kk) => Math.abs(kk.t - prev) > 5 && Math.abs(kk.t - nt) > 5);
+          track.push({ t: nt, v: kv, ease: ke });
+          track.sort((a, b) => a.t - b.t);
+          return { ...c, tracks: { ...c.tracks, [prop]: track } };
+        });
+        setSelCamKf({ prop, t: nt });
+      }
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      if (!moved) { setTime(k0.t); setSelCamKf({ prop, t: k0.t }); }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
   /* drag a world-map country marker (appear/disappear) on the timeline */
   const onWorldKfDown = (e, objId, cc, kind, t0) => {
     if (e.button === 2) return;
@@ -1217,6 +1361,13 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   const SW = brand.colors;
   /* audio lane is selected only while no layer selection supersedes it */
   const audioLaneSel = audioSel && !!audioTrack && selIds.length === 0;
+  /* camera lane selected: mirrors audioLaneSel — a layer or audio selection supersedes it */
+  const cameraLaneSel = cameraSel && !audioSel && selIds.length === 0;
+  const selCamKfData = useMemo(() => {
+    if (!selCamKf || !camera) return null;
+    const k = kfAt(camera.tracks?.[selCamKf.prop], selCamKf.t);
+    return k ? { ...selCamKf, k } : null;
+  }, [selCamKf, camera]);
   /* bar length: the file's own duration once known, else to the end of the comp (min 100ms so it stays grabbable) */
   const audioBarMs = audioTrack ? Math.max(100, Math.min(ctxDur - audioTrack.startT, audioDurMs != null ? Math.min(audioDurMs, ctxDur) : ctxDur - audioTrack.startT)) : 0;
   const audioAssets = (assets || []).filter((a) => a.kind === "audio");
@@ -1261,7 +1412,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
       <input ref={audioFileRef} type="file" accept={AUDIO_ACCEPT_ATTR} style={{ display: "none" }} onChange={onPickAudioAsset} />
 
       {/* ============ TOP BAR ============ */}
-      <TopBar name={name} setName={setName}
+      <TopBar name={name} setName={setName} exitToDepth={exitToDepth} inClip={inClip} ctx={ctx}
         stage={stage} applyStagePreset={applyStagePreset} stageIsPreset={stageIsPreset} brand={brand}
         setBrandOpen={setBrandOpen} setIoOpen={setIoOpen} setImportErr={setImportErr} setExportOpen={setExportOpen} />
 
@@ -1301,10 +1452,13 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
           onObjectDown={onObjectDown} enterClip={enterClip} displayValue={displayValue} onResizeDown={onResizeDown} onRotateDown={onRotateDown}
           onPathPtDown={onPathPtDown} patchPath={patchPath} setOverflowShow={setOverflowShow}
           setSelIds={setSelIds} setSelKf={setSelKf} setAudioSel={setAudioSel} setShapesOpen={setShapesOpen} setMapsOpen={setMapsOpen} setImagesOpen={setImagesOpen} setAudioOpen={setAudioOpen}
+          camera={camera} cameraLaneSel={cameraLaneSel} onStageEmptyDown={onStageEmptyDown}
           stepZoom={stepZoom} cycleZoom={cycleZoom} setZoom={setZoom} />
 
         {/* ---- inspector ---- */}
         <Inspector audioLaneSel={audioLaneSel} audioTrack={audioTrack} patchAudio={patchAudio} detachAudio={detachAudio} fmt={fmt}
+          cameraLaneSel={cameraLaneSel} camera={camera} editCameraProp={editCameraProp} setCameraKeyframe={setCameraKeyframe} removeCameraKeyframe={removeCameraKeyframe}
+          cameraKfNav={cameraKfNav} resetCamera={resetCamera} selCamKfData={selCamKfData} setCameraSegmentEase={setCameraSegmentEase}
           selMany={selMany} groupSelection={groupSelection} align={align} duplicateSelected={duplicateSelected} removeSelected={removeSelected}
           inClip={inClip} ctx={ctx} sel={sel} patchObject={patchObject} toggleHide={toggleHide} toggleLock={toggleLock}
           stage={stage} stageBg={stageBg} setStageBg={setStageBg} applyStagePreset={applyStagePreset} stageIsPreset={stageIsPreset}
@@ -1323,6 +1477,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
         enterClip={enterClip} exitToDepth={exitToDepth} crumbs={ctx.names} onLayerContext={onLayerContext} onLaneContext={onLaneContext} toggleHide={toggleHide} toggleLock={toggleLock}
         reorder={reorder} duplicateSelected={duplicateSelected} removeSelected={removeSelected}
         inClip={inClip} onAudioLaneDown={onAudioLaneDown} audioTrack={audioTrack} audioLaneSel={audioLaneSel} audioBarMs={audioBarMs} onAudioBarDown={onAudioBarDown}
+        camera={camera} cameraLaneSel={cameraLaneSel} onCameraLaneDown={onCameraLaneDown} onCameraKfDown={onCameraKfDown} selCamKf={selCamKf}
         rulerRef={rulerRef} onRulerDown={onRulerDown} onBarDown={onBarDown} onKfDown={onKfDown} selKf={selKf} onWorldKfDown={onWorldKfDown} />
 
       {/* ============ CONTEXT MENU ============ */}

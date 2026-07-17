@@ -55,6 +55,7 @@ async function main() {
     EASE, clamp01, valueAt, colorAt, lerpColor, lerpPts, morphPtsAt, shapePtsOf,
     pointOnPath, posOf, clipLocalTime, clipTransition, numberValue, numberColumns,
     charFx, confettiParticles, highlightFlick, parseChart, worldCameraAt, fxDuration,
+    cameraAt, cameraTransform, camIsIdentity, camTransformCss, clampZoom, cameraFromJson, cameraToJson,
   } = M;
   console.log("Engine exports loaded:", Object.keys(M).filter((k) => k !== "default").length, "named exports\n");
 
@@ -178,6 +179,42 @@ async function main() {
   check("highlightFlick bounds", highlightFlick(0, 1) === 0 && highlightFlick(0.85, 1) === 1);
   check("highlightFlick deterministic + binary", [0, 1].includes(highlightFlick(0.4, 7)) && highlightFlick(0.4, 7) === highlightFlick(0.4, 7));
   check("parseChart", JSON.stringify(parseChart("Q1, 42\nQ2, 65\nbad\nQ3: 38")) === JSON.stringify([{ l: "Q1", v: 42 }, { l: "Q2", v: 65 }, { l: "Q3", v: 38 }]));
+
+  /* ---------- 2.5D scene camera + parallax depth ----------
+     The ONE formula (engine/camera.js, applied per root layer in StageObject —
+     same render point for preview + export):
+       f = 1 + depth · translate(−camX·f, −camY·f) · scale(1+(zoom−1)·f) about center */
+  console.log("cameraAt / cameraTransform (2.5D parallax)");
+  check("absent camera is identity", (() => { const c = cameraAt(null, 500); return c.x === 0 && c.y === 0 && c.zoom === 1; })());
+  check("empty camera is identity", (() => { const c = cameraAt({ tracks: {} }, 500); return c.x === 0 && c.y === 0 && c.zoom === 1; })());
+  const camX = { tracks: { x: [{ t: 0, v: 0, ease: "linear" }, { t: 1000, v: 400 }] } };
+  check("camera x keyframes interpolate (0→400/1s, t=500 → 200)", approx(cameraAt(camX, 500).x, 200));
+  check("camera x holds before/after keys", cameraAt(camX, -50).x === 0 && cameraAt(camX, 1500).x === 400);
+  check("zoom keyframes clamp to 0.25…4", clampZoom(cameraAt({ tracks: { zoom: [{ t: 0, v: 99 }] } }, 0).zoom) === 4 && cameraAt({ tracks: { zoom: [{ t: 0, v: 0.01 }] } }, 0).zoom === 0.25);
+  const cam100 = { tracks: { x: [{ t: 0, v: 100 }] } };
+  check("camera x=100 · depth 0 (absent) → layer shifts −100", (() => { const t = cameraTransform(cam100, 0, undefined); return t.tx === -100 && t.ty === 0 && t.s === 1 && t.f === 1; })());
+  check("camera x=100 · depth 1 → −200", approx(cameraTransform(cam100, 0, 1).tx, -200));
+  check("camera x=100 · depth −0.9 → −10 (far background)", approx(cameraTransform(cam100, 0, -0.9).tx, -10));
+  check("camera x=100 · depth 1.5 → −250 (foreground)", approx(cameraTransform(cam100, 0, 1.5).tx, -250));
+  check("depth −1 → f=0 camera-locked overlay (no shift, no scale)", (() => { const t = cameraTransform(cam100, 0, -1); return t.f === 0 && t.tx === 0 && t.s === 1; })());
+  const camZ2 = { tracks: { zoom: [{ t: 0, v: 2 }] } };
+  check("zoom 2 · depth 0 → scale 2 about center", cameraTransform(camZ2, 0, 0).s === 2);
+  check("zoom 2 · depth 1 → scale 3", cameraTransform(camZ2, 0, 1).s === 3);
+  check("zoom 0.5 · depth 0 → scale 0.5", cameraTransform({ tracks: { zoom: [{ t: 0, v: 0.5 }] } }, 0, 0).s === 0.5);
+  check("zoom-out + extreme depth never mirror-flips (s ≥ 0.05)", cameraTransform({ tracks: { zoom: [{ t: 0, v: 0.25 }] } }, 0, 1.5).s === 0.05);
+  check("out-of-range depth clamps (−5 → f=0 · 3 → f=2.5)", cameraTransform(cam100, 0, -5).tx === 0 && cameraTransform(cam100, 0, 3).tx === -250);
+  check("combined x/y/zoom at depth 0.5", (() => {
+    const t = cameraTransform({ tracks: { x: [{ t: 0, v: 100 }], y: [{ t: 0, v: 50 }], zoom: [{ t: 0, v: 2 }] } }, 0, 0.5);
+    return t.f === 1.5 && t.tx === -150 && t.ty === -75 && t.s === 2.5;
+  })());
+  check("identity transform detected", camIsIdentity(cameraTransform(null, 400, 1.5)) && camIsIdentity({ tx: 0, ty: 0, s: 1 }) && !camIsIdentity({ tx: -100, ty: 0, s: 1 }));
+  check("css string", camTransformCss({ tx: -100, ty: 0, s: 2 }) === "translate(-100px, 0px) scale(2)");
+  check("camera JSON round-trip (sanitize + re-serialize)", (() => {
+    const raw = { tracks: { x: [{ t: 0, v: 0, ease: "linear" }, { t: 1000, v: 400 }], zoom: [{ t: 200, v: 99, ease: "easeOutQuad" }], junk: [{ t: 0, v: 1 }] } };
+    const j = cameraToJson(cameraFromJson(raw));
+    return j && !("junk" in j.tracks) && j.tracks.zoom[0].v === 4 && j.tracks.x.length === 2 && JSON.stringify(cameraToJson(cameraFromJson(JSON.parse(JSON.stringify(j))))) === JSON.stringify(j);
+  })());
+  check("empty/absent camera serializes to null (field omitted)", cameraToJson({ tracks: { x: [], y: [], zoom: [] } }) === null && cameraToJson(null) === null && cameraFromJson("nope") === null && cameraFromJson(null) === null);
 
   /* ---------- known engine gap probe (informational) ---------- */
   console.log("engine gap probe (informational)");

@@ -7,12 +7,17 @@
    ============================================================ */
 import { Fragment } from "react";
 import { C, PROP_LABEL, KF_PROPS, TYPE_BAR, layerSpan, packRows, transportBtn, chipStyle, inputStyle } from "./model";
-import { NoteIcon, MiniBtn } from "./ui";
+import { NoteIcon, MiniBtn, CamIcon } from "./ui";
 import { EASE_LABEL } from "../../engine/easing.js";
 import { colorAt } from "../../engine/keyframes.js";
 import { normHi, worldZoomWindow, WORLD } from "../../engine/maps.js";
+import { CAM_PROPS, cameraKeyCount } from "../../engine/camera.js";
 
-export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, setPlaying, setTime, playing, time, fmt, ctxDur, setCtxDurMs, stretchClips, setStretchClips, loop, setLoop, autokey, setAutokey, selMany, groupSelection, ctxLayers, selIds, setSelIds, setSelKf, enterClip, exitToDepth, crumbs, onLayerContext, onLaneContext, toggleHide, toggleLock, reorder, duplicateSelected, removeSelected, inClip, onAudioLaneDown, audioTrack, audioLaneSel, audioBarMs, onAudioBarDown, rulerRef, onRulerDown, onBarDown, onKfDown, selKf, onWorldKfDown }) {
+/* camera lane diamond colors: x amber · y teal · zoom blue */
+const CAM_KF_COLOR = { x: C.amber, y: "#6EE7B7", zoom: C.info };
+const CAM_PROP_LABEL = { x: "Camera X", y: "Camera Y", zoom: "Camera zoom" };
+
+export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, setPlaying, setTime, playing, time, fmt, ctxDur, setCtxDurMs, stretchClips, setStretchClips, loop, setLoop, autokey, setAutokey, selMany, groupSelection, ctxLayers, selIds, setSelIds, setSelKf, enterClip, exitToDepth, crumbs, onLayerContext, onLaneContext, toggleHide, toggleLock, reorder, duplicateSelected, removeSelected, inClip, onAudioLaneDown, audioTrack, audioLaneSel, audioBarMs, onAudioBarDown, camera, cameraLaneSel, onCameraLaneDown, onCameraKfDown, selCamKf, rulerRef, onRulerDown, onBarDown, onKfDown, selKf, onWorldKfDown }) {
   /* ---------- auto-packed rows (visual only) ----------
      spanById holds each object's [start, end] exactly as its bar renders it;
      packRows groups non-overlapping objects (touching boundaries can share). */
@@ -89,6 +94,18 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
         <div style={{ flex: 1, display: "flex", minHeight: 0, overflowY: "auto" }}>
           <div style={{ width: 212, flexShrink: 0, borderRight: `1px solid ${C.line}` }}>
             <div style={{ height: 26 }} />
+            {/* camera lane header — pinned at the TOP (main timeline only: the
+                scene camera lives at root). Click selects "Camera" in the Inspector. */}
+            {!inClip && (
+              <div onPointerDown={onCameraLaneDown} title="Scene camera — click to select · drag empty stage space to pan · Alt+wheel (or select this lane) to zoom"
+                style={{ height: 30, display: "flex", alignItems: "center", gap: 6, padding: "0 8px", cursor: "pointer", borderBottom: `1px solid ${C.bg2}`, background: cameraLaneSel ? C.bg3 : "transparent", borderLeft: cameraLaneSel ? `2px solid ${C.amber}` : "2px solid transparent", boxSizing: "border-box" }}>
+                <CamIcon size={13} color={cameraLaneSel || cameraKeyCount(camera) ? C.amber : C.faint} />
+                <span style={{ fontSize: 12, fontWeight: 600, color: cameraLaneSel ? C.txt : cameraKeyCount(camera) ? C.dim : C.faint, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>
+                  Camera
+                </span>
+                {cameraKeyCount(camera) > 0 && <span style={{ fontSize: 9.5, color: C.faint, fontFamily: "'JetBrains Mono'", fontVariantNumeric: "tabular-nums" }}>{cameraKeyCount(camera)}◆</span>}
+              </div>
+            )}
             {rows.map((row, ri) => (
               /* one label row per packed lane — a single object gets the classic
                  full row; sharing objects split it into compact segments, each
@@ -151,6 +168,27 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
             </div>
 
             <div onPointerDown={onRulerDown} style={{ position: "relative" }}>
+              {/* camera lane — pinned at the TOP, above the packed rows (mirrors the
+                  audio lane pattern). ◆ diamonds for x/y/zoom: click seeks + selects
+                  the keyframe, drag retimes it. Main timeline only. */}
+              {!inClip && (
+                <div onPointerDown={onCameraLaneDown} title="Scene camera · drag empty stage space to pan · Alt+wheel (or select this lane) to zoom"
+                  style={{ height: 30, position: "relative", borderBottom: `1px solid ${C.bg2}`, background: cameraLaneSel ? "rgba(245,165,36,.04)" : "transparent" }}>
+                  {CAM_PROPS.map((p) => (camera?.tracks?.[p] || []).map((k) => {
+                    const isSelK = selCamKf && selCamKf.prop === p && Math.abs(selCamKf.t - k.t) <= 5;
+                    return (
+                      <span key={`${p}:${k.t}`} className="gd-kf" onPointerDown={(e) => onCameraKfDown(e, p, k)}
+                        title={`${CAM_PROP_LABEL[p]} @ ${fmt(k.t)} · ${p === "zoom" ? `${k.v.toFixed(2)}×` : `${Math.round(k.v)}px`} · ${EASE_LABEL[k.ease] || "Linear"} · drag to retime`}
+                        style={{ position: "absolute", left: `${(k.t / ctxDur) * 100}%`, top: "50%", width: 9, height: 9, transform: "translate(-50%,-50%) rotate(45deg)", background: isSelK ? C.txt : CAM_KF_COLOR[p], borderRadius: 1.5, cursor: "ew-resize", transition: "transform .1s", boxShadow: isSelK ? "0 0 0 3px rgba(245,165,36,.4)" : "none", zIndex: 2 }} />
+                    );
+                  }))}
+                  {!cameraKeyCount(camera) && (
+                    <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", padding: "0 10px", gap: 6, color: C.faint, fontSize: 10.5, pointerEvents: "none" }}>
+                      <CamIcon size={12} color={C.faint} /> No camera keyframes — drag empty stage space to pan · Alt+wheel to zoom
+                    </div>
+                  )}
+                </div>
+              )}
               {rows.map((row, ri) => {
                 const anySel = row.some((o) => selIds.includes(o.id));
                 return (

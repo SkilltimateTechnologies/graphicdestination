@@ -3,13 +3,42 @@
    Extracted VERBATIM from GraphicDestinationMotion.jsx (Refactor Pass 2).
    ============================================================ */
 import { C, PROP_LABEL, TEXTFX_LIST, NUM_STYLES, PRESETS, TRANSITIONS, STAGE_PRESETS, kfAt, inputStyle, chipStyle, sectionLabel } from "./model";
-import { Card, ChipRow, ColorKfRow, PropRow, FontControls, WorldPicker, Row, SliderRow, EaseCurve, NoteIcon } from "./ui";
+import { Card, ChipRow, ColorKfRow, PropRow, FontControls, WorldPicker, Row, SliderRow, EaseCurve, NoteIcon, CamIcon } from "./ui";
 import { EASE, EASE_LABEL } from "../../engine/easing.js";
 import { SHAPE_IDS, SHAPE_DEFS, ptsToStr } from "../../engine/shapes.js";
 import { MAPS, CONTINENT_NAMES, CONTINENTS, normHi } from "../../engine/maps.js";
 import { CONFETTI_STYLES, confettiStyleOf } from "../../engine/fx.js";
+import { CAM_PROPS, CAM_ZOOM_MIN, CAM_ZOOM_MAX, CAM_DEPTH_MIN, CAM_DEPTH_MAX, cameraAt, camTrackHost, clampDepth } from "../../engine/camera.js";
 
-export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detachAudio, fmt, selMany, groupSelection, align, duplicateSelected, removeSelected, inClip, ctx, sel, patchObject, toggleHide, toggleLock, stage, stageBg, setStageBg, applyStagePreset, stageIsPreset, enterClip, patchProps, ctxDur, stretchClipDur, stretchClips, setStretchClips, ungroupClip, morphQ, setMorphQ, time, timeRef, setShapeAt, editProp, removeKeyframe, setKeyframe, setSelKf, flowText, brand, SW, addPathTo, patchPath, animateAlongPath, kfNav, selectedKfData, setSegmentEase, applyPreset, fileRef }) {
+/* per-layer parallax depth slider — lives in the FIRST card of every object
+   type (absent for the audio lane / camera selection). 0 = world-locked
+   (default, omitted from the JSON); −0.9 far background … +1.5 foreground. */
+function DepthRow({ value, onChange }) {
+  const d = value || 0;
+  const on = Math.abs(d) > 1e-9;
+  return (
+    <div title="Parallax depth vs. the scene camera — 0 world-locked · −0.9 far background (barely moves) · +1.5 foreground (whips past) · −1 in JSON = camera-locked overlay"
+      style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+      <span style={{ width: 62, color: C.dim, fontSize: 11, fontWeight: 600, flexShrink: 0 }}>Depth</span>
+      <input type="range" min={CAM_DEPTH_MIN} max={CAM_DEPTH_MAX} step={0.05} value={d} onChange={(e) => onChange(parseFloat(e.target.value))} style={{ flex: 1 }} aria-label="Parallax depth" />
+      <span style={{ width: 40, textAlign: "right", fontFamily: "'JetBrains Mono'", fontSize: 10.5, fontVariantNumeric: "tabular-nums", color: on ? C.amber : C.txt }}>{d.toFixed(2)}</span>
+    </div>
+  );
+}
+
+export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detachAudio, fmt, cameraLaneSel, camera, editCameraProp, setCameraKeyframe, removeCameraKeyframe, cameraKfNav, resetCamera, selCamKfData, setCameraSegmentEase, selMany, groupSelection, align, duplicateSelected, removeSelected, inClip, ctx, sel, patchObject, toggleHide, toggleLock, stage, stageBg, setStageBg, applyStagePreset, stageIsPreset, enterClip, patchProps, ctxDur, stretchClipDur, stretchClips, setStretchClips, ungroupClip, morphQ, setMorphQ, time, timeRef, setShapeAt, editProp, removeKeyframe, setKeyframe, setSelKf, flowText, brand, SW, addPathTo, patchPath, animateAlongPath, kfNav, selectedKfData, setSegmentEase, applyPreset, fileRef }) {
+  /* camera as a valueAt-compatible pseudo-object for the shared PropRow UI */
+  const camObj = camTrackHost(camera);
+  const camVals = cameraAt(camera, time);
+  const CAM_ROW_CFG = { x: [-stage.w, stage.w, 1], y: [-stage.h, stage.h, 1], zoom: [CAM_ZOOM_MIN, CAM_ZOOM_MAX, 0.01] };
+  const CAM_ROW_LABEL = { x: "Pan X", y: "Pan Y", zoom: "Zoom" };
+  /* depth lives on props but 0 is the default — remove the key entirely so
+     untouched layers keep their old-project JSON shape (no depth field) */
+  const setDepth = (v) => {
+    const d = clampDepth(v);
+    if (Math.abs(d) < 1e-9) patchObject(sel.id, (o) => { const p = { ...o.props }; delete p.depth; return { ...o, props: p }; });
+    else patchProps(sel.id, { depth: d });
+  };
   /* x/y/w/h/rotation moved on-canvas (direct manipulation) — Transform keeps only
      the props that aren't canvas-editable; the card collapses if that list is empty */
   /* Keyframeable transform props. x/y/rotation VALUES are edited on-canvas
@@ -42,6 +71,50 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
               </Row>
               <button className="gd-btn" onClick={detachAudio} style={{ ...chipStyle, cursor: "pointer", color: C.danger, width: "100%", padding: "7px 0", marginTop: 2 }}>✕ Remove audio from project</button>
             </Card>
+          ) : cameraLaneSel ? (
+            <div>
+              <Card title="Camera" hint="2.5D scene · root timeline">
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                  <CamIcon size={16} color={C.amber} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: C.txt }}>Scene camera</div>
+                    <div style={{ fontSize: 10, color: C.faint, fontFamily: "'JetBrains Mono'", fontVariantNumeric: "tabular-nums" }}>
+                      x {Math.round(camVals.x)} px · y {Math.round(camVals.y)} px · {camVals.zoom.toFixed(2)}×
+                    </div>
+                  </div>
+                </div>
+                {CAM_PROPS.map((p) => (
+                  <PropRow key={p} obj={camObj} prop={p} time={time} ctxDur={ctxDur} stage={stage}
+                    cfgMap={CAM_ROW_CFG} label={CAM_ROW_LABEL[p]}
+                    onEdit={(v) => editCameraProp(p, v)}
+                    onKfToggle={(has, v) => { if (has) removeCameraKeyframe(p, Math.round(time / 10) * 10); else setCameraKeyframe(p, time, v); }}
+                    onNav={(dir) => cameraKfNav(p, dir)} />
+                ))}
+                <button className="gd-btn" onClick={() => CAM_PROPS.forEach((p) => setCameraKeyframe(p, time, camVals[p]))}
+                  title="Keyframe all three camera props at the playhead with their current values"
+                  style={{ width: "100%", background: C.bg2, border: `1px solid ${C.amber}`, color: C.amber, borderRadius: 6, padding: "7px 0", cursor: "pointer", fontWeight: 700, marginBottom: 8 }}>◆ Add keyframe at playhead</button>
+                <button className="gd-btn" onClick={resetCamera}
+                  title="Remove every camera keyframe — the camera field leaves the project JSON and the scene renders exactly as before"
+                  style={{ ...chipStyle, cursor: "pointer", color: C.danger, width: "100%", padding: "7px 0" }}>⟲ Reset camera</button>
+                <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.55, marginTop: 9 }}>
+                  On-canvas: drag empty stage space to pan · Alt+wheel (or wheel while this card is open) to zoom.
+                  Layers react through their <b style={{ color: C.txt }}>Depth</b>: −0.9 far background · 0 world-locked · +1.5 foreground · −1 = camera-locked overlay (JSON only).
+                  The camera applies at the root scene only — clips edit in raw clip space.
+                </div>
+              </Card>
+              {selCamKfData && (
+                <Card title="Camera easing" hint={`${CAM_ROW_LABEL[selCamKfData.prop]} @ ${fmt(selCamKfData.t)}`}>
+                  <EaseCurve ease={selCamKfData.k.ease} />
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 8 }}>
+                    {Object.keys(EASE).map((e) => (
+                      <button key={e} className="gd-btn" onClick={() => setCameraSegmentEase(selCamKfData.prop, selCamKfData.t, e)}
+                        style={{ ...chipStyle, cursor: "pointer", borderColor: selCamKfData.k.ease === e ? C.amber : C.line, color: selCamKfData.k.ease === e ? C.amber : C.dim }}>{EASE_LABEL[e]}</button>
+                    ))}
+                  </div>
+                  <div style={{ color: C.faint, fontSize: 10.5, marginTop: 7, lineHeight: 1.5 }}>Shapes the segment leaving this ◆. Click a diamond on the Camera lane to pick a keyframe.</div>
+                </Card>
+              )}
+            </div>
           ) : selMany.length > 1 ? (
             <Card title={`${selMany.length} layers selected`}>
               <button className="gd-btn" onClick={groupSelection} style={{ width: "100%", background: C.amber, color: "#1a1405", border: "none", borderRadius: 6, padding: "9px 0", cursor: "pointer", fontWeight: 700, marginBottom: 12 }}>⌘G · Group into Clip</button>
@@ -84,6 +157,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
 
               {sel.type === "clip" && (
                 <Card title="Clip">
+                  <DepthRow value={sel.props.depth} onChange={setDepth} />
                   <button className="gd-btn" onClick={() => enterClip(sel.id)} style={{ width: "100%", background: C.amber, color: "#1a1405", border: "none", borderRadius: 6, padding: "8px 0", cursor: "pointer", fontWeight: 700, marginBottom: 10 }}>Open clip timeline →</button>
                   <SliderRow label="Start" min={0} max={Math.max(100, ctxDur - 100)} step={10} value={sel.props.start} onChange={(v) => patchProps(sel.id, { start: v })} />
                   <SliderRow label="Duration" min={300} max={15000} step={100} value={sel.props.dur} onChange={(v) => stretchClipDur(sel.id, v)} />
@@ -117,6 +191,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
 
               {sel.type === "shape" && (
                 <Card title="Shape" hint="click = morph keyframe">
+                  <DepthRow value={sel.props.depth} onChange={setDepth} />
                   <input value={morphQ} onChange={(e) => setMorphQ(e.target.value)} placeholder="Search shapes…" style={{ ...inputStyle, marginBottom: 7 }} />
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 5, marginBottom: 9 }}>
                     {SHAPE_IDS.filter((sid) => SHAPE_DEFS[sid].name.toLowerCase().includes(morphQ.toLowerCase())).map((sid) => {
@@ -144,6 +219,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
 
               {sel.type === "text" && (
                 <Card title="Text">
+                  <DepthRow value={sel.props.depth} onChange={setDepth} />
                   <Row label="Text"><input value={sel.props.text} onChange={(e) => patchProps(sel.id, { text: e.target.value })} style={inputStyle} /></Row>
                   <FontControls P={sel.props} onChange={(patch) => patchProps(sel.id, patch)} showSpacing brand={brand} />
                   <ColorKfRow label="Color" obj={sel} time={time} sw={SW} onEdit={(v) => editProp(sel.id, "fill", v)} onKf={(has, v) => { if (has) removeKeyframe(sel.id, "fill", Math.round(time / 10) * 10); else { const T = setKeyframe(sel.id, "fill", time, v); setSelKf({ objId: sel.id, prop: "fill", t: T }); } }} />
@@ -162,6 +238,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
 
               {sel.type === "number" && (
                 <Card title="Number">
+                  <DepthRow value={sel.props.depth} onChange={setDepth} />
                   <Row label="From"><input type="number" value={sel.props.from} onChange={(e) => patchProps(sel.id, { from: Math.max(0, parseFloat(e.target.value) || 0) })} style={inputStyle} /></Row>
                   <Row label="To"><input type="number" value={sel.props.to} onChange={(e) => patchProps(sel.id, { to: Math.max(0, parseFloat(e.target.value) || 0) })} style={inputStyle} /></Row>
                   <ChipRow label="Style" options={NUM_STYLES.map((s) => [s.id, s.name])} value={sel.props.style} onChange={(v) => patchProps(sel.id, { style: v })} wrap />
@@ -200,12 +277,14 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
 
               {sel.type === "image" && (
                 <Card title="Image">
+                  <DepthRow value={sel.props.depth} onChange={setDepth} />
                   <button className="gd-btn" onClick={() => fileRef.current?.click()} style={{ ...chipStyle, cursor: "pointer" }}>Replace image…</button>
                 </Card>
               )}
 
               {sel.type === "map" && (
                 <Card title="Country map" hint="real outlines">
+                  <DepthRow value={sel.props.depth} onChange={setDepth} />
                   <ChipRow label="Country" options={Object.keys(MAPS).map((cc) => [cc, MAPS[cc].name])} value={sel.props.country} onChange={(v) => patchProps(sel.id, { country: v })} wrap />
                   <ChipRow label="Effect" options={[["plain", "Plain"], ["draw", "Draw & stay"], ["comet", "Comet"], ["neon", "Neon"], ["reveal", "Draw → Glow"], ["pulse", "Glow pulse"]]} value={sel.props.mapStyle} onChange={(v) => patchProps(sel.id, { mapStyle: v })} wrap />
                   <Row label="Fill"><input type="color" value={sel.props.fillC} onChange={(e) => patchProps(sel.id, { fillC: e.target.value })} /></Row>
@@ -223,6 +302,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
 
               {sel.type === "world" && (
                 <Card title="World map" hint="countries appear at their set time">
+                  <DepthRow value={sel.props.depth} onChange={setDepth} />
                   <WorldPicker hi={normHi(sel.props.hi)} fmt={fmt} zoomHoldMs={sel.props.zoomHoldMs || 1600}
                     onAdd={(cc) => patchProps(sel.id, { hi: [...normHi(sel.props.hi), { cc, t: Math.round(timeRef.current / 10) * 10, zoom: true }] })}
                     onRetime={(cc) => patchProps(sel.id, { hi: normHi(sel.props.hi).map((h) => (h.cc === cc ? { ...h, t: Math.round(timeRef.current / 10) * 10 } : h)) })}
@@ -263,6 +343,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
 
               {sel.type === "continent" && (
                 <Card title="Continent map" hint="all countries in the region">
+                  <DepthRow value={sel.props.depth} onChange={setDepth} />
                   <ChipRow label="Region" options={Object.keys(CONTINENT_NAMES).map((k) => [k, CONTINENT_NAMES[k]])} value={sel.props.continent} onChange={(v) => patchProps(sel.id, { continent: v })} wrap />
                   <ChipRow label="Effect" options={[["plain", "Plain"], ["draw", "Draw & stay"], ["comet", "Comet"], ["neon", "Neon"], ["reveal", "Draw → Glow"], ["pulse", "Glow pulse"]]} value={sel.props.mapStyle} onChange={(v) => patchProps(sel.id, { mapStyle: v })} wrap />
                   <Row label="Fill"><input type="color" value={sel.props.fillC} onChange={(e) => patchProps(sel.id, { fillC: e.target.value })} /></Row>
@@ -308,6 +389,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
               {sel.type === "chart" && (
                 <Card title="Chart" hint="one row per line: Label, value">
                   {/* chart type is chosen at insert (Charts rail panel) — not switchable here */}
+                  <DepthRow value={sel.props.depth} onChange={setDepth} />
                   <textarea value={sel.props.dataStr} onChange={(e) => patchProps(sel.id, { dataStr: e.target.value })}
                     style={{ ...inputStyle, height: 92, resize: "none", fontFamily: "'JetBrains Mono'", fontSize: 11, marginBottom: 8 }} placeholder={"Q1, 42\nQ2, 65"} />
                   {sel.props.chartType !== "gauge" && <ChipRow label="Values" options={[[true, "Show"], [false, "Hide"]]} value={sel.props.showVals} onChange={(v) => patchProps(sel.id, { showVals: v })} />}
@@ -333,6 +415,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
               )}
               {sel.type === "confetti" && (
                 <Card title="Confetti">
+                  <DepthRow value={sel.props.depth} onChange={setDepth} />
                   <ChipRow label="Style" options={CONFETTI_STYLES.map((s) => [s.id, s.name])} value={confettiStyleOf(sel.props)} onChange={(v) => patchProps(sel.id, { style: v })} wrap />
                   <SliderRow label="Burst" min={0} max={Math.max(100, ctxDur - 500)} step={10} value={sel.props.burst} onChange={(v) => patchProps(sel.id, { burst: v })} />
                   <SliderRow label="Particles" min={20} max={160} value={sel.props.count} onChange={(v) => patchProps(sel.id, { count: v })} />

@@ -29,6 +29,7 @@ import { Component, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { StageObject, FONT_IMPORT } from "../components/GraphicDestinationMotion.jsx";
+import { cameraFromJson } from "../engine/camera.js";
 
 /* ---------- small utils ---------- */
 
@@ -134,6 +135,11 @@ export async function createFrameRenderer({ project, ctx, width, height, warn })
   const bg = project?.stage?.bg || "#101218";
   const cloned = JSON.parse(JSON.stringify(project || {}));
   const objects = Array.isArray(cloned.objects) ? cloned.objects : [];
+  /* optional 2.5D scene camera (project.camera, sanitized) — threaded into the
+     SAME StageObject render point the editor preview uses, so the export applies
+     the identical per-layer parallax transform. null (old projects) = identity,
+     StageObject adds no wrapper and frames render byte-identical. */
+  const camera = cameraFromJson(cloned.camera);
 
   await inlineRemoteImages(objects, warn);
   const fontCss = await getWebFontCss();
@@ -168,7 +174,7 @@ export async function createFrameRenderer({ project, ctx, width, height, warn })
       },
       objects.map((o) =>
         h(LayerBoundary, { key: o.id, layer: o, onLayerError },
-          h(StageObject, { obj: o, time, stage, selected: false, interactive: false }))
+          h(StageObject, { obj: o, time, stage, camera, selected: false, interactive: false }))
       )
     );
 

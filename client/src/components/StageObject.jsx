@@ -7,6 +7,7 @@ import { C } from "./editor/model";
 import { EASE, clamp01 } from "../engine/easing.js";
 import { ptsToStr, pathSamples, pointOnPath, morphPtsAt } from "../engine/shapes.js";
 import { valueAt, colorAt, lerpColor, clipLocalTime, clipTransition } from "../engine/keyframes.js";
+import { cameraTransform, camTransformCss } from "../engine/camera.js";
 import { MAPS, WORLD_H, CONTINENTS, WORLD_EXT, ringsToPath, arcPath, mapBox, WORLD_D, normHi } from "../engine/maps.js";
 import { SWATCHES, CONFETTI_STYLES, confettiStyleOf, confettiLife, confettiParticles, charFx, numberValue, numberColumns, parseChart, highlightFlick, worldCameraAt } from "../engine/fx.js";
 
@@ -161,7 +162,36 @@ function confettiMotion(style, p, dt, life, anchor) {
   return { px, py, rot: p.spin * dt, op: fade };
 }
 
-export function StageObject({ obj, time, stage, selected, onDown, onEnterClip, displayValue, onResize, onRotate, interactive, stageScale = 1, playing = false, selCount = 1, rotLive = null }) {
+/* ============================================================
+   CAMERA INJECTION POINT (2.5D scene camera + parallax)
+   StageObject is the SINGLE shared render point of the editor preview and
+   the export frame renderer. The optional `camera` prop is the project's
+   raw camera state ({ tracks:{x,y,zoom} } | null); each root-level object
+   wraps itself in a stage-sized div carrying its own parallax transform
+   (engine/camera.js — ONE formula, never forked):
+
+     f = 1 + depth · translate(−camX·f, −camY·f) · scale(1+(zoom−1)·f) about center
+
+   · camera === null  → NO wrapper at all → old projects render byte-identical.
+   · Clip children recurse WITHOUT a camera prop → camera applies at the ROOT
+     scene level only; inside clips everything renders in raw clip space.
+   · Selection outline, resize/rotate grips and the confetti glyph all live
+     inside the object subtree → they track the camera transform for free.
+   · stageScale passed inward is multiplied by the layer's screen scale so
+     the grips keep a constant on-screen size even under camera zoom.
+   ============================================================ */
+export function StageObject(props) {
+  const { camera } = props;
+  if (!camera) return <StageObjectInner {...props} />;
+  const t = cameraTransform(camera, props.time, props.obj?.props?.depth);
+  return (
+    <div style={{ position: "absolute", left: 0, top: 0, width: props.stage.w, height: props.stage.h, transform: camTransformCss(t), transformOrigin: `${props.stage.w / 2}px ${props.stage.h / 2}px`, pointerEvents: "none" }}>
+      <StageObjectInner {...props} stageScale={(props.stageScale || 1) * t.s} />
+    </div>
+  );
+}
+
+function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, displayValue, onResize, onRotate, interactive, stageScale = 1, playing = false, selCount = 1, rotLive = null }) {
   const P = obj.props;
   if (obj.hidden && !(interactive && selected)) return null;
   if (obj.type !== "clip") {

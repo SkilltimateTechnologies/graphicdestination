@@ -49,11 +49,13 @@ export function ColorKfRow({ label, obj, time, sw, onEdit, onKf }) {
     </div>
   );
 }
-export function PropRow({ obj, prop, time, ctxDur, stage, onEdit, onKfToggle, onNav }) {
+export function PropRow({ obj, prop, time, ctxDur, stage, onEdit, onKfToggle, onNav, cfgMap, label }) {
   const v = valueAt(obj, prop, time);
   const track = obj.tracks[prop] || [];
   const has = !!kfAt(track, Math.round(time / 10) * 10);
-  const cfg = { x: [0, stage.w, 1], y: [0, stage.h, 1], prog: [0, 1, 0.005], focus: [0, 1, 0.005], scale: [0, 3, 0.01], rotation: [-360, 360, 1], opacity: [0, 1, 0.01] }[prop];
+  /* cfgMap lets non-object pseudo-tracks (the scene camera) supply their own
+     slider ranges/labels — object props keep the classic ranges. */
+  const cfg = (cfgMap || { x: [0, stage.w, 1], y: [0, stage.h, 1], prog: [0, 1, 0.005], focus: [0, 1, 0.005], scale: [0, 3, 0.01], rotation: [-360, 360, 1], opacity: [0, 1, 0.01] })[prop];
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
       <button onClick={() => onKfToggle(has, v)} title={has ? "Remove keyframe" : "Add keyframe at playhead"}
@@ -66,9 +68,9 @@ export function PropRow({ obj, prop, time, ctxDur, stage, onEdit, onKfToggle, on
           <button onClick={() => onNav(1)} title="Next keyframe" style={navBtn}>›</button>
         </span>
       ) : <span style={{ width: 26 }} />}
-      <span style={{ width: 56, color: C.dim, fontSize: 10.5, fontWeight: 600 }}>{PROP_LABEL[prop]}</span>
+      <span style={{ width: 56, color: C.dim, fontSize: 10.5, fontWeight: 600 }}>{label || PROP_LABEL[prop]}</span>
       <input type="range" min={cfg[0]} max={cfg[1]} step={cfg[2]} value={v} onChange={(e) => onEdit(parseFloat(e.target.value))} style={{ flex: 1 }} />
-      <span style={{ width: 38, textAlign: "right", fontFamily: "'JetBrains Mono'", fontSize: 10.5, fontVariantNumeric: "tabular-nums" }}>{prop === "opacity" || prop === "scale" || prop === "prog" ? v.toFixed(2) : Math.round(v)}</span>
+      <span style={{ width: 38, textAlign: "right", fontFamily: "'JetBrains Mono'", fontSize: 10.5, fontVariantNumeric: "tabular-nums" }}>{prop === "opacity" || prop === "scale" || prop === "prog" || prop === "zoom" ? v.toFixed(2) : Math.round(v)}</span>
     </div>
   );
 }
@@ -159,6 +161,18 @@ export function NoteIcon({ size = 18, color = C.dim }) {
       <path d="M9 18.25V5.5l10-2v12.75" />
       <circle cx="6.75" cy="18.25" r="2.25" />
       <circle cx="16.75" cy="16.25" r="2.25" />
+    </svg>
+  );
+}
+/* scene camera — frame corners + center dot, same 1.5px stroke style */
+export function CamIcon({ size = 18, color = C.dim }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9" />
+      <path d="M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9" />
+      <path d="M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15" />
+      <path d="M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15" />
+      <circle cx="12" cy="12" r="2.6" />
     </svg>
   );
 }
