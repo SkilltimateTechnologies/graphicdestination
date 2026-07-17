@@ -10,9 +10,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "mp4-muxer": "^5.2.2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-router-dom": "^7.18.1"
+    "react-router-dom": "^7.18.1",
+    "ts-ebml": "^3.0.2"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",

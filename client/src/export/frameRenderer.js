@@ -176,13 +176,14 @@ export async function createFrameRenderer({ project, ctx, width, height, warn })
     const svg =
       `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
       `<foreignObject x="0" y="0" width="${width}" height="${height}">${styleTag}${xhtml}</foreignObject></svg>`;
-    const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
-    let img;
-    try {
-      img = await loadImage(url);
-    } finally {
-      URL.revokeObjectURL(url);
-    }
+    /* data: URL, not a blob: URL. Chromium and WebKit mark a canvas TAINTED
+       when it is drawn from a blob-URL SVG that contains <foreignObject>
+       (data-URL SVGs stay origin-clean — see whatwg/html#10641). A tainted
+       export canvas silently kills every downstream consumer: captureStream
+       starves (WebM exports come out frameless) and the VideoFrame
+       constructor throws (MP4). */
+    const url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    const img = await loadImage(url);
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, width, height);
     ctx.drawImage(img, 0, 0, width, height);

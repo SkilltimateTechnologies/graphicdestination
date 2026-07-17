@@ -1,19 +1,25 @@
 /**
  * ExportDialog.jsx — export modal for Graphic Destination Motion.
  *
- * Two paths, per design/design.md "Export UX":
- *   · WebM — instant, in-browser (RECOMMENDED): deterministic client-side
- *     export via exportProjectToWebM(), auto-downloads when done.
+ * Three paths, per design/design.md "Export UX":
+ *   · MP4 (H.264) — instant, in-browser (RECOMMENDED): deterministic
+ *     client-side export via exportProject({ prefer: "mp4" }) — WebCodecs +
+ *     mp4-muxer, plays everywhere (QuickTime/WMP/phones). Falls back to WebM
+ *     automatically when WebCodecs H.264 is unavailable.
+ *   · WebM — fallback: explicit MediaRecorder WebM export (VP9/VP8), with
+ *     duration metadata repaired via ts-ebml.
  *   · MP4 — server render (BETA): POST /api/projects/:id/render and download
  *     the streamed mp4. (api.js has no render helper yet, so this calls the
  *     endpoint with the same BASE/credentials conventions as api.js.)
  *
  * Props: { open, onClose, project, projectId, projectName }
- * Self-contained: inline styles + design tokens from design.md, no new deps.
+ * Self-contained: inline styles + design tokens from design.md.
  */
 
 import { useEffect, useRef, useState } from "react";
-import { exportProjectToWebM, downloadBlob, isWebmExportSupported } from "../export/exportWebm.js";
+import { exportProject } from "../export/exportVideo.js";
+import { isMp4ExportSupported } from "../export/exportMp4.js";
+import { downloadBlob, isWebmExportSupported } from "../export/exportWebm.js";
 
 const T = {
   canvas: "#0A0C10", panel: "#10131A", raised: "#171B24", hover: "#1E2330",
@@ -77,13 +83,14 @@ function FormatCard({ selected, disabled, badge, title, desc, note, icon, onClic
 }
 
 export default function ExportDialog({ open, onClose, project, projectId, projectName }) {
-  const [format, setFormat] = useState("webm");
+  const [format, setFormat] = useState("mp4"); // "mp4" | "webm" | "server"
   const [fps, setFps] = useState(30);
   const [quality, setQuality] = useState("high");
   const [phase, setPhase] = useState("idle"); // idle | running | done | error
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState(null); // { filename, size, warnings }
   const [error, setError] = useState(null);   // { message, hint }
+  const [mp4Ok, setMp4Ok] = useState(false);
   const abortRef = useRef(null);
   const lastBlobRef = useRef(null);
 
@@ -94,8 +101,17 @@ export default function ExportDialog({ open, onClose, project, projectId, projec
   useEffect(() => {
     if (!open) return;
     setPhase("idle"); setProgress(0); setResult(null); setError(null);
-    setFormat("webm"); setFps(30); setQuality("high");
+    setFps(30); setQuality("high");
     lastBlobRef.current = null;
+    /* Probe WebCodecs H.264 support (async, cached) and pick the default
+       format: MP4 when encodable here, WebM otherwise. */
+    let live = true;
+    isMp4ExportSupported().then((ok) => {
+      if (!live) return;
+      setMp4Ok(ok);
+      setFormat(ok ? "mp4" : "webm");
+    });
+    return () => { live = false; };
   }, [open]);
 
   useEffect(() => {
@@ -118,14 +134,18 @@ export default function ExportDialog({ open, onClose, project, projectId, projec
     abortRef.current = controller;
     setPhase("running"); setProgress(0); setError(null); setResult(null);
     try {
-      if (format === "webm") {
-        const { blob, warnings } = await exportProjectToWebM({
+      if (format !== "server") {
+        /* In-browser path: MP4/H.264 when supported (prefer "mp4"), else the
+           WebM fallback; prefer "webm" forces the explicit WebM path. The
+           returned format is authoritative — name the file after it. */
+        const { blob, warnings, format: used } = await exportProject({
           project, width: stageW, height: stageH, fps,
           videoBitsPerSecond: q.bps,
           onProgress: setProgress,
           signal: controller.signal,
+          prefer: format,
         });
-        const name = filename("webm");
+        const name = filename(used);
         lastBlobRef.current = blob;
         downloadBlob(blob, name); // auto-download on completion
         setResult({ filename: name, size: blob.size, warnings });
@@ -214,19 +234,29 @@ export default function ExportDialog({ open, onClose, project, projectId, projec
             {/* format cards */}
             <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
               <FormatCard
-                selected={format === "webm"}
-                disabled={!webmOk}
-                onClick={() => setFormat("webm")}
+                selected={format === "mp4"}
+                disabled={!mp4Ok}
+                onClick={() => setFormat("mp4")}
                 badge={<Badge color={T.accent} bg={T.accentSoft}>Recommended</Badge>}
-                title="WebM"
-                desc="Instant, in-browser. Every frame rendered locally from the same engine as the preview — no server round-trip."
-                note={webmOk ? "VP9/VP8 · downloads as .webm" : "Not supported by this browser — use a Chromium-based browser."}
+                title="MP4 (H.264)"
+                desc="Instant, in-browser. Every frame rendered locally from the same engine as the preview — plays everywhere, duration intact."
+                note={mp4Ok ? "H.264 · QuickTime / Windows / phones · .mp4" : "MP4 export needs Chrome/Edge — using WebM"}
                 icon={<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M8.8 1.5 3.5 9h3.3l-1 5.5L11.5 7H8.1l.7-5.5z" /></svg>}
               />
               <FormatCard
-                selected={format === "mp4"}
+                selected={format === "webm"}
+                disabled={!webmOk}
+                onClick={() => setFormat("webm")}
+                badge={<Badge color={T.dim} bg="rgba(147,155,173,0.12)">Fallback</Badge>}
+                title="WebM"
+                desc="Instant, in-browser. For browsers without H.264 encoding — some players (QuickTime, WMP) can't open WebM."
+                note={webmOk ? "VP9/VP8 · downloads as .webm" : "Not supported by this browser — use a Chromium-based browser."}
+                icon={<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6.2" /><path d="M6.5 5.4v5.2l4.4-2.6z" fill="currentColor" stroke="none" /></svg>}
+              />
+              <FormatCard
+                selected={format === "server"}
                 disabled={mp4Missing}
-                onClick={() => setFormat("mp4")}
+                onClick={() => setFormat("server")}
                 badge={<Badge color={T.info} bg="rgba(91,141,239,0.12)">Beta</Badge>}
                 title="MP4"
                 desc="Server render. Uploads the saved project and renders it to H.264 — best compatibility, slower."
@@ -283,12 +313,12 @@ export default function ExportDialog({ open, onClose, project, projectId, projec
 
             <button
               onClick={startExport}
-              disabled={format === "webm" ? !webmOk : mp4Missing}
+              disabled={format === "server" ? mp4Missing : format === "webm" ? !webmOk : !mp4Ok}
               style={{
                 width: "100%", background: T.accent, color: "#1A1405", border: "none", borderRadius: 8,
                 padding: "10px 0", fontSize: 13, fontWeight: 700, cursor: "pointer",
                 transition: "background 120ms ease-out", fontFamily: "inherit",
-                opacity: (format === "webm" ? !webmOk : mp4Missing) ? 0.5 : 1,
+                opacity: (format === "server" ? mp4Missing : format === "webm" ? !webmOk : !mp4Ok) ? 0.5 : 1,
               }}
               onMouseEnter={(e) => { e.currentTarget.style.background = T.accentDim; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = T.accent; }}
@@ -302,7 +332,7 @@ export default function ExportDialog({ open, onClose, project, projectId, projec
           <div style={{ padding: "6px 0 2px" }}>
             <div style={{ display: "flex", alignItems: "baseline", marginBottom: 10 }}>
               <div style={{ fontSize: 13, fontWeight: 600 }}>
-                {format === "webm" ? "Rendering frames in your browser…" : "Rendering on the server…"}
+                {format === "server" ? "Rendering on the server…" : "Rendering frames in your browser…"}
               </div>
               <div style={{ marginLeft: "auto", fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: T.accent, fontVariantNumeric: "tabular-nums" }}>
                 {progress < 0 ? "" : `${pct}%`}
@@ -320,9 +350,11 @@ export default function ExportDialog({ open, onClose, project, projectId, projec
               )}
             </div>
             <div style={{ fontSize: 11, color: T.faint, lineHeight: 1.5, marginBottom: 14 }}>
-              {format === "webm"
-                ? "Keep this tab in the foreground — export runs at about real-time speed. The download starts automatically."
-                : "This can take a minute depending on the render queue. The download starts automatically."}
+              {format === "server"
+                ? "This can take a minute depending on the render queue. The download starts automatically."
+                : format === "webm"
+                  ? "Keep this tab in the foreground — export runs at about real-time speed. The download starts automatically."
+                  : "Encoded as fast as your machine goes — usually quicker than real time. The download starts automatically."}
             </div>
             <button
               onClick={cancel}
