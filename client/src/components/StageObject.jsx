@@ -8,7 +8,7 @@ import { EASE, clamp01 } from "../engine/easing.js";
 import { ptsToStr, pathSamples, pointOnPath, morphPtsAt } from "../engine/shapes.js";
 import { valueAt, colorAt, lerpColor, clipLocalTime, clipTransition } from "../engine/keyframes.js";
 import { MAPS, WORLD_H, CONTINENTS, WORLD_EXT, ringsToPath, arcPath, mapBox, WORLD_D, normHi } from "../engine/maps.js";
-import { SWATCHES, CONFETTI_LIFE, confettiParticles, charFx, numberValue, numberColumns, parseChart, highlightFlick, worldCameraAt } from "../engine/fx.js";
+import { SWATCHES, CONFETTI_STYLES, confettiStyleOf, confettiLife, confettiParticles, charFx, numberValue, numberColumns, parseChart, highlightFlick, worldCameraAt } from "../engine/fx.js";
 
 /* ---------- on-canvas selection handles (direct manipulation) ----------
    Rendered inside the SAME transformed wrapper as the selection outline, so they
@@ -22,6 +22,16 @@ const HANDLE_DEFS = [ /* [id, left, top, drag-axis°] — corners + edge midpoin
   ["se", "100%", "100%", 45], ["s", "50%", "100%", 90], ["sw", "0%", "100%", 135], ["w", "0%", "50%", 0],
 ];
 const ROTATE_OFFSET = 22; /* screen px the rotation grip floats above top-center */
+
+/* stroke-only arc (maps.js arcPath closes to the center for pie wedges —
+   gauges need the open arc). Angles in degrees, 0° = +x, positive = clockwise. */
+function arcStrokeD(cx, cy, r, a0, a1) {
+  const rad = (a) => (a * Math.PI) / 180;
+  const x0 = cx + r * Math.cos(rad(a0)), y0 = cy + r * Math.sin(rad(a0));
+  const x1 = cx + r * Math.cos(rad(a1)), y1 = cy + r * Math.sin(rad(a1));
+  const laf = (((a1 - a0) % 360) + 360) % 360 > 180 ? 1 : 0;
+  return `M${x0.toFixed(2)} ${y0.toFixed(2)}A${r} ${r} 0 ${laf} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+}
 
 /* box styling for text/number layers */
 function boxStyleOf(P, time) {
@@ -97,6 +107,60 @@ function MapEffectShape({ id, d, box, P, time, down, common, handles }) {
   );
 }
 
+/* per-style confetti kinematics — pure playback of the particle fields
+   precomputed in engine/fx.js (confettiParticles). Returns wrapper-local
+   offsets {px, py} + rotation/opacity for one particle at dt seconds after
+   the burst. `anchor` shifts the emission point: (0,0) = the object's own
+   x/y (burst and most styles); cannons re-anchor to the stage's bottom
+   corners, expressed relative to the object's position. "burst" below is
+   the original fountain math, verbatim. */
+function confettiMotion(style, p, dt, life, anchor) {
+  if (style === "rain") {
+    const px = p.ox + p.swayA * Math.sin(p.wob + dt * p.swayF);
+    const py = -320 + p.vy * 620 * dt;
+    const op = clamp01(dt / 0.25) * (1 - clamp01((dt - (life - 0.8)) / 0.8));
+    return { px, py, rot: p.spin * dt, op };
+  }
+  if (style === "cannonL" || style === "cannonR") {
+    const g = 2.1;
+    const px = anchor.x + p.vx * 620 * dt + p.drift * dt * Math.sin(p.wob + dt * 5);
+    const py = anchor.y + p.vy * 620 * dt + 0.5 * g * 620 * dt * dt;
+    const op = 1 - clamp01((dt - (life - 0.7)) / 0.7);
+    return { px, py, rot: p.spin * dt, op };
+  }
+  if (style === "firework") {
+    const g = 1.35;
+    const k = 1 / (1 + 0.9 * dt); /* air drag — the shell decelerates as it flies */
+    const px = p.vx * 620 * dt * k + p.drift * dt * Math.sin(p.wob + dt * 4);
+    const py = p.vy * 620 * dt * k + 0.5 * g * 620 * dt * dt;
+    const fade = 1 - clamp01((dt - (life - 1.1)) / 1.1);
+    const twinkle = 0.6 + 0.4 * Math.sin(p.wob + dt * p.twk * Math.PI);
+    return { px, py, rot: p.spin * dt, op: fade * twinkle };
+  }
+  if (style === "spiral") {
+    const r = p.r0 + p.vr * dt;
+    const th = p.th0 + p.om * dt;
+    const op = clamp01(dt / 0.18) * (1 - clamp01((dt - (life - 0.9)) / 0.9));
+    return { px: r * Math.cos(th), py: r * Math.sin(th), rot: p.spin * dt, op };
+  }
+  if (style === "snow") {
+    const px = p.ox + p.swayA * Math.sin(p.wob + dt * p.swayF);
+    const py = -330 + p.vy * 620 * dt;
+    const op = clamp01(dt / 0.6) * (1 - clamp01((dt - (life - 1.2)) / 1.2));
+    return { px, py, rot: 0, op };
+  }
+  if (style === "pop") {
+    const u = clamp01(dt / life);
+    const e = 1 - Math.pow(1 - u, 3); /* easeOutCubic ring expansion, quick fade */
+    return { px: p.vx * 260 * e, py: p.vy * 260 * e, rot: p.spin * dt, op: 1 - u * 1.15 };
+  }
+  const g = 1.9;
+  const px = p.vx * 620 * dt + p.drift * dt * Math.sin(p.wob + dt * 5);
+  const py = p.vy * 620 * dt + 0.5 * g * 620 * dt * dt;
+  const fade = dt > 1.7 ? 1 - (dt - 1.7) / 0.7 : 1;
+  return { px, py, rot: p.spin * dt, op: fade };
+}
+
 export function StageObject({ obj, time, stage, selected, onDown, onEnterClip, displayValue, onResize, onRotate, interactive, stageScale = 1, playing = false, selCount = 1, rotLive = null }) {
   const P = obj.props;
   if (obj.hidden && !(interactive && selected)) return null;
@@ -134,19 +198,21 @@ export function StageObject({ obj, time, stage, selected, onDown, onEnterClip, d
   }
 
   if (obj.type === "confetti") {
+    const style = confettiStyleOf(P); /* missing/unknown style → "burst" (pre-styles projects unchanged) */
     const parts = confettiParticles(obj);
+    const life = confettiLife(style) / 1000;
     const dt = (time - P.burst) / 1000;
-    const active = dt >= 0 && dt <= CONFETTI_LIFE / 1000;
+    const active = dt >= 0 && dt <= life;
+    /* cannons emit from the stage's bottom corners — re-anchored relative to the object's own position */
+    const anchor = style === "cannonL" ? { x: -x, y: stage.h - y } : style === "cannonR" ? { x: stage.w - x, y: stage.h - y } : { x: 0, y: 0 };
+    const glyph = (CONFETTI_STYLES.find((s) => s.id === style) || CONFETTI_STYLES[0]).glyph;
     return (
       <div onPointerDown={interactive && !obj.locked ? (e) => onDown(e, obj) : undefined}
         style={{ position: "absolute", left: x, top: y, transform: "translate(-50%,-50%)", width: 44, height: 44, cursor: interactive && !obj.locked ? "grab" : "default", zIndex: 50, pointerEvents: interactive ? "auto" : "none" }}>
-        {(selected || (!active && interactive)) && <div style={{ position: "absolute", inset: 0, border: selected ? `1.5px dashed ${C.amber}` : "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, opacity: active ? 1 : 0.35 }}>🎉</div>}
+        {(selected || (!active && interactive)) && <div style={{ position: "absolute", inset: 0, border: selected ? `1.5px dashed ${C.amber}` : "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, opacity: active ? 1 : 0.35 }}>{glyph}</div>}
         {active && parts.map((p, i) => {
-          const g = 1.9;
-          const px = p.vx * 620 * dt + p.drift * dt * Math.sin(p.wob + dt * 5);
-          const py = p.vy * 620 * dt + 0.5 * g * 620 * dt * dt;
-          const fade = dt > 1.7 ? 1 - (dt - 1.7) / 0.7 : 1;
-          return <div key={i} style={{ position: "absolute", left: 22 + px, top: 22 + py, width: p.size, height: p.size * (p.round ? 1 : 0.55), background: p.color, borderRadius: p.round ? "50%" : 1.5, transform: `rotate(${p.spin * dt}deg)`, opacity: Math.max(0, fade), pointerEvents: "none" }} />;
+          const m = confettiMotion(style, p, dt, life, anchor);
+          return <div key={i} style={{ position: "absolute", left: 22 + m.px, top: 22 + m.py, width: p.size, height: p.size * (p.round ? 1 : 0.55), background: p.color, borderRadius: p.round ? "50%" : 1.5, transform: `rotate(${m.rot}deg)`, opacity: Math.max(0, Math.min(1, m.op)), pointerEvents: "none" }} />;
         })}
       </div>
     );
@@ -344,25 +410,79 @@ export function StageObject({ obj, time, stage, selected, onDown, onEnterClip, d
         els.push(<text key={"l" + i} x={p[0]} y={Hh - 4} textAnchor="middle" fill="#98A0B4" fontSize={12} fontFamily="'Inter'" fontWeight={600} opacity={eAll}>{data[i].l}</text>);
       });
     }
-    if (P.chartType === "donut" && n) {
+    if (P.chartType === "area" && n > 1) {
+      /* line's filled sibling: solid translucent fill (no gradient) + the same draw-on stroke */
+      const pts2 = data.map((d, i) => [padL + (plotW * i) / (n - 1), padT + plotH - (d.v / vmax) * plotH]);
+      const dStr = pts2.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join("");
+      const fillStr = dStr + `L${(padL + plotW).toFixed(1)} ${(padT + plotH).toFixed(1)}L${padL} ${(padT + plotH).toFixed(1)}Z`;
+      els.push(<path key="af" d={fillStr} fill={SWATCHES[3]} fillOpacity={0.3 * eAll} />);
+      els.push(<path key="al" d={dStr} fill="none" stroke={SWATCHES[3]} strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" pathLength={100} strokeDasharray={100} strokeDashoffset={100 * (1 - eAll)} style={{ filter: `drop-shadow(0 0 6px ${SWATCHES[3]}66)` }} />);
+      pts2.forEach((p, i) => {
+        const ui = clamp01((eAll * (n - 1) - i + 0.5) * 2);
+        if (P.showVals) els.push(<text key={"v" + i} x={p[0]} y={p[1] - 12} textAnchor="middle" fill="#E9EBF2" fontSize={12.5} fontFamily="'JetBrains Mono'" fontWeight={600} opacity={ui}>{data[i].v}</text>);
+        els.push(<text key={"l" + i} x={p[0]} y={Hh - 4} textAnchor="middle" fill="#98A0B4" fontSize={12} fontFamily="'Inter'" fontWeight={600} opacity={eAll}>{data[i].l}</text>);
+      });
+    }
+    if (P.chartType === "hbar" && n) {
+      /* horizontal bars: label gutter on the left, bars grow left→right with the bar stagger */
+      const gx = padL + 84;
+      const maxW = Math.max(40, W - gx - padL - (P.showVals ? 44 : 0));
+      const bh = Math.min(34, (plotH / n) * 0.58);
+      data.forEach((d, i) => {
+        const ui = clamp01((time - P.start - i * 110) / Math.max(300, P.dur * 0.55));
+        const ew = Math.min(1.04, EASE.easeOutBack(ui)) * (d.v / vmax) * maxW;
+        const by = padT + (plotH / n) * (i + 0.5) - bh / 2;
+        const col = SWATCHES[i % 5];
+        els.push(<rect key={"b" + i} x={gx} y={by} width={Math.max(0, ew)} height={bh} rx={Math.min(8, bh / 3)} fill={col} style={{ filter: `drop-shadow(0 4px 10px ${col}44)` }} />);
+        els.push(<text key={"l" + i} x={gx - 8} y={by + bh / 2 + 4} textAnchor="end" fill="#98A0B4" fontSize={12} fontFamily="'Inter'" fontWeight={600} opacity={eAll}>{d.l}</text>);
+        if (P.showVals) els.push(<text key={"v" + i} x={gx + Math.max(0, ew) + 8} y={by + bh / 2 + 4.5} fill="#E9EBF2" fontSize={12.5} fontFamily="'JetBrains Mono'" fontWeight={600} opacity={clamp01(ui * 1.4)}>{Math.round(d.v * EASE.easeOutCubic(ui))}</text>);
+      });
+    }
+    if ((P.chartType === "donut" || P.chartType === "pie") && n) {
+      const isPie = P.chartType === "pie"; /* pie = donut with the inner radius at 0 (+ per-slice % labels) */
       const total = data.reduce((a, d) => a + d.v, 0) || 1;
       const cx2 = W / 2, cy2 = padT + plotH / 2, R2 = Math.min(plotW, plotH) / 2 - 6;
       const sweep = eAll * 359.9;
       let acc = 0;
+      const slices = [];
       data.forEach((d, i) => {
         const a0 = (acc / total) * 359.9;
         acc += d.v;
         const a1 = (acc / total) * 359.9;
+        slices.push({ a0, a1 });
         const vis0 = Math.min(a0, sweep), vis1 = Math.min(a1, sweep);
         if (vis1 <= vis0) return;
         els.push(<path key={"s" + i} d={arcPath(cx2, cy2, R2, -90 + vis0, -90 + vis1)} fill={SWATCHES[i % 5]} style={{ filter: `drop-shadow(0 3px 8px ${SWATCHES[i % 5]}33)` }} />);
       });
-      els.push(<circle key="hole" cx={cx2} cy={cy2} r={R2 * 0.62} fill="#12151C" />);
-      if (P.showVals) els.push(<text key="tot" x={cx2} y={cy2 + 6} textAnchor="middle" fill="#E9EBF2" fontSize={Math.max(16, R2 * 0.34)} fontFamily="'JetBrains Mono'" fontWeight={700}>{Math.round(total * EASE.easeOutCubic(eAll))}</text>);
+      if (!isPie) {
+        els.push(<circle key="hole" cx={cx2} cy={cy2} r={R2 * 0.62} fill="#12151C" />);
+        if (P.showVals) els.push(<text key="tot" x={cx2} y={cy2 + 6} textAnchor="middle" fill="#E9EBF2" fontSize={Math.max(16, R2 * 0.34)} fontFamily="'JetBrains Mono'" fontWeight={700}>{Math.round(total * EASE.easeOutCubic(eAll))}</text>);
+      } else if (P.showVals) {
+        data.forEach((d, i) => {
+          const share = d.v / total;
+          if (share < 0.045) return; /* slivers stay unlabeled */
+          const mid = -90 + (slices[i].a0 + slices[i].a1) / 2;
+          const a = (mid * Math.PI) / 180;
+          els.push(<text key={"pv" + i} x={cx2 + Math.cos(a) * R2 * 0.62} y={cy2 + Math.sin(a) * R2 * 0.62 + 4.5} textAnchor="middle" fill="#10131A" fontSize={13} fontFamily="'JetBrains Mono'" fontWeight={700} opacity={clamp01((sweep - slices[i].a1) / 30)}>{Math.round(share * 100)}%</text>);
+        });
+      }
       data.forEach((d, i) => {
         els.push(<circle key={"lg" + i} cx={14} cy={16 + i * 18} r={5} fill={SWATCHES[i % 5]} opacity={eAll} />);
         els.push(<text key={"lt" + i} x={25} y={20 + i * 18} fill="#98A0B4" fontSize={11.5} fontFamily="'Inter'" fontWeight={600} opacity={eAll}>{d.l}</text>);
       });
+    }
+    if (P.chartType === "gauge") {
+      /* single-value radial meter: first data row reads 0–100, big mono % in the middle */
+      const uAll = clamp01((time - P.start) / Math.max(1, P.dur));
+      const e = EASE.easeOutCubic(uAll);
+      const pct = clamp01((n ? data[0].v : 0) / 100);
+      const cx2 = W / 2, cy2 = padT + plotH / 2, R2 = Math.min(plotW, plotH) / 2 - 6;
+      const sw2 = Math.max(10, R2 * 0.16);
+      const A0 = 135, SPAN = 270; /* bottom-left → bottom-right, through the top */
+      els.push(<path key="gt" d={arcStrokeD(cx2, cy2, R2, A0, A0 + SPAN)} fill="none" stroke="#2B3140" strokeWidth={sw2} strokeLinecap="round" />);
+      if (pct * e > 0.004) els.push(<path key="gv" d={arcStrokeD(cx2, cy2, R2, A0, A0 + SPAN * pct * e)} fill="none" stroke={SWATCHES[0]} strokeWidth={sw2} strokeLinecap="round" style={{ filter: `drop-shadow(0 0 7px ${SWATCHES[0]}66)` }} />);
+      els.push(<text key="gl" x={cx2} y={cy2 + R2 * 0.12} textAnchor="middle" fill="#E9EBF2" fontSize={Math.max(20, R2 * 0.5)} fontFamily="'JetBrains Mono'" fontWeight={700}>{Math.round(pct * 100 * e)}%</text>);
+      if (n > 0 && data[0].l) els.push(<text key="gc" x={cx2} y={cy2 + R2 * 0.12 + Math.max(17, R2 * 0.22)} textAnchor="middle" fill="#98A0B4" fontSize={13} fontFamily="'Inter'" fontWeight={600} opacity={eAll}>{data[0].l}</text>);
     }
     const pad = P.pad || 0;
     return (

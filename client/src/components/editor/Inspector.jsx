@@ -7,6 +7,7 @@ import { Card, ChipRow, ColorKfRow, PropRow, FontControls, WorldPicker, Row, Sli
 import { EASE, EASE_LABEL } from "../../engine/easing.js";
 import { SHAPE_IDS, SHAPE_DEFS, ptsToStr } from "../../engine/shapes.js";
 import { MAPS, CONTINENT_NAMES, CONTINENTS, normHi } from "../../engine/maps.js";
+import { CONFETTI_STYLES, confettiStyleOf } from "../../engine/fx.js";
 
 export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detachAudio, fmt, selMany, groupSelection, align, duplicateSelected, removeSelected, inClip, ctx, sel, patchObject, toggleHide, toggleLock, stage, stageBg, setStageBg, applyStagePreset, stageIsPreset, enterClip, patchProps, ctxDur, stretchClipDur, stretchClips, setStretchClips, ungroupClip, morphQ, setMorphQ, time, timeRef, setShapeAt, editProp, removeKeyframe, setKeyframe, setSelKf, flowText, brand, SW, addPathTo, patchPath, animateAlongPath, kfNav, selectedKfData, setSegmentEase, applyPreset, fileRef }) {
   /* x/y/w/h/rotation moved on-canvas (direct manipulation) — Transform keeps only
@@ -303,13 +304,13 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
               )}
               {sel.type === "chart" && (
                 <Card title="Chart" hint="one row per line: Label, value">
-                  <ChipRow label="Type" options={[["bar", "Bars"], ["line", "Line"], ["donut", "Donut"]]} value={sel.props.chartType} onChange={(v) => patchProps(sel.id, { chartType: v })} />
+                  {/* chart type is chosen at insert (Charts rail panel) — not switchable here */}
                   <textarea value={sel.props.dataStr} onChange={(e) => patchProps(sel.id, { dataStr: e.target.value })}
                     style={{ ...inputStyle, height: 92, resize: "none", fontFamily: "'JetBrains Mono'", fontSize: 11, marginBottom: 8 }} placeholder={"Q1, 42\nQ2, 65"} />
-                  <ChipRow label="Values" options={[[true, "Show"], [false, "Hide"]]} value={sel.props.showVals} onChange={(v) => patchProps(sel.id, { showVals: v })} />
+                  {sel.props.chartType !== "gauge" && <ChipRow label="Values" options={[[true, "Show"], [false, "Hide"]]} value={sel.props.showVals} onChange={(v) => patchProps(sel.id, { showVals: v })} />}
                   <SliderRow label="Start" min={0} max={Math.max(100, ctxDur - 300)} step={10} value={sel.props.start} onChange={(v) => patchProps(sel.id, { start: v })} />
                   <SliderRow label="Duration" min={400} max={5000} step={10} value={sel.props.dur} onChange={(v) => patchProps(sel.id, { dur: v })} />
-                  <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.5 }}>Series colors follow the brand palette. Bars stagger in, lines draw on, donuts sweep — all easing-finished.</div>
+                  <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.5 }}>Series colors follow the brand palette. Bars stagger in, lines draw on, donuts sweep, the gauge always reads a % — all easing-finished.</div>
                 </Card>
               )}
               {sel.type === "chart" && (
@@ -329,6 +330,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
               )}
               {sel.type === "confetti" && (
                 <Card title="Confetti">
+                  <ChipRow label="Style" options={CONFETTI_STYLES.map((s) => [s.id, s.name])} value={confettiStyleOf(sel.props)} onChange={(v) => patchProps(sel.id, { style: v })} wrap />
                   <SliderRow label="Burst" min={0} max={Math.max(100, ctxDur - 500)} step={10} value={sel.props.burst} onChange={(v) => patchProps(sel.id, { burst: v })} />
                   <SliderRow label="Particles" min={20} max={160} value={sel.props.count} onChange={(v) => patchProps(sel.id, { count: v })} />
                   <SliderRow label="Power" min={0.4} max={2} step={0.05} value={sel.props.power} onChange={(v) => patchProps(sel.id, { power: v })} />

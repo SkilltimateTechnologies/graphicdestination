@@ -15,6 +15,9 @@ import ShapesPanel from "./editor/panels/ShapesPanel";
 import MapsPanel from "./editor/panels/MapsPanel";
 import ImagePanel from "./editor/panels/ImagePanel";
 import AudioPanel from "./editor/panels/AudioPanel";
+import TemplatesPanel from "./editor/panels/TemplatesPanel";
+import ConfettiPanel from "./editor/panels/ConfettiPanel";
+import ChartsPanel from "./editor/panels/ChartsPanel";
 import StageView from "./editor/StageView";
 import Inspector from "./editor/Inspector";
 import Timeline from "./editor/Timeline";
@@ -79,7 +82,7 @@ function makeObject(type, over = {}) {
   if (type === "number") { base.name = "Number"; Object.assign(base.props, { from: 0, to: 100, start: 200, dur: 1600, style: "odometer", decimals: 0, prefix: "", suffix: "", fontSize: 96, fill: "#F9F9F9", numEase: "easeOutCubic", fontFamily: "JetBrains Mono", ring: "none", ringC: "#FFB224", ringW: 8, ...BOX_DEFAULTS }); }
   if (type === "map") { base.name = "Map"; Object.assign(base.props, { country: "IND", mapStyle: "comet", stroke: "#FFB224", fillC: "#FFB224", fillOp: 0.85, strokeW: 1.6, start: 200, dur: 1800, w: 420 }); }
   if (type === "continent") { base.name = "Continent"; Object.assign(base.props, { continent: "ASIA", mapStyle: "comet", stroke: "#FFB224", fillC: "#FFB224", fillOp: 0.7, strokeW: 1, start: 200, dur: 2200, w: 620, hi: [], reveal: "simple", revealDur: 600, hiFill: "#FFD984", hiStroke: "#ffffff", glow: true, autoZoom: true, zoomK: 2.2, zoomHoldMs: 1600, zoomTransMs: 550 }); }
-  if (type === "confetti") { base.name = "Confetti"; Object.assign(base.props, { burst: 500, count: 70, power: 1, seed: 7 }); }
+  if (type === "confetti") { base.name = "Confetti"; Object.assign(base.props, { burst: 500, count: 70, power: 1, seed: 7, style: "burst" }); }
   if (type === "chart") { base.name = "Chart"; Object.assign(base.props, { chartType: "bar", dataStr: "Q1, 42\nQ2, 65\nQ3, 38\nQ4, 84", start: 200, dur: 1400, w: 560, h: 340, showVals: true, bg: "#171B24", bgOp: 1, radius: 18, borderC: "#2B3140", borderW: 1, pad: 20 }); }
   if (type === "world") { base.name = "World map"; Object.assign(base.props, { hi: [{ cc: "IND", t: 0, zoom: true }], reveal: "simple", revealDur: 600, zoomK: 2.6, autoZoom: true, zoomHoldMs: 1600, zoomTransMs: 550, focus: 0, base: "#2A3350", baseOp: 1, hiFill: "#FFB224", hiStroke: "#FFD984", stroke: "#3D4A6E", strokeW: 0.7, glow: true, w: 780 }); }
   if (type === "clip") {
@@ -253,6 +256,11 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   const [shapesOpen, setShapesOpen] = useState(false);
   const [mapsOpen, setMapsOpen] = useState(false);
   const [imagesOpen, setImagesOpen] = useState(false);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [chartsOpen, setChartsOpen] = useState(false);
+  const [confettiOpen, setConfettiOpen] = useState(false);
+  const [tplQ, setTplQ] = useState(""); /* templates panel search (persists across open/close, like shapeQ) */
+  const [tplCat, setTplCat] = useState("All");
   const [assets, setAssets] = useState(null); /* null = not fetched yet; [] = fetched, empty */
   const [assetsBusy, setAssetsBusy] = useState(false);
   const [assetErr, setAssetErr] = useState("");
@@ -529,6 +537,20 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     setSelIds([o.id]);
     setShapesOpen(false);
     if (type === "clip" && !over.children) enterClip(o.id);
+  };
+  /* insert a gallery template as ONE editable clip at the playhead.
+     buildClip() ships a full clip layer whose children carry the template
+     file's own ob<n> ids — cloneLayer re-issues editor ids for the whole
+     subtree, the same fresh-id path paste/duplicate uses (mirrors how
+     importProject walks ids and bumps _uid). The clip keeps the template's
+     name and is selected after insert. */
+  const insertTemplateClip = (tpl) => {
+    const clip = cloneLayer(tpl.buildClip());
+    clip.locked = false;
+    clip.props.start = Math.max(0, Math.min(Math.max(0, ctxDur - 400), Math.round(timeRef.current / 10) * 10));
+    setLayers((ls) => [...ls, clip]);
+    setSelIds([clip.id]);
+    setTemplatesOpen(false);
   };
   const copySelection = () => { if (!selMany.length) return; clipboardRef.current = selMany.map((o) => JSON.parse(JSON.stringify(o))); setClipCount(clipboardRef.current.length); };
   const pasteClipboard = () => {
@@ -1229,10 +1251,21 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
       <div style={{ display: "flex", flex: 1, minHeight: 0, position: "relative" }}>
         <IconRail shapesOpen={shapesOpen} setShapesOpen={setShapesOpen} imagesOpen={imagesOpen} setImagesOpen={setImagesOpen}
           audioOpen={audioOpen} setAudioOpen={setAudioOpen} mapsOpen={mapsOpen} setMapsOpen={setMapsOpen}
+          templatesOpen={templatesOpen} setTemplatesOpen={setTemplatesOpen} chartsOpen={chartsOpen} setChartsOpen={setChartsOpen}
+          confettiOpen={confettiOpen} setConfettiOpen={setConfettiOpen}
           audioTrack={audioTrack} addObject={addObject} />
+
+        {/* templates drawer: search + categories, inserts as one editable clip at the playhead */}
+        {templatesOpen && <TemplatesPanel tplQ={tplQ} setTplQ={setTplQ} tplCat={tplCat} setTplCat={setTplCat} insertTemplateClip={insertTemplateClip} />}
 
         {/* shapes folder with search */}
         {shapesOpen && <ShapesPanel shapeQ={shapeQ} setShapeQ={setShapeQ} addObject={addObject} />}
+
+        {/* charts drawer: 7 chart types as separate insertables */}
+        {chartsOpen && <ChartsPanel addObject={addObject} setChartsOpen={setChartsOpen} />}
+
+        {/* confetti drawer: 8 emission styles */}
+        {confettiOpen && <ConfettiPanel addObject={addObject} setConfettiOpen={setConfettiOpen} />}
 
         {/* maps drawer */}
         {mapsOpen && <MapsPanel addObject={addObject} setMapsOpen={setMapsOpen} />}

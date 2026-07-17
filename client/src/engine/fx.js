@@ -80,16 +80,104 @@ export function numberColumns(P, time) {
 }
 
 /* ============================================================
-   CONFETTI (seeded)
+   CONFETTI (seeded) — 8 emission styles. Missing/unknown
+   props.style falls back to "burst", the original upward
+   fountain, so projects saved before styles existed render
+   EXACTLY as before (same rng order, same particle fields).
+   All math is pure/deterministic (mulberry32) — the renderer
+   (components/StageObject.jsx) only plays the kinematics back.
    ============================================================ */
 export const CONFETTI_LIFE = 2400;
+/* per-style particle lifetime (ms) — the renderer's active window */
+const CONFETTI_LIVES = { burst: CONFETTI_LIFE, rain: 3400, cannonL: 2600, cannonR: 2600, firework: 2800, spiral: 2600, snow: 6500, pop: 700 };
+export const CONFETTI_STYLES = [
+  { id: "burst", name: "Burst", glyph: "🎉" },
+  { id: "rain", name: "Rain", glyph: "🌧" },
+  { id: "cannonL", name: "Cannon L", glyph: "◣" },
+  { id: "cannonR", name: "Cannon R", glyph: "◢" },
+  { id: "firework", name: "Firework", glyph: "🎆" },
+  { id: "spiral", name: "Spiral", glyph: "🌀" },
+  { id: "snow", name: "Snow", glyph: "❄" },
+  { id: "pop", name: "Pop", glyph: "💥" },
+];
+export const confettiStyleOf = (P) => (P && CONFETTI_LIVES[P.style] ? P.style : "burst");
+export function confettiLife(style) { return CONFETTI_LIVES[style] || CONFETTI_LIFE; }
 export function confettiParticles(obj) {
-  const rng = mulberry32(obj.props.seed);
+  const P = obj.props;
+  const style = confettiStyleOf(P);
+  const rng = mulberry32(P.seed);
+  const power = P.power || 1;
   const out = [];
-  for (let i = 0; i < obj.props.count; i++) {
-    const ang = -Math.PI / 2 + (rng() - 0.5) * Math.PI * 1.1;
-    const speed = (0.55 + rng() * 0.9) * obj.props.power;
-    out.push({ vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, size: 5 + rng() * 9, color: SWATCHES[Math.floor(rng() * 5)], spin: (rng() - 0.5) * 1400, round: rng() > 0.6, drift: (rng() - 0.5) * 60, wob: rng() * Math.PI * 2 });
+  if (style === "burst") {
+    /* original upward fountain — unchanged field set + rng consumption order */
+    for (let i = 0; i < P.count; i++) {
+      const ang = -Math.PI / 2 + (rng() - 0.5) * Math.PI * 1.1;
+      const speed = (0.55 + rng() * 0.9) * power;
+      out.push({ vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, size: 5 + rng() * 9, color: SWATCHES[Math.floor(rng() * 5)], spin: (rng() - 0.5) * 1400, round: rng() > 0.6, drift: (rng() - 0.5) * 60, wob: rng() * Math.PI * 2 });
+    }
+    return out;
+  }
+  if (style === "rain") {
+    /* spawn across a wide band above the anchor, fall with a sine sway */
+    for (let i = 0; i < P.count; i++) {
+      out.push({
+        ox: (rng() - 0.5) * 620, vy: (0.3 + rng() * 0.45) * power,
+        size: 5 + rng() * 8, color: SWATCHES[Math.floor(rng() * 5)],
+        spin: (rng() - 0.5) * 700, round: rng() > 0.55,
+        swayA: 12 + rng() * 26, swayF: 2.2 + rng() * 2.6, wob: rng() * Math.PI * 2,
+      });
+    }
+    return out;
+  }
+  if (style === "cannonL" || style === "cannonR") {
+    /* corner cannon: strong upward velocity angled into the stage (dir flips the side) */
+    const dir = style === "cannonL" ? 1 : -1;
+    for (let i = 0; i < P.count; i++) {
+      const vx = dir * (0.5 + rng() * 0.8) * power;
+      const vy = -(0.95 + rng() * 0.8) * power;
+      out.push({ vx, vy, size: 5 + rng() * 8, color: SWATCHES[Math.floor(rng() * 5)], spin: (rng() - 0.5) * 1200, round: rng() > 0.6, drift: (rng() - 0.5) * 46, wob: rng() * Math.PI * 2 });
+    }
+    return out;
+  }
+  if (style === "firework") {
+    /* radial explosion from the anchor — twk drives the twinkle frequency */
+    for (let i = 0; i < P.count; i++) {
+      const ang = rng() * Math.PI * 2;
+      const speed = (0.35 + rng() * 0.85) * power;
+      out.push({ vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, size: 3.5 + rng() * 4.5, color: SWATCHES[Math.floor(rng() * 5)], spin: (rng() - 0.5) * 500, round: true, drift: (rng() - 0.5) * 26, wob: rng() * Math.PI * 2, twk: 6 + rng() * 9 });
+    }
+    return out;
+  }
+  if (style === "spiral") {
+    /* particles wind outward: radius grows at vr px/s while the angle sweeps at om rad/s */
+    for (let i = 0; i < P.count; i++) {
+      out.push({
+        th0: rng() * Math.PI * 2, om: (2.2 + rng() * 2.8) * (rng() > 0.85 ? -1 : 1),
+        r0: 6 + rng() * 26, vr: (90 + rng() * 170) * power,
+        size: 4 + rng() * 7, color: SWATCHES[Math.floor(rng() * 5)],
+        spin: (rng() - 0.5) * 900, round: rng() > 0.5, wob: rng() * Math.PI * 2,
+      });
+    }
+    return out;
+  }
+  if (style === "snow") {
+    /* slow gentle fall — small round white flakes, extra-long life */
+    for (let i = 0; i < P.count; i++) {
+      const shade = rng();
+      out.push({
+        ox: (rng() - 0.5) * 720, vy: (0.075 + rng() * 0.1) * power,
+        size: 3 + rng() * 4, color: shade > 0.82 ? SWATCHES[3] : shade > 0.7 ? SWATCHES[2] : "#F9F9F9",
+        spin: 0, round: true,
+        swayA: 16 + rng() * 30, swayF: 0.9 + rng() * 1.2, wob: rng() * Math.PI * 2,
+      });
+    }
+    return out;
+  }
+  /* pop — fast short ring: even angular spread + slight jitter, renderer eases out + fades fast */
+  for (let i = 0; i < P.count; i++) {
+    const ang = (i / Math.max(1, P.count)) * Math.PI * 2 + (rng() - 0.5) * 0.24;
+    const speed = (0.9 + rng() * 0.5) * power;
+    out.push({ vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, size: 4 + rng() * 5, color: SWATCHES[Math.floor(rng() * 5)], spin: (rng() - 0.5) * 900, round: rng() > 0.5 });
   }
   return out;
 }

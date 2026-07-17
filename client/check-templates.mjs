@@ -1,5 +1,8 @@
 /* Sanity check: every template's buildProject() output parses and matches the
-   GraphicDestinationMotion project schema (v5) — run with: node check-templates.mjs */
+   GraphicDestinationMotion project schema (v5), and every buildClip() returns
+   a clip-shaped payload (type "clip", children, 0-relative start, template-
+   length dur, fades, fresh ids per call) for the editor's insert-as-clip path
+   — run with: node check-templates.mjs */
 import { TEMPLATES, blankProject } from "./src/templates/templates.js";
 
 const EASE_IDS = ["linear", "easeOutQuad", "easeInQuad", "easeInOutCubic", "easeOutCubic", "easeInCubic", "easeOutBack", "easeOutElastic", "easeOutBounce", "easeInOutSine"];
@@ -14,7 +17,7 @@ const TYPE_PROPS = {
   shape: ["shape", "w", "h", "fillMode", "sC", "sW", "cornerR"],
   text: ["text", "fontSize", "fontWeight", "w", "h", "textFx", "fontFamily", "ls", "upper", "pathMode", "bg", "pad", "borderC", "borderW", "radius", "boxFx"],
   number: ["from", "to", "start", "dur", "style", "decimals", "prefix", "suffix", "fontSize", "fill", "numEase", "fontFamily", "ring", "ringC", "ringW", "bg", "pad", "borderC", "borderW", "radius", "boxFx"],
-  confetti: ["burst", "count", "power", "seed"],
+  confetti: ["burst", "count", "power", "seed", "style"],
   clip: ["start", "dur", "speed", "end", "bg", "bgPad", "bgRadius", "tIn", "tOut", "tDur"],
 };
 
@@ -83,14 +86,54 @@ function checkProject(tid, p) {
   if (JSON.stringify(JSON.parse(JSON.stringify(p))) !== JSON.stringify(p)) fail(`${tid}: JSON round-trip changed the project`);
 }
 
+/* confetti emission styles the engine supports (engine/fx.js CONFETTI_STYLES) */
+const CONFETTI_STYLE_IDS = ["burst", "rain", "cannonL", "cannonR", "firework", "spiral", "snow", "pop"];
+const CLIP_TRANSITION_IDS = ["none", "fade", "slideU", "slideD", "slideL", "slideR", "zoom", "zoomOut"];
+
+function collectIds(l, out) {
+  out.push(l.id);
+  (l.children || []).forEach((c) => collectIds(c, out));
+  return out;
+}
+
+/* buildClip(): the insert-as-editable-clip payload — one clip layer whose
+   children are the template's objects, with 0-relative timing and fades */
+function checkClip(t) {
+  let c;
+  try { c = t.buildClip(); } catch (e) { fail(`${t.id}: buildClip threw — ${e.message}`); return; }
+  const where = `${t.id}/clip`;
+  if (c.type !== "clip") return fail(`${where}: payload type must be "clip" — got ${c.type}`);
+  if (c.name !== t.name) fail(`${where}: clip should be titled with the template name "${t.name}" — got "${c.name}"`);
+  if (!Array.isArray(c.children) || !c.children.length) fail(`${where}: clip needs a non-empty children array`);
+  for (const k of ["id", "type", "name", "tracks", "locked", "hidden", "props", "children"]) if (!(k in c)) fail(`${where}: missing layer key "${k}"`);
+  if (typeof c.props.start !== "number" || c.props.start !== 0) fail(`${where}: clip start must be 0-relative — got ${c.props.start}`);
+  if (c.props.dur !== 5000) fail(`${where}: clip dur must equal the template length (5000) — got ${c.props.dur}`);
+  if (!CLIP_TRANSITION_IDS.includes(c.props.tIn) || !CLIP_TRANSITION_IDS.includes(c.props.tOut)) fail(`${where}: unknown tIn/tOut "${c.props.tIn}"/"${c.props.tOut}"`);
+  if (typeof c.props.x !== "number" || typeof c.props.y !== "number") fail(`${where}: clip needs numeric x/y (stage-centered)`);
+  const seen = new Set();
+  checkLayer(t.id, c, seen); /* full recursive schema check of clip + children */
+  (c.children || []).forEach((ch) => { if (ch.type === "confetti" && !CONFETTI_STYLE_IDS.includes(ch.props.style)) fail(`${where}/${ch.name}: unknown confetti style "${ch.props.style}"`); });
+  if (JSON.stringify(JSON.parse(JSON.stringify(c))) !== JSON.stringify(c)) fail(`${where}: JSON round-trip changed the clip`);
+  /* fresh ids on every call — two clips from the same template must not share ids */
+  let c2;
+  try { c2 = t.buildClip(); } catch (e) { fail(`${t.id}: second buildClip threw — ${e.message}`); return; }
+  const ids1 = new Set(collectIds(c, []));
+  const dup = collectIds(c2, []).filter((id) => ids1.has(id));
+  if (dup.length) fail(`${where}: buildClip does not mint fresh ids — repeated ${dup.join(", ")}`);
+  if (c2.children.length !== c.children.length) fail(`${where}: buildClip child count differs between calls`);
+}
+
 console.log(`Checking ${TEMPLATES.length} templates + blankProject()…\n`);
 for (const t of TEMPLATES) {
   console.log(`• ${t.name} (${t.id})`);
   if (!t.id || !t.name || !t.description || typeof t.accent !== "string" || typeof t.buildProject !== "function") { fail(`${t.id}: template meta incomplete`); continue; }
   if (!SWATCHES.includes(t.accent)) fail(`${t.id}: accent ${t.accent} not from engine SWATCHES`);
+  if (typeof t.category !== "string" || !t.category.trim()) fail(`${t.id}: category missing`);
+  if (typeof t.buildClip !== "function") fail(`${t.id}: buildClip missing`);
   let p;
   try { p = t.buildProject(); } catch (e) { fail(`${t.id}: buildProject threw — ${e.message}`); continue; }
   checkProject(t.id, p);
+  if (typeof t.buildClip === "function") checkClip(t);
   if (!failures) ok(`${p.objects.length} layers, schema valid`);
   else console.log("");
 }
