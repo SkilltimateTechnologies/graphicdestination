@@ -26,6 +26,14 @@ const STAGE_H = 720;
 const DUR = 5000;
 const FPS = 60;
 
+/* timeline vertical resize + stage zoom */
+const TL_H_KEY = "gd:timelineH";
+const TL_H_DEFAULT = 240;
+const TL_H_MIN = 160;
+const clampTlH = (h) => Math.max(TL_H_MIN, Math.min(window.innerHeight * 0.45, h));
+const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5];
+const STAGE_PAD = 120; /* workspace margin (screen px) around the canvas in manual zoom — bounds the scroll/pan area */
+
 const C = {
   bg0: "#0A0C10", bg1: "#10131A", bg2: "#171B24", bg3: "#1E2330",
   line: "#232936", lineStrong: "#2E3546", txt: "#E9ECF3", dim: "#939BAD", faint: "#5D667A",
@@ -277,6 +285,9 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   const [autokey, setAutokey] = useState(true);
   const [stageBg, setStageBg] = useState("#101218");
   const [stageScale, setStageScale] = useState(0.6);
+  const [zoomMode, setZoomMode] = useState("fit"); /* "fit" (auto) or a manual factor from ZOOM_STEPS */
+  const [tlH, setTlH] = useState(() => { try { const v = parseFloat(localStorage.getItem(TL_H_KEY)); return Number.isFinite(v) ? clampTlH(v) : TL_H_DEFAULT; } catch { return TL_H_DEFAULT; } });
+  const [tlDragging, setTlDragging] = useState(false);
   const [shapesOpen, setShapesOpen] = useState(false);
   const [mapsOpen, setMapsOpen] = useState(false);
   const [shapeQ, setShapeQ] = useState("");
@@ -296,14 +307,18 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   const timeRef = useRef(0);
   timeRef.current = time;
   const stageWrapRef = useRef(null);
+  const stageScrollRef = useRef(null);
   const rulerRef = useRef(null);
   const fileRef = useRef(null);
+  const zoomModeRef = useRef("fit");
+  zoomModeRef.current = zoomMode;
 
   const brand = brands.find((b) => b.id === brandId) || brands[0] || DEFAULT_BRAND;
   const ctx = useMemo(() => resolvePath(objects, path, compDur), [objects, path, compDur]);
   const ctxLayers = ctx.layers;
   const ctxDur = ctx.dur;
   const inClip = path.length > 0;
+  const zoomed = zoomMode !== "fit"; /* manual zoom: stage scrolls/pans inside a padded wrapper */
   const sel = ctxLayers.find((o) => o.id === selIds[0]) || null;
   const selMany = selIds.map((id) => ctxLayers.find((o) => o.id === id)).filter(Boolean);
 
@@ -360,15 +375,55 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   };
 
   /* ---------- fit + playback + keyboard ---------- */
+  const fitStage = useCallback(() => {
+    const el = stageWrapRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setStageScale(Math.min((r.width - 48) / stage.w, (r.height - 60) / stage.h));
+  }, [stage]);
   useEffect(() => {
     const el = stageWrapRef.current;
     if (!el) return;
-    const fit = () => { const r = el.getBoundingClientRect(); setStageScale(Math.min((r.width - 48) / stage.w, (r.height - 60) / stage.h)); };
+    const fit = () => { if (zoomModeRef.current === "fit") fitStage(); };
     fit();
     const ro = new ResizeObserver(fit);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [stage]);
+  }, [fitStage]);
+
+  /* ---------- stage zoom (Fit = auto-fit above; manual steps reuse the same stageScale transform) ---------- */
+  const setZoom = (z) => { setZoomMode(z); if (z === "fit") fitStage(); else setStageScale(z); };
+  const stepZoom = (dir) => {
+    const eff = zoomMode === "fit" ? stageScale : zoomMode;
+    const next = dir > 0 ? ZOOM_STEPS.find((s) => s > eff + 0.001) : [...ZOOM_STEPS].reverse().find((s) => s < eff - 0.001);
+    setZoom(next != null ? next : dir > 0 ? ZOOM_STEPS[ZOOM_STEPS.length - 1] : ZOOM_STEPS[0]);
+  };
+  const cycleZoom = () => setZoom(zoomMode === "fit" ? 1 : zoomMode === 1 ? 0.5 : zoomMode === 0.5 ? 0.25 : "fit");
+
+  /* keep the timeline height inside 160px…45% of the viewport when the window resizes */
+  useEffect(() => {
+    const onRs = () => setTlH((h) => clampTlH(h));
+    window.addEventListener("resize", onRs);
+    return () => window.removeEventListener("resize", onRs);
+  }, []);
+
+  /* ns-resize cursor across the whole window while the timeline is being dragged */
+  useEffect(() => {
+    if (!tlDragging) return;
+    const prev = document.body.style.cursor;
+    document.body.style.cursor = "ns-resize";
+    return () => { document.body.style.cursor = prev; };
+  }, [tlDragging]);
+
+  /* manual zoom keeps the canvas centered in the scrollport when it overflows
+     (runs on zoom change only — never fights the user's own panning) */
+  useEffect(() => {
+    if (zoomMode === "fit") return;
+    const el = stageScrollRef.current;
+    if (!el) return;
+    el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
+    el.scrollTop = (el.scrollHeight - el.clientHeight) / 2;
+  }, [zoomMode, stageScale]);
 
   useEffect(() => {
     if (!playing) return;
@@ -775,6 +830,27 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
+
+  /* ---------- timeline vertical resize (top-edge handle) ---------- */
+  const persistTlH = (h) => { try { localStorage.setItem(TL_H_KEY, String(Math.round(h))); } catch { /* storage unavailable — height just won't persist */ } };
+  const onTlHandleDown = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startY = e.clientY, startH = tlH;
+    setTlDragging(true);
+    const move = (ev) => setTlH(clampTlH(startH + (startY - ev.clientY)));
+    const up = (ev) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setTlDragging(false);
+      const h = clampTlH(startH + (startY - ev.clientY));
+      setTlH(h);
+      persistTlH(h);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  const resetTlH = () => { setTlH(TL_H_DEFAULT); persistTlH(TL_H_DEFAULT); };
   const onKfDown = (e, objId, prop, k0) => {
     if (e.button === 2) return;
     e.stopPropagation();
@@ -943,6 +1019,9 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
         .gd-name-input{background:transparent;border:1px solid transparent;border-radius:6px;color:${C.txt};padding:4px 8px;font-size:12.5px;font-weight:600;font-family:inherit;outline:none;transition:border-color 120ms ease-out,background 120ms ease-out}
         .gd-name-input:hover{border-color:${C.line}}
         .gd-name-input:focus{border-color:${C.amber};background:${C.bg2}}
+        .gd-tl-handle-line{opacity:0;transition:opacity 120ms ease-out}
+        .gd-tl-handle:hover .gd-tl-handle-line{opacity:1}
+        .gd-tl-handle.gd-dragging .gd-tl-handle-line{opacity:1}
       `}</style>
       <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onPickImage} />
 
@@ -1032,8 +1111,12 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
 
         {/* ---- stage ---- */}
         <div ref={stageWrapRef} onPointerDown={() => { setSelIds([]); setSelKf(null); setShapesOpen(false); setMapsOpen(false); }}
-          style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: C.bg0, minWidth: 0, position: "relative", overflow: "hidden" }}>
-          <div style={{ width: stage.w, height: stage.h, transform: `scale(${stageScale})`, background: stageBg, borderRadius: 6, boxShadow: inClip ? `0 0 0 2px ${C.amber}55, 0 8px 50px rgba(0,0,0,.55)` : "0 8px 50px rgba(0,0,0,.55)", position: "relative", overflow: overflowShow ? "visible" : "hidden", flexShrink: 0, backgroundImage: "radial-gradient(rgba(255,255,255,.045) 1px, transparent 1px)", backgroundSize: "36px 36px" }}>
+          style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: C.bg0, minWidth: 0, position: "relative", overflow: "hidden", pointerEvents: tlDragging ? "none" : undefined }}>
+          {/* manual zoom: inner scroller pans the padded canvas area (margin:auto centers until larger than the viewport);
+              floating overlays stay pinned because the scroller is a sibling. fit mode: display:contents = zero layout change */}
+          <div ref={stageScrollRef} style={zoomed ? { position: "absolute", inset: 0, overflow: "auto", display: "flex" } : { display: "contents" }}>
+          <div style={zoomed ? { width: stage.w * stageScale + STAGE_PAD * 2, height: stage.h * stageScale + STAGE_PAD * 2, margin: "auto", flexShrink: 0, position: "relative", overflow: "hidden" } : { display: "contents" }}>
+          <div style={{ width: stage.w, height: stage.h, transform: `scale(${stageScale})`, background: stageBg, borderRadius: 6, boxShadow: inClip ? `0 0 0 2px ${C.amber}55, 0 8px 50px rgba(0,0,0,.55)` : "0 8px 50px rgba(0,0,0,.55)", position: zoomed ? "absolute" : "relative", overflow: overflowShow ? "visible" : "hidden", flexShrink: 0, backgroundImage: "radial-gradient(rgba(255,255,255,.045) 1px, transparent 1px)", backgroundSize: "36px 36px", ...(zoomed ? { left: STAGE_PAD, top: STAGE_PAD, transformOrigin: "0 0" } : null) }}>
             {inClip && ctx.clip?.props.bg && <div style={{ position: "absolute", inset: 0, background: ctx.clip.props.bg, pointerEvents: "none" }} />}
             {ctxLayers.map((obj) => (
               <StageObject key={obj.id} obj={obj} time={time} stage={stage} selected={selIds.includes(obj.id)} onDown={onObjectDown} onEnterClip={enterClip} displayValue={displayValue} onResize={onResizeDown} onRotate={onRotateDown} interactive />
@@ -1049,6 +1132,8 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
               <PathEditor obj={sel} onPtDown={onPathPtDown} patchPath={patchPath} locked={sel.locked} />
             )}
           </div>
+          </div>
+          </div>
           {inClip && (
             <div style={{ position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)", background: C.amberSoft, border: `1px solid ${C.amber}`, color: C.amber, borderRadius: 999, padding: "5px 14px", fontSize: 11.5, fontWeight: 700 }}>
               Editing clip: {ctx.names[ctx.names.length - 1]} — Esc to go back
@@ -1056,6 +1141,20 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
           )}
           <div style={{ position: "absolute", bottom: 8, left: 14, color: C.faint, fontSize: 10.5, fontFamily: "'JetBrains Mono'", fontVariantNumeric: "tabular-nums" }}>
             <span onClick={() => setOverflowShow(!overflowShow)} style={{ cursor: "pointer", color: overflowShow ? C.amber : C.faint, marginRight: 8 }}>[{overflowShow ? "workspace: showing off-canvas" : "workspace: hidden"}]</span>{stage.w}×{stage.h} · space play · ⌘click multi · ⌘G group · ⌘D dup · right-click timeline = easing
+          </div>
+
+          {/* ---- zoom controls (bottom-right) ---- */}
+          <div onPointerDown={(e) => e.stopPropagation()}
+            style={{ position: "absolute", right: 14, bottom: 8, display: "flex", alignItems: "center", gap: 2, background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 6, padding: 3, zIndex: 80 }}>
+            <button className="gd-btn" onClick={() => stepZoom(-1)} title="Zoom out" style={zoomCtlBtn}>−</button>
+            <button className="gd-btn" onClick={cycleZoom} title="Zoom — click to cycle Fit → 100% → 50% → 25%"
+              style={{ ...zoomCtlBtn, minWidth: 52, fontFamily: "'JetBrains Mono'", fontVariantNumeric: "tabular-nums", fontSize: 11 }}>
+              {Math.round((zoomMode === "fit" ? stageScale : zoomMode) * 100)}%
+            </button>
+            <button className="gd-btn" onClick={() => stepZoom(1)} title="Zoom in" style={zoomCtlBtn}>+</button>
+            <div style={{ width: 1, height: 16, background: C.line, margin: "0 2px" }} />
+            <button className="gd-btn" onClick={() => setZoom("fit")} title="Fit stage to the available space"
+              style={{ ...zoomCtlBtn, padding: "0 10px", fontSize: 11.5, fontWeight: 700, color: zoomMode === "fit" ? C.amber : C.dim }}>Fit</button>
           </div>
         </div>
 
@@ -1433,7 +1532,13 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
       </div>
 
       {/* ============ TIMELINE ============ */}
-      <div style={{ height: 240, background: C.bg1, borderTop: `1px solid ${C.line}`, display: "flex", flexDirection: "column", flexShrink: 0 }}>
+      <div style={{ height: tlH, background: C.bg1, borderTop: `1px solid ${C.line}`, display: "flex", flexDirection: "column", flexShrink: 0, position: "relative" }}>
+        {/* top-edge resize handle: 6px hit zone, drag to resize (160px…45vh), double-click resets to 240px */}
+        <div className={tlDragging ? "gd-tl-handle gd-dragging" : "gd-tl-handle"} onPointerDown={onTlHandleDown} onDoubleClick={resetTlH}
+          title="Drag to resize the timeline · double-click to reset"
+          style={{ position: "absolute", top: -3, left: 0, right: 0, height: 6, cursor: "ns-resize", zIndex: 60 }}>
+          <div className="gd-tl-handle-line" style={{ position: "absolute", top: 2, left: 0, right: 0, height: 1, background: C.amber }} />
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 12px", height: 44, borderBottom: `1px solid ${C.line}` }}>
           <button className="gd-btn" onClick={() => { setPlaying(false); setTime(0); }} style={transportBtn}>⏮</button>
           <button onClick={() => setPlaying(!playing)} style={{ ...transportBtn, width: 34, height: 28, background: C.amber, color: "#1a1405", border: "none", fontWeight: 800 }}>{playing ? "❚❚" : "▶"}</button>
@@ -1559,7 +1664,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
                   </div>
                 );
               })}
-              <div style={{ position: "absolute", top: -26, bottom: 0, left: `${(time / ctxDur) * 100}%`, width: 1.5, background: C.amber, pointerEvents: "none", zIndex: 5 }}>
+              <div style={{ position: "absolute", top: -26, bottom: 0, left: `${(time / ctxDur) * 100}%`, width: 2, background: C.amber, boxShadow: "0 0 6px rgba(245,165,36,.45)", pointerEvents: "none", zIndex: 5 }}>
                 <div style={{ position: "absolute", top: 0, left: -5, width: 0, height: 0, borderLeft: "5.5px solid transparent", borderRight: "5.5px solid transparent", borderTop: `7px solid ${C.amber}` }} />
               </div>
             </div>
@@ -2390,5 +2495,6 @@ function EaseCurve({ ease }) {
 const inputStyle = { width: "100%", background: "#171B24", border: "1px solid #232936", borderRadius: 6, color: "#E9ECF3", padding: "6px 9px", fontSize: 12.5, outline: "none", fontFamily: "inherit", boxSizing: "border-box" };
 const chipStyle = { background: "#171B24", border: "1px solid #232936", borderRadius: 6, color: "#939BAD", padding: "4px 10px", fontSize: 11, fontWeight: 600 };
 const transportBtn = { width: 30, height: 28, background: "#171B24", border: "1px solid #232936", borderRadius: 6, color: "#E9ECF3", cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" };
+const zoomCtlBtn = { height: 24, minWidth: 26, background: "transparent", border: "none", borderRadius: 4, color: "#939BAD", cursor: "pointer", fontSize: 14, padding: "0 6px", display: "flex", alignItems: "center", justifyContent: "center" };
 const navBtn = { width: 13, height: 17, background: "none", border: "none", color: "#939BAD", cursor: "pointer", fontSize: 12, padding: 0, lineHeight: 1, fontWeight: 700 };
 const sectionLabel = { fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#5D667A" };
