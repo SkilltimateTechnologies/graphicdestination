@@ -1,0 +1,141 @@
+/* ============================================================
+   ENGINE · text/number/confetti/chart/map FX + camera (pure, deterministic)
+   Extracted VERBATIM from components/GraphicDestinationMotion.jsx
+   (zero-behavior-change refactor — pure engine code only).
+   ============================================================ */
+
+import { EASE, clamp01 } from "./easing.js";
+import { mulberry32 } from "./random.js";
+import { WORLD_H, WORLD_EXT, normHi, worldZoomWindow } from "./maps.js";
+
+export const SWATCHES = ["#FFB224", "#FF6B6B", "#5B8CFF", "#6EE7B7", "#C084FC", "#F9F9F9", "#0F1116"];
+
+export const FONT_IMPORT = "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Bebas+Neue&family=Montserrat:wght@400;600;700;800&family=Oswald:wght@400;600;700&family=Playfair+Display:wght@400;600;700;800&family=Archivo+Black&family=Pacifico&family=Caveat:wght@400;600;700&display=swap";
+
+/* ============================================================
+   TEXT FX — per-character, deterministic
+   ============================================================ */
+export const FX_STAG = 45, FX_CDUR = 480;
+const SCRAM = "ABCDEFGHIJKLMNPQRSTUVWXYZ#@$%&*";
+export function charFx(fx, i, n, time, ch) {
+  const spd = fx.speed || 1;
+  const STAG = FX_STAG / spd, CDUR = FX_CDUR / spd;
+  const local = time - fx.start;
+  const u = clamp01((local - i * STAG) / CDUR);
+  switch (fx.type) {
+    case "typewriter": return { o: local >= i * (STAG + 25 / spd) ? 1 : 0, dy: 0, s: 1, dx: 0, ch };
+    case "rise": return { o: clamp01(u * 1.6), dy: (1 - EASE.easeOutCubic(u)) * 34, s: 1, dx: 0, ch };
+    case "pop": return { o: clamp01(u * 2), dy: 0, s: EASE.easeOutBack(u), dx: 0, ch };
+    case "fall": return { o: clamp01(u * 2.5), dy: (EASE.easeOutBounce(u) - 1) * 70, s: 1, dx: 0, ch };
+    case "tracking": { const U = clamp01(local / (CDUR * 2)); return { o: clamp01(U * 1.4), dy: 0, s: 1, dx: (i - (n - 1) / 2) * (1 - EASE.easeOutCubic(U)) * 20, ch }; }
+    case "scramble": {
+      if (u >= 1 || ch === " ") return { o: 1, dy: 0, s: 1, dx: 0, ch };
+      if (local < i * STAG) return { o: 0.15, dy: 0, s: 1, dx: 0, ch: SCRAM[Math.floor(mulberry32(fx.seed + i * 101)() * SCRAM.length)] };
+      const cyc = Math.floor((local * spd) / 55);
+      return { o: 0.9, dy: 0, s: 1, dx: 0, ch: SCRAM[Math.floor(mulberry32(fx.seed + i * 101 + cyc * 7919)() * SCRAM.length)] };
+    }
+    case "wave": return { o: 1, dy: Math.sin((time * spd) / 260 + i * 0.55) * 7, s: 1, dx: 0, ch };
+    default: return { o: 1, dy: 0, s: 1, dx: 0, ch };
+  }
+}
+
+/* ============================================================
+   NUMBER ROLLERS (mechanical odometer cascade)
+   ============================================================ */
+export function numberValue(P, time) {
+  const u = clamp01((time - P.start) / P.dur);
+  return P.from + (P.to - P.from) * (EASE[P.numEase] || EASE.easeOutCubic)(u);
+}
+export function numberColumns(P, time) {
+  const dec = P.decimals;
+  const target = Math.max(Math.abs(P.from), Math.abs(P.to));
+  const intDigits = Math.max(1, String(Math.floor(target)).length);
+  const totalDigits = intDigits + dec;
+  const v = Math.max(0, numberValue(P, time));
+  const W = v * Math.pow(10, dec);
+  /* units wheel spins continuously; each higher wheel turns only
+     while the wheel below sweeps 9→0 (carry cascades) */
+  const digits = new Array(totalDigits);
+  let prev = 0;
+  for (let p = 0; p < totalDigits; p++) {
+    const d = p === 0 ? ((W % 10) + 10) % 10 : (Math.floor(W / Math.pow(10, p)) % 10) + Math.max(0, prev - 9);
+    digits[p] = Math.min(10, d);
+    prev = d;
+  }
+  const cols = [];
+  for (let j = 0; j < totalDigits; j++) {
+    const p = totalDigits - 1 - j;
+    if (dec > 0 && j === intDigits) cols.push({ ch: "." });
+    if (P.style === "slot") {
+      const cu = clamp01((time - P.start - j * 130) / Math.max(300, P.dur * 0.75));
+      const finalW = Math.max(0, P.to) * Math.pow(10, dec);
+      const fd = Math.floor(finalW / Math.pow(10, p)) % 10;
+      const spin = (1 - EASE.easeOutCubic(cu)) * (22 + j * 9);
+      cols.push({ d: (fd + spin) % 10, dim: false });
+    } else {
+      cols.push({ d: digits[p], dim: v < Math.pow(10, p - dec) && p - dec > 0 });
+    }
+  }
+  return cols;
+}
+
+/* ============================================================
+   CONFETTI (seeded)
+   ============================================================ */
+export const CONFETTI_LIFE = 2400;
+export function confettiParticles(obj) {
+  const rng = mulberry32(obj.props.seed);
+  const out = [];
+  for (let i = 0; i < obj.props.count; i++) {
+    const ang = -Math.PI / 2 + (rng() - 0.5) * Math.PI * 1.1;
+    const speed = (0.55 + rng() * 0.9) * obj.props.power;
+    out.push({ vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, size: 5 + rng() * 9, color: SWATCHES[Math.floor(rng() * 5)], spin: (rng() - 0.5) * 1400, round: rng() > 0.6, drift: (rng() - 0.5) * 60, wob: rng() * Math.PI * 2 });
+  }
+  return out;
+}
+
+export function parseChart(str) {
+  return (str || "").split(/\n+/).map((l) => {
+    const m = l.split(/[,:]/);
+    if (m.length < 2) return null;
+    const v = parseFloat(m[m.length - 1]);
+    if (isNaN(v)) return null;
+    return { l: m.slice(0, -1).join(":").trim(), v: Math.max(0, v) };
+  }).filter(Boolean).slice(0, 10);
+}
+
+/* deterministic per-country flicker for the "Electric" reveal style — same
+   sequence every playback, shared by both world and continent maps */
+export function highlightFlick(u, seed) {
+  if (u <= 0) return 0;
+  if (u >= 0.8) return 1;
+  const fi = Math.floor(u * 16) + seed;
+  return ((Math.imul(fi ^ 0x9e37, 2654435761) >>> 0) / 4294967296) > 0.45 ? 1 : 0;
+}
+
+/* Automatic documentary-style camera for the world map.
+   Each zoom-enabled country contributes a smooth 0->1 weight envelope over
+   its own active window (appear -> hide, or a default hold if no hide is
+   set). The camera targets a weighted blend of active countries, so
+   overlapping or back-to-back countries produce a natural pan/push instead
+   of a hard cut back to the overview between them. */
+export function worldCameraAt(P, time, fallbackCenter) {
+  const his = normHi(P.hi).filter((h) => h.zoom !== false && WORLD_EXT[h.cc]);
+  const trans = Math.max(80, P.zoomTransMs || 550);
+  let wsum = 0, cx = 0, cy = 0, wmax = 0;
+  his.forEach((h) => {
+    const { zin, zout } = worldZoomWindow(h, P);
+    let w = 0;
+    if (time < zin - trans || time > zout + trans) w = 0;
+    else if (time < zin) w = EASE.easeInOutSine(clamp01((time - (zin - trans)) / trans));
+    else if (time <= zout) w = 1;
+    else w = 1 - EASE.easeInOutSine(clamp01((time - zout) / trans));
+    if (w <= 0.002) return;
+    const e = WORLD_EXT[h.cc];
+    const ex = (e[0] + e[2]) / 2, ey = (e[1] + e[3]) / 2;
+    wsum += w; cx += ex * w; cy += ey * w; wmax = Math.max(wmax, w);
+  });
+  const fb = fallbackCenter || { cx: 100, cy: WORLD_H / 2 };
+  if (wsum < 0.002) return { focus: 0, cx: fb.cx, cy: fb.cy };
+  return { focus: clamp01(wmax), cx: cx / wsum, cy: cy / wsum };
+}

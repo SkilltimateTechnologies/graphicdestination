@@ -223,7 +223,7 @@ export default function Landing() {
           </nav>
           <div style={{ flex: 1 }} />
           <Link to="/login" className="lp-navlink" style={{ fontWeight: 600 }}>Sign in</Link>
-          <Link to="/login" className="lp-cta" style={{ borderRadius: 6, padding: "8px 16px", fontSize: 13 }}>Start creating</Link>
+          <Link to="/dashboard" className="lp-cta" style={{ borderRadius: 6, padding: "8px 16px", fontSize: 13 }}>Start creating</Link>
         </div>
       </header>
 
@@ -241,7 +241,7 @@ export default function Landing() {
           studio that runs in a tab. No install, no plugins, no render farm.
         </p>
         <div style={{ display: "flex", gap: 12, justifyContent: "center", marginBottom: 84 }}>
-          <Link to="/login" className="lp-cta" style={{ borderRadius: 6, padding: "13px 28px", fontSize: 15 }}>Start creating free</Link>
+          <Link to="/dashboard" className="lp-cta" style={{ borderRadius: 6, padding: "13px 28px", fontSize: 15 }}>Start creating free</Link>
           <a href="#workflow" className="lp-ghost" style={{ borderRadius: 6, padding: "12px 24px", fontSize: 15, display: "inline-flex", alignItems: "center", gap: 8 }}>
             <svg width="13" height="13" viewBox="0 0 12 12"><path d="M3 2.2v7.6c0 .7.8 1.1 1.4.7l6-3.8c.5-.3.5-1 0-1.4l-6-3.8c-.6-.3-1.4.1-1.4.7z" fill="currentColor" /></svg>
             Watch it work
@@ -310,7 +310,7 @@ export default function Landing() {
                 </li>
               ))}
             </ul>
-            <Link to="/login" className="lp-ghost" style={{ display: "block", textAlign: "center", borderRadius: 6, padding: "10px 0", fontSize: 13.5 }}>Start creating free</Link>
+            <Link to="/dashboard" className="lp-ghost" style={{ display: "block", textAlign: "center", borderRadius: 6, padding: "10px 0", fontSize: 13.5 }}>Start creating free</Link>
           </div>
           {/* Pro */}
           <div className="lp-card" style={{ background: T.raised, border: "1px solid rgba(245,165,36,0.4)", borderRadius: 8, padding: "28px 26px", position: "relative" }}>
@@ -327,7 +327,7 @@ export default function Landing() {
                 </li>
               ))}
             </ul>
-            <Link to="/login" className="lp-cta" style={{ display: "block", textAlign: "center", borderRadius: 6, padding: "11px 0", fontSize: 13.5 }}>Go Pro</Link>
+            <Link to="/dashboard" className="lp-cta" style={{ display: "block", textAlign: "center", borderRadius: 6, padding: "11px 0", fontSize: 13.5 }}>Go Pro</Link>
           </div>
         </div>
       </section>
@@ -336,7 +336,7 @@ export default function Landing() {
       <section style={{ maxWidth: 1120, margin: "0 auto", padding: "120px 24px 0", textAlign: "center" }}>
         <h2 style={{ fontSize: 40, fontWeight: 800, letterSpacing: "-0.02em", margin: "0 0 16px" }}>Your next animation is a tab away.</h2>
         <p style={{ color: T.dim, fontSize: 15, margin: "0 0 32px" }}>Open the studio, drag a shape, and watch Autokey do the rest.</p>
-        <Link to="/login" className="lp-cta" style={{ borderRadius: 6, padding: "13px 30px", fontSize: 15 }}>Start creating free</Link>
+        <Link to="/dashboard" className="lp-cta" style={{ borderRadius: 6, padding: "13px 30px", fontSize: 15 }}>Start creating free</Link>
       </section>
 
       {/* ============ FOOTER ============ */}

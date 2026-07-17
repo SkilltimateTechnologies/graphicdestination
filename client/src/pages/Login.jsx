@@ -41,7 +41,7 @@ export default function Login() {
   const [hint, setHint] = useState(null);
 
   useEffect(() => {
-    if (user) navigate("/editor", { replace: true });
+    if (user) navigate("/dashboard", { replace: true });
   }, [user, navigate]);
 
   useEffect(() => {
@@ -80,7 +80,7 @@ export default function Login() {
     try {
       if (signingUp) await signup(username.trim(), password);
       else await login(username.trim(), password);
-      navigate("/editor");
+      navigate("/dashboard");
     } catch (err) {
       if (err.status === 409) setErr("Username is taken.");
       else setErr(err.message || "Something went wrong. Please try again.");

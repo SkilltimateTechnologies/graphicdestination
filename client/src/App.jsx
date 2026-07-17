@@ -3,6 +3,8 @@ import { AuthProvider, useAuth } from "./AuthContext";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Editor from "./pages/Editor";
+import Dashboard from "./pages/Dashboard";
+import Templates from "./pages/Templates";
 
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
@@ -27,7 +29,31 @@ export default function App() {
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
           <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/templates"
+            element={
+              <ProtectedRoute>
+                <Templates />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/editor"
+            element={
+              <ProtectedRoute>
+                <Editor />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/editor/:id"
             element={
               <ProtectedRoute>
                 <Editor />
