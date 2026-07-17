@@ -8,9 +8,9 @@
  * uses (non-interactive: no selection, no pointer handlers), and time is
  * driven by requestAnimationFrame 0 → duration, looping by default.
  *
- * Minimal chrome per design/design.md: top-left "GD Motion" brand, a bottom
+ * Minimal chrome per design/design.md: top-left "Zwoosh" brand, a bottom
  * control bar (play/pause, JetBrains Mono timecode, loop indicator), and a
- * "Made with GraphicDestination Motion — create yours" link to /.
+ * "Made with Zwoosh — create yours" link to /.
  * Unknown/disabled tokens (404) get a designed error card.
  */
 
@@ -101,8 +101,8 @@ export default function PublicPlayer() {
   /* ----- document title reflects the shared project ----- */
   useEffect(() => {
     if (status === "ready" && proj?.name) {
-      document.title = `${proj.name} — GD Motion`;
-      return () => { document.title = "GraphicDestination Motion — Browser Motion Studio"; };
+      document.title = `${proj.name} — Zwoosh`;
+      return () => { document.title = "Zwoosh — Motion Studio in Your Browser"; };
     }
     return undefined;
   }, [status, proj]);
@@ -197,7 +197,7 @@ export default function PublicPlayer() {
       {/* top-left brand */}
       <div style={{ position: "absolute", top: 14, left: 16, display: "flex", alignItems: "center", gap: 9, zIndex: 10, pointerEvents: "none" }}>
         <BrandMark />
-        <span style={{ fontWeight: 700, fontSize: 13, letterSpacing: "-0.01em" }}>GD Motion</span>
+        <span style={{ fontWeight: 800, fontSize: 13, letterSpacing: "-0.01em" }}>Zwoosh</span>
       </div>
 
       {status === "loading" && (
@@ -236,7 +236,7 @@ export default function PublicPlayer() {
             )}
             <div>
               <Link to="/" className="gd-player-footer" style={{ color: T.faint, fontSize: 12, fontWeight: 600, textDecoration: "none" }}>
-                Made with GraphicDestination Motion — create yours →
+                Made with Zwoosh — create yours →
               </Link>
             </div>
           </div>
@@ -322,7 +322,7 @@ export default function PublicPlayer() {
               color: T.faint, fontSize: 11.5, fontWeight: 600, textDecoration: "none", whiteSpace: "nowrap",
             }}
           >
-            Made with GraphicDestination Motion — create yours →
+            Made with Zwoosh — create yours →
           </Link>
         </>
       )}

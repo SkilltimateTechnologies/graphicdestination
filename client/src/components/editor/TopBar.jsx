@@ -7,9 +7,12 @@ import { C, STAGE_PRESETS } from "./model";
 export default function TopBar({ name, setName, exitToDepth, inClip, ctx, stage, applyStagePreset, stageIsPreset, brand, setBrandOpen, setIoOpen, setImportErr, setExportOpen }) {
   return (
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 14px", height: 44, background: C.bg1, borderBottom: `1px solid ${C.line}`, flexShrink: 0 }}>
-        <div style={{ fontFamily: "'Space Grotesk'", fontWeight: 700, fontSize: 15, letterSpacing: 0.4, whiteSpace: "nowrap" }}>
-          Graphic<span style={{ color: C.amber }}>Destination</span>
-          <span style={{ color: C.faint, fontWeight: 500, marginLeft: 8, fontSize: 12 }}>MOTION · v0.5</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, whiteSpace: "nowrap" }}>
+          <span style={{ width: 20, height: 20, borderRadius: 6, background: C.amber, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <svg width="10" height="10" viewBox="0 0 12 12"><path d="M3 2.2v7.6c0 .7.8 1.1 1.4.7l6-3.8c.5-.3.5-1 0-1.4l-6-3.8c-.6-.3-1.4.1-1.4.7z" fill="#1A1405" /></svg>
+          </span>
+          <span style={{ fontWeight: 800, fontSize: 15, letterSpacing: "-0.02em" }}>Zwoosh</span>
+          <span style={{ color: C.faint, fontWeight: 500, fontSize: 12 }}>v0.5</span>
         </div>
         <input className="gd-name-input" value={name} onChange={(e) => setName(e.target.value)} title="Project name" aria-label="Project name" style={{ width: 150 }} />
         <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 8, overflow: "hidden" }}>

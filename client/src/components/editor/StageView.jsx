@@ -32,11 +32,8 @@ export default function StageView({ stageWrapRef, stageScrollRef, tlDragging, zo
           </div>
           </div>
           </div>
-          {inClip && (
-            <div style={{ position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)", background: C.amberSoft, border: `1px solid ${C.amber}`, color: C.amber, borderRadius: 999, padding: "5px 14px", fontSize: 11.5, fontWeight: 700 }}>
-              Editing clip: {ctx.names[ctx.names.length - 1]} — Esc to go back
-            </div>
-          )}
+          {/* clip-context indicator moved to the slim breadcrumb bar directly
+              above the timeline (editor/Timeline.jsx) — Esc still exits a level */}
           {/* ---- zoom controls (bottom-right) ---- */}
           <div onPointerDown={(e) => e.stopPropagation()}
             style={{ position: "absolute", right: 14, bottom: 8, display: "flex", alignItems: "center", gap: 2, background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 6, padding: 3, zIndex: 80 }}>

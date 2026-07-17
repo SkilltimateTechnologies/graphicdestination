@@ -109,8 +109,8 @@ export default function Login() {
         <span style={{ width: 30, height: 30, borderRadius: 8, background: T.accent, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
           <svg width="14" height="14" viewBox="0 0 12 12"><path d="M3 2.2v7.6c0 .7.8 1.1 1.4.7l6-3.8c.5-.3.5-1 0-1.4l-6-3.8c-.6-.3-1.4.1-1.4.7z" fill="#1A1405" /></svg>
         </span>
-        <span style={{ color: T.text, fontWeight: 700, fontSize: 17, letterSpacing: "-0.02em" }}>GraphicDestination</span>
-        <span style={{ color: T.accent, background: T.accentSoft, border: "1px solid rgba(245,165,36,0.28)", borderRadius: 5, padding: "2px 7px", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" }}>Motion</span>
+        <span style={{ color: T.text, fontWeight: 800, fontSize: 17, letterSpacing: "-0.02em" }}>Zwoosh</span>
+        <span style={{ color: T.accent, background: T.accentSoft, border: "1px solid rgba(245,165,36,0.28)", borderRadius: 5, padding: "2px 7px", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" }}>beta</span>
       </Link>
 
       <form onSubmit={submit} noValidate style={{ width: 400, maxWidth: "100%", background: T.panel, border: `1px solid ${T.border}`, borderRadius: 10, padding: "26px 26px 24px", boxShadow: "0 12px 40px rgba(0,0,0,0.5)", animation: "gdAuthIn 160ms ease-out" }}>

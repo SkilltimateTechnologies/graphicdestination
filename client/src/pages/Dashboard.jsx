@@ -57,7 +57,7 @@ function BrandMark() {
       <span style={{ width: 20, height: 20, borderRadius: 8, background: T.accent, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
         <svg width="10" height="10" viewBox="0 0 12 12"><path d="M3 2.2v7.6c0 .7.8 1.1 1.4.7l6-3.8c.5-.3.5-1 0-1.4l-6-3.8c-.6-.3-1.4.1-1.4.7z" fill="#1A1405" /></svg>
       </span>
-      <span style={{ color: T.text, fontWeight: 700, fontSize: 13, letterSpacing: "-0.01em" }}>GD Motion</span>
+      <span style={{ color: T.text, fontWeight: 800, fontSize: 13, letterSpacing: "-0.01em" }}>Zwoosh</span>
     </Link>
   );
 }

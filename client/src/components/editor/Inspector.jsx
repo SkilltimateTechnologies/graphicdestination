@@ -12,7 +12,10 @@ import { CONFETTI_STYLES, confettiStyleOf } from "../../engine/fx.js";
 export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detachAudio, fmt, selMany, groupSelection, align, duplicateSelected, removeSelected, inClip, ctx, sel, patchObject, toggleHide, toggleLock, stage, stageBg, setStageBg, applyStagePreset, stageIsPreset, enterClip, patchProps, ctxDur, stretchClipDur, stretchClips, setStretchClips, ungroupClip, morphQ, setMorphQ, time, timeRef, setShapeAt, editProp, removeKeyframe, setKeyframe, setSelKf, flowText, brand, SW, addPathTo, patchPath, animateAlongPath, kfNav, selectedKfData, setSegmentEase, applyPreset, fileRef }) {
   /* x/y/w/h/rotation moved on-canvas (direct manipulation) — Transform keeps only
      the props that aren't canvas-editable; the card collapses if that list is empty */
-  const tProps = !sel || sel.type === "confetti" ? [] : sel.type === "world" ? (sel.props.autoZoom !== false ? ["scale", "opacity"] : ["scale", "opacity", "focus"]) : sel.props.path ? ["prog", "scale", "opacity"] : ["scale", "opacity"];
+  /* Keyframeable transform props. x/y/rotation VALUES are edited on-canvas
+     (direct manipulation) — these rows exist so users can set/jump/ease their
+     KEYFRAMES; the on-canvas grips write the same base props. */
+  const tProps = !sel || sel.type === "confetti" ? [] : sel.type === "world" ? (sel.props.autoZoom !== false ? ["scale", "opacity"] : ["scale", "opacity", "focus"]) : sel.props.path ? ["prog", "x", "y", "rotation", "scale", "opacity"] : ["x", "y", "rotation", "scale", "opacity"];
   return (
         <div style={{ width: 280, background: C.bg1, borderLeft: `1px solid ${C.line}`, overflowY: "auto", flexShrink: 0, padding: "12px 12px 30px" }}>
           {audioLaneSel ? (

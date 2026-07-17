@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 /* ============================================================
-   LANDING — GraphicDestination Motion (design/design.md v1.0)
+   LANDING — Zwoosh (design/design.md v1.0)
    Dark, cinematic, Linear-grade. Pure-CSS animated editor mock.
    ============================================================ */
 
@@ -102,8 +102,8 @@ function Logo() {
       <span style={{ width: 22, height: 22, borderRadius: 6, background: T.accent, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
         <svg width="11" height="11" viewBox="0 0 12 12"><path d="M3 2.2v7.6c0 .7.8 1.1 1.4.7l6-3.8c.5-.3.5-1 0-1.4l-6-3.8c-.6-.3-1.4.1-1.4.7z" fill="#1A1405" /></svg>
       </span>
-      <span style={{ color: T.text, fontWeight: 700, fontSize: 15, letterSpacing: "-0.02em" }}>GraphicDestination</span>
-      <span style={{ color: T.accent, background: T.accentSoft, border: `1px solid rgba(245,165,36,0.28)`, borderRadius: 5, padding: "2px 7px", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" }}>Motion</span>
+      <span style={{ color: T.text, fontWeight: 800, fontSize: 15, letterSpacing: "-0.02em" }}>Zwoosh</span>
+      <span style={{ color: T.accent, background: T.accentSoft, border: `1px solid rgba(245,165,36,0.28)`, borderRadius: 5, padding: "2px 7px", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" }}>beta</span>
     </Link>
   );
 }
@@ -346,7 +346,7 @@ export default function Landing() {
         <a href="#features" className="lp-navlink" style={{ fontSize: 12.5 }}>Features</a>
         <a href="#workflow" className="lp-navlink" style={{ fontSize: 12.5 }}>Workflow</a>
         <a href="#pricing" className="lp-navlink" style={{ fontSize: 12.5 }}>Pricing</a>
-        <span style={{ color: T.faint, fontSize: 12.5 }}>© 2025 GraphicDestination Motion</span>
+        <span style={{ color: T.faint, fontSize: 12.5 }}>© 2026 Zwoosh</span>
       </footer>
     </div>
   );

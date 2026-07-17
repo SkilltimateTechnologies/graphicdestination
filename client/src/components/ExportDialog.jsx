@@ -127,7 +127,7 @@ export default function ExportDialog({ open, onClose, project, projectId, projec
   const stageH = project?.stage?.h || 720;
   const durationMs = Number(project?.stage?.dur) || 5000;
   const q = QUALITY_STOPS.find((s) => s.id === quality) || QUALITY_STOPS[2];
-  const filename = (ext) => `graphicdestination-${safeName(projectName)}.${ext}`;
+  const filename = (ext) => `zwoosh-${safeName(projectName)}.${ext}`;
 
   const startExport = async () => {
     const controller = new AbortController();

@@ -1,5 +1,5 @@
 /**
- * ShareDialog.jsx — public share-link modal for Graphic Destination Motion.
+ * ShareDialog.jsx — public share-link modal for Zwoosh.
  *
  * Per design/design.md modal pattern (mirrors ExportDialog): 480px raised
  * card on a dimmed overlay, radius 10, 160ms ease-out enter, Esc/overlay to

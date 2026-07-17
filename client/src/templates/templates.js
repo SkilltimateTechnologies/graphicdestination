@@ -20,7 +20,7 @@ const STAGE_BG = "#101218"; // engine default stage background
 /* engine constants (client/src/components/GraphicDestinationMotion.jsx) */
 const SWATCHES = ["#FFB224", "#FF6B6B", "#5B8CFF", "#6EE7B7", "#C084FC", "#F9F9F9", "#0F1116"];
 const [AMBER, CORAL, BLUE, MINT, VIOLET, WHITE, INK] = SWATCHES;
-const BRAND = { id: "b1", name: "Graphic Destination", colors: [AMBER, CORAL, BLUE, MINT, WHITE], headFont: "Space Grotesk", bodyFont: "Inter" };
+const BRAND = { id: "b1", name: "Zwoosh", colors: [AMBER, CORAL, BLUE, MINT, WHITE], headFont: "Space Grotesk", bodyFont: "Inter" };
 const BOX_DEFAULTS = { bg: "", pad: 16, borderC: AMBER, borderW: 0, radius: 14, boxFx: "none" };
 
 let _id = 0;

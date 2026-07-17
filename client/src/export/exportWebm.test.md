@@ -51,7 +51,7 @@ dialog disables the WebM card there.
 4. During export: progress bar advances with %, **Cancel** aborts cleanly
    (back to options, no download, console shows `Export cancelled` rejection
    handled by the dialog).
-5. On completion the file `graphicdestination-<name>.webm` downloads
+5. On completion the file `zwoosh-<name>.webm` downloads
    automatically and the success state shows filename + size; any warnings are
    listed below it.
 6. Verify the video in Chrome/VLC:

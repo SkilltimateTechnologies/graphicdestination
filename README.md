@@ -1,6 +1,6 @@
-# GraphicDestination Motion
+# Zwoosh (graphicdestination.com)
 
-**After Effects-grade motion graphics, in your browser.** A full-stack SaaS
+**After Effects-grade motion graphics, in your browser.** Zwoosh is a full-stack
 motion-design studio: keyframed layers, shape morphing, text FX, charts, maps —
 with instant in-browser WebM export and cloud-saved projects.
 

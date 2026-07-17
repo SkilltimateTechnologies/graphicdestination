@@ -64,6 +64,40 @@ export const TRANSITIONS = [
 
 export function layerOut(o, dur) { return o.props.outT == null ? dur : o.props.outT; }
 
+/* an object's visible span on the timeline [start, end] (ms, clamped to the
+   context duration) — the exact math the timeline lanes use for their bars:
+   clips run [start, start + dur/speed), everything else runs [inT, outT). */
+export function layerSpan(o, ctxDur) {
+  if (o.type === "clip") {
+    const start = o.props.start || 0;
+    return [start, Math.min(ctxDur, start + o.props.dur / (o.props.speed || 1))];
+  }
+  return [o.props.inT || 0, Math.min(ctxDur, layerOut(o, ctxDur))];
+}
+
+/* ---------- timeline row packing (visual only — schema untouched) ----------
+   Greedy first-fit interval packing: sort spans by start (then end, then
+   front-most first for identical spans so all-overlapping stacks keep the
+   classic front-on-top order); each span joins the FIRST row whose latest end
+   <= its start — touching at a boundary (a.end === b.start) is NOT an overlap,
+   so it can share — otherwise it opens a new row below.
+   `spans`: [{ id, start, end }] → array of rows, each an array of ids in
+   placement order. Rows come out ordered by ascending start. */
+export function packRows(spans) {
+  const sorted = spans.map((s, i) => ({ ...s, i })).sort((a, b) => (a.start - b.start) || (a.end - b.end) || (b.i - a.i));
+  const rows = []; /* [{ end, ids }] — end = latest end among the row's spans */
+  for (const s of sorted) {
+    let row = null;
+    for (const r of rows) {
+      if (s.start >= r.end) { row = r; break; }
+    }
+    if (!row) { row = { end: -Infinity, ids: [] }; rows.push(row); }
+    row.ids.push(s.id);
+    if (s.end > row.end) row.end = s.end;
+  }
+  return rows.map((r) => r.ids);
+}
+
 /* Stage size presets — the default (16:9 1280×720) matches the STAGE_W/STAGE_H
    constants and every built-in template. Changing the preset only resizes the
    stage; existing layers keep their coordinates (off-canvas layers still render

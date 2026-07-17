@@ -42,6 +42,7 @@ const STAGE_W = 1280;
 const STAGE_H = 720;
 const DUR = 5000;
 const FPS = 60;
+const DRAG_MIN_VISIBLE = 40; /* stage drag: px of an object that must stay inside the stage bounds on every axis (live clamp) */
 
 /* timeline vertical resize + stage zoom */
 const TL_H_KEY = "gd:timelineH";
@@ -104,7 +105,7 @@ function cloneLayer(o) {
 
 function demoProject() {
   /* Scene 1 — Intro clip: fades out, replaced by Scene 2 sliding up */
-  const title = makeObject("text", { name: "Title", props: { text: "GRAPHIC DESTINATION", fontSize: 72, x: 640, y: 300, fill: "#F9F9F9", textFx: { type: "rise", start: 250, seed: 3 } } });
+  const title = makeObject("text", { name: "Title", props: { text: "ZWOOSH", fontSize: 72, x: 640, y: 300, fill: "#F9F9F9", textFx: { type: "rise", start: 250, seed: 3 } } });
   const chip = makeObject("text", { name: "Chip", props: { text: "MOTION · MADE LIGHT", fontSize: 21, x: 640, y: 392, fill: "#FFB224", fontWeight: 600, bg: "#20263480", borderC: "#FFB224", borderW: 1.5, radius: 999, pad: 18, boxFx: "glow", inT: 550 } });
   chip.tracks = { opacity: [{ t: 550, v: 0, ease: "easeOutQuad" }, { t: 1000, v: 1, ease: "linear" }] };
   const morph = makeObject("shape", { shape: "ellipse", name: "Morpher", props: { x: 240, y: 150, w: 96, h: 96, fill: "#FFB224", path: { pts: [[210, 175], [640, 78], [1070, 175]], curved: true, show: true } } });
@@ -213,7 +214,7 @@ function scaleLayerTimes(o, f) {
 }
 
 export { STAGE_PRESETS } from "./editor/model";
-const DEFAULT_BRAND = { id: "b1", name: "Graphic Destination", colors: ["#FFB224", "#FF6B6B", "#5B8CFF", "#6EE7B7", "#F9F9F9"], headFont: "Space Grotesk", bodyFont: "Inter" };
+const DEFAULT_BRAND = { id: "b1", name: "Zwoosh", colors: ["#FFB224", "#FF6B6B", "#5B8CFF", "#6EE7B7", "#F9F9F9"], headFont: "Space Grotesk", bodyFont: "Inter" };
 
 /* map /api/assets failures (and image-prep rejections) to panel-friendly copy */
 function assetErrorText(err) {
@@ -844,7 +845,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [objects, stage, compDur, stageBg, brands, brandId, audioTrack]);
 
-  /* ---------- stage drag (group + path aware, lock aware) ---------- */
+  /* ---------- stage drag (group + path aware, lock aware, canvas-bounds clamped) ---------- */
   const dragRef = useRef(null);
   const onObjectDown = (e, obj) => {
     e.stopPropagation();
@@ -855,7 +856,17 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     else { ids = [obj.id]; setSelIds(ids); }
     const t = timeRef.current;
     const members = ids.map((id) => ctxLayers.find((o) => o.id === id)).filter((o) => o && !o.locked)
-      .map((o) => ({ id: o.id, hasPath: !!o.props.path, pts: o.props.path ? o.props.path.pts.map((p) => p.slice()) : null, ox: valueAt(o, "x", t), oy: valueAt(o, "y", t) }));
+      .map((o) => {
+        /* bounds clamp setup: a drag may never push an object fully off-stage —
+           at least DRAG_MIN_VISIBLE px of it stays inside the stage on every
+           axis (clips included). Half-extents come from the live size × scale
+           at drag start (the same box align() uses); path objects clamp by
+           their on-path position since the path carries them. */
+        const { w, h } = objSize(o, t);
+        const s = Math.max(0.05, valueAt(o, "scale", t) ?? 1);
+        const [px, py] = o.props.path ? posOf(o, t) : [0, 0];
+        return { id: o.id, hasPath: !!o.props.path, pts: o.props.path ? o.props.path.pts.map((p) => p.slice()) : null, ox: valueAt(o, "x", t), oy: valueAt(o, "y", t), px, py, hw: (w * s) / 2, hh: (h * s) / 2 };
+      });
     if (!members.length) return;
     dragRef.current = { members, sx: e.clientX, sy: e.clientY, moved: false, live: {} };
     const move = (ev) => {
@@ -864,12 +875,19 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
       const dx = (ev.clientX - d.sx) / stageScale, dy = (ev.clientY - d.sy) / stageScale;
       if (Math.abs(dx) + Math.abs(dy) > 2) d.moved = true;
       d.members.forEach((m) => {
+        /* clamp AFTER rounding so the visible overlap stays >= DRAG_MIN_VISIBLE:
+           center ∈ [MIN − half, stage − MIN + half] ⇔ [center−half, center+half]
+           overlaps [0, stage] by at least MIN px on that axis — applied live,
+           on every pointer move (and the clamped values land in keyframes). */
+        const clX = (v) => Math.max(DRAG_MIN_VISIBLE - m.hw, Math.min(stage.w - DRAG_MIN_VISIBLE + m.hw, Math.round(v)));
+        const clY = (v) => Math.max(DRAG_MIN_VISIBLE - m.hh, Math.min(stage.h - DRAG_MIN_VISIBLE + m.hh, Math.round(v)));
         if (m.hasPath) {
-          const npts = m.pts.map(([px, py]) => [Math.round(px + dx), Math.round(py + dy)]);
+          const dxc = clX(m.px + dx) - m.px, dyc = clY(m.py + dy) - m.py;
+          const npts = m.pts.map(([px, py]) => [Math.round(px + dxc), Math.round(py + dyc)]);
           d.live[m.id] = { pathPts: npts };
           patchPath(m.id, (p) => ({ ...p, pts: npts }));
         } else {
-          const nx = Math.round(m.ox + dx), ny = Math.round(m.oy + dy);
+          const nx = clX(m.ox + dx), ny = clY(m.oy + dy);
           d.live[m.id] = { x: nx, y: ny };
           patchProps(m.id, { x: nx, y: ny });
         }
@@ -1243,7 +1261,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
       <input ref={audioFileRef} type="file" accept={AUDIO_ACCEPT_ATTR} style={{ display: "none" }} onChange={onPickAudioAsset} />
 
       {/* ============ TOP BAR ============ */}
-      <TopBar name={name} setName={setName} exitToDepth={exitToDepth} inClip={inClip} ctx={ctx}
+      <TopBar name={name} setName={setName}
         stage={stage} applyStagePreset={applyStagePreset} stageIsPreset={stageIsPreset} brand={brand}
         setBrandOpen={setBrandOpen} setIoOpen={setIoOpen} setImportErr={setImportErr} setExportOpen={setExportOpen} />
 
@@ -1302,7 +1320,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
         setPlaying={setPlaying} setTime={setTime} playing={playing} time={time} fmt={fmt} ctxDur={ctxDur} setCtxDurMs={setCtxDurMs}
         stretchClips={stretchClips} setStretchClips={setStretchClips} loop={loop} setLoop={setLoop} autokey={autokey} setAutokey={setAutokey}
         selMany={selMany} groupSelection={groupSelection} ctxLayers={ctxLayers} selIds={selIds} setSelIds={setSelIds} setSelKf={setSelKf}
-        enterClip={enterClip} onLayerContext={onLayerContext} onLaneContext={onLaneContext} toggleHide={toggleHide} toggleLock={toggleLock}
+        enterClip={enterClip} exitToDepth={exitToDepth} crumbs={ctx.names} onLayerContext={onLayerContext} onLaneContext={onLaneContext} toggleHide={toggleHide} toggleLock={toggleLock}
         reorder={reorder} duplicateSelected={duplicateSelected} removeSelected={removeSelected}
         inClip={inClip} onAudioLaneDown={onAudioLaneDown} audioTrack={audioTrack} audioLaneSel={audioLaneSel} audioBarMs={audioBarMs} onAudioBarDown={onAudioBarDown}
         rulerRef={rulerRef} onRulerDown={onRulerDown} onBarDown={onBarDown} onKfDown={onKfDown} selKf={selKf} onWorldKfDown={onWorldKfDown} />
