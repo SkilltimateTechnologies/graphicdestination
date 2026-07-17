@@ -9,21 +9,22 @@ fs.mkdirSync(path.dirname(LOCAL_DB_PATH), { recursive: true });
 
 /*
  * Turso connection strategy:
- * - TURSO_DATABASE_URL + TURSO_AUTH_TOKEN set  -> embedded replica: local file
- *   mirrors a real Turso cloud database (reads are local/fast, writes sync to
- *   the cloud primary). This is the production configuration.
- * - Neither set (local dev / this sandbox)     -> plain local SQLite file via
- *   the same @libsql/client API. Zero code changes needed to go from this to
- *   a real Turso deployment -- just set the two env vars.
+ * - TURSO_DATABASE_URL + TURSO_AUTH_TOKEN set  -> REMOTE-ONLY client: plain
+ *   HTTPS queries straight to the Turso primary. No embedded replica, no local
+ *   file, no native sync binary. This is deliberate: it keeps the deployment
+ *   artifact dependency-light (no libsql native sync package — some npm
+ *   mirrors don't carry it), avoids the deprecated embedded-sync protocol
+ *   entirely, and makes the container fully stateless (ephemeral-filesystem
+ *   platforms like Railway/preview hosts are safe).
+ * - Neither set (local dev)                            -> plain local SQLite
+ *   file via the same @libsql/client API.
  */
 const hasTurso = !!(process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKEN);
 
 export const db = hasTurso
   ? createClient({
-      url: `file:${LOCAL_DB_PATH}`,
-      syncUrl: process.env.TURSO_DATABASE_URL,
+      url: process.env.TURSO_DATABASE_URL,
       authToken: process.env.TURSO_AUTH_TOKEN,
-      syncInterval: 60,
     })
   : createClient({ url: `file:${LOCAL_DB_PATH}` });
 

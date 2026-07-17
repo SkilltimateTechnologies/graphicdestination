@@ -33,7 +33,7 @@ app.use(cookieParser());
 app.use(cors({ origin: process.env.CLIENT_ORIGIN || true, credentials: true }));
 
 await initSchema();
-console.log(`Database: ${usingTurso ? "Turso cloud (embedded replica)" : "local SQLite file (no Turso env vars set)"}`);
+console.log(`Database: ${usingTurso ? "Turso cloud (remote HTTPS)" : "local SQLite file (no Turso env vars set)"}`);
 
 /* ---------------- health (no auth) ---------------- */
 
