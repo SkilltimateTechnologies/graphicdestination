@@ -6,7 +6,7 @@ import { C, STAGE_PAD, zoomCtlBtn } from "./model";
 import { StageObject } from "../StageObject";
 import { PathEditor } from "./PathEditor";
 
-export default function StageView({ stageWrapRef, stageScrollRef, tlDragging, zoomed, stage, stageScale, stageBg, inClip, ctx, ctxLayers, time, selIds, sel, overflowShow, zoomMode, onObjectDown, enterClip, displayValue, onResizeDown, onRotateDown, onPathPtDown, patchPath, setOverflowShow, setSelIds, setSelKf, setAudioSel, setShapesOpen, setMapsOpen, setImagesOpen, setAudioOpen, stepZoom, cycleZoom, setZoom }) {
+export default function StageView({ stageWrapRef, stageScrollRef, tlDragging, zoomed, stage, stageScale, stageBg, inClip, ctx, ctxLayers, time, selIds, sel, overflowShow, zoomMode, playing, rotLive, onObjectDown, enterClip, displayValue, onResizeDown, onRotateDown, onPathPtDown, patchPath, setOverflowShow, setSelIds, setSelKf, setAudioSel, setShapesOpen, setMapsOpen, setImagesOpen, setAudioOpen, stepZoom, cycleZoom, setZoom }) {
   return (
         <div ref={stageWrapRef} onPointerDown={() => { setSelIds([]); setSelKf(null); setAudioSel(false); setShapesOpen(false); setMapsOpen(false); setImagesOpen(false); setAudioOpen(false); }}
           style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: C.bg0, minWidth: 0, position: "relative", overflow: "hidden", pointerEvents: tlDragging ? "none" : undefined }}>
@@ -17,7 +17,7 @@ export default function StageView({ stageWrapRef, stageScrollRef, tlDragging, zo
           <div style={{ width: stage.w, height: stage.h, transform: `scale(${stageScale})`, background: stageBg, borderRadius: 6, boxShadow: inClip ? `0 0 0 2px ${C.amber}55, 0 8px 50px rgba(0,0,0,.55)` : "0 8px 50px rgba(0,0,0,.55)", position: zoomed ? "absolute" : "relative", overflow: overflowShow ? "visible" : "hidden", flexShrink: 0, backgroundImage: "radial-gradient(rgba(255,255,255,.045) 1px, transparent 1px)", backgroundSize: "36px 36px", ...(zoomed ? { left: STAGE_PAD, top: STAGE_PAD, transformOrigin: "0 0" } : null) }}>
             {inClip && ctx.clip?.props.bg && <div style={{ position: "absolute", inset: 0, background: ctx.clip.props.bg, pointerEvents: "none" }} />}
             {ctxLayers.map((obj) => (
-              <StageObject key={obj.id} obj={obj} time={time} stage={stage} selected={selIds.includes(obj.id)} onDown={onObjectDown} onEnterClip={enterClip} displayValue={displayValue} onResize={onResizeDown} onRotate={onRotateDown} interactive />
+              <StageObject key={obj.id} obj={obj} time={time} stage={stage} selected={selIds.includes(obj.id)} onDown={onObjectDown} onEnterClip={enterClip} displayValue={displayValue} onResize={onResizeDown} onRotate={onRotateDown} stageScale={stageScale} playing={playing} selCount={selIds.length} rotLive={rotLive} interactive />
             ))}
             {overflowShow && <>
               <div style={{ position: "absolute", left: -4000, top: -4000, width: 9000, height: 4000, background: "rgba(8,10,14,.58)", zIndex: 70, pointerEvents: "none" }} />

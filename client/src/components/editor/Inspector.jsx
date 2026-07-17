@@ -9,6 +9,9 @@ import { SHAPE_IDS, SHAPE_DEFS, ptsToStr } from "../../engine/shapes.js";
 import { MAPS, CONTINENT_NAMES, CONTINENTS, normHi } from "../../engine/maps.js";
 
 export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detachAudio, fmt, selMany, groupSelection, align, duplicateSelected, removeSelected, inClip, ctx, sel, patchObject, toggleHide, toggleLock, stage, stageBg, setStageBg, applyStagePreset, stageIsPreset, enterClip, patchProps, ctxDur, stretchClipDur, stretchClips, setStretchClips, ungroupClip, morphQ, setMorphQ, time, timeRef, setShapeAt, editProp, removeKeyframe, setKeyframe, setSelKf, flowText, brand, SW, addPathTo, patchPath, animateAlongPath, kfNav, selectedKfData, setSegmentEase, applyPreset, fileRef }) {
+  /* x/y/w/h/rotation moved on-canvas (direct manipulation) — Transform keeps only
+     the props that aren't canvas-editable; the card collapses if that list is empty */
+  const tProps = !sel || sel.type === "confetti" ? [] : sel.type === "world" ? (sel.props.autoZoom !== false ? ["scale", "opacity"] : ["scale", "opacity", "focus"]) : sel.props.path ? ["prog", "scale", "opacity"] : ["scale", "opacity"];
   return (
         <div style={{ width: 280, background: C.bg1, borderLeft: `1px solid ${C.line}`, overflowY: "auto", flexShrink: 0, padding: "12px 12px 30px" }}>
           {audioLaneSel ? (
@@ -132,8 +135,6 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                     </>
                   )}
                   <SliderRow label="Corner R" min={0} max={49} value={sel.props.cornerR} onChange={(v) => patchProps(sel.id, { cornerR: v })} />
-                  <SliderRow label="Width" min={20} max={900} value={sel.props.w} onChange={(v) => patchProps(sel.id, { w: v })} />
-                  <SliderRow label="Height" min={20} max={900} value={sel.props.h} onChange={(v) => patchProps(sel.id, { h: v })} />
                 </Card>
               )}
 
@@ -195,8 +196,6 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
 
               {sel.type === "image" && (
                 <Card title="Image">
-                  <SliderRow label="Width" min={20} max={1200} value={sel.props.w} onChange={(v) => patchProps(sel.id, { w: v })} />
-                  <SliderRow label="Height" min={20} max={1200} value={sel.props.h} onChange={(v) => patchProps(sel.id, { h: v })} />
                   <button className="gd-btn" onClick={() => fileRef.current?.click()} style={{ ...chipStyle, cursor: "pointer" }}>Replace image…</button>
                 </Card>
               )}
@@ -209,7 +208,6 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                   <SliderRow label="Fill op." min={0} max={1} step={0.01} value={sel.props.fillOp} onChange={(v) => patchProps(sel.id, { fillOp: v })} />
                   <Row label="Border"><input type="color" value={sel.props.stroke} onChange={(e) => patchProps(sel.id, { stroke: e.target.value })} /></Row>
                   <SliderRow label="Border W" min={0.5} max={5} step={0.1} value={sel.props.strokeW} onChange={(v) => patchProps(sel.id, { strokeW: v })} />
-                  <SliderRow label="Size" min={80} max={1000} value={sel.props.w} onChange={(v) => patchProps(sel.id, { w: v })} />
                   {(sel.props.mapStyle === "draw" || sel.props.mapStyle === "reveal") && (
                     <>
                       <SliderRow label="Start" min={0} max={Math.max(100, ctxDur - 300)} step={10} value={sel.props.start} onChange={(v) => patchProps(sel.id, { start: v })} />
@@ -255,7 +253,6 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                       onNav={(dir) => kfNav(sel, "focus", dir)} />
                   )}
                   <SliderRow label="Zoom amount" min={1.4} max={5} step={0.1} value={sel.props.zoomK || 2.6} onChange={(v) => patchProps(sel.id, { zoomK: v })} />
-                  <SliderRow label="Size" min={200} max={1400} value={sel.props.w} onChange={(v) => patchProps(sel.id, { w: v })} />
                   <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.5, marginTop: 4 }}>Keyframe <b style={{ color: C.txt }}>Zoom focus</b> in Transform — the lit countries enlarge to the map's center while the rest of the world blurs behind them.</div>
                 </Card>
               )}
@@ -268,7 +265,6 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                   <SliderRow label="Fill op." min={0} max={1} step={0.01} value={sel.props.fillOp} onChange={(v) => patchProps(sel.id, { fillOp: v })} />
                   <Row label="Border"><input type="color" value={sel.props.stroke} onChange={(e) => patchProps(sel.id, { stroke: e.target.value })} /></Row>
                   <SliderRow label="Border W" min={0.3} max={3} step={0.1} value={sel.props.strokeW} onChange={(v) => patchProps(sel.id, { strokeW: v })} />
-                  <SliderRow label="Size" min={200} max={1400} value={sel.props.w} onChange={(v) => patchProps(sel.id, { w: v })} />
                   {(sel.props.mapStyle === "draw" || sel.props.mapStyle === "reveal") && (
                     <>
                       <SliderRow label="Start" min={0} max={Math.max(100, ctxDur - 300)} step={10} value={sel.props.start} onChange={(v) => patchProps(sel.id, { start: v })} />
@@ -313,8 +309,6 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                   <ChipRow label="Values" options={[[true, "Show"], [false, "Hide"]]} value={sel.props.showVals} onChange={(v) => patchProps(sel.id, { showVals: v })} />
                   <SliderRow label="Start" min={0} max={Math.max(100, ctxDur - 300)} step={10} value={sel.props.start} onChange={(v) => patchProps(sel.id, { start: v })} />
                   <SliderRow label="Duration" min={400} max={5000} step={10} value={sel.props.dur} onChange={(v) => patchProps(sel.id, { dur: v })} />
-                  <SliderRow label="Width" min={200} max={1100} value={sel.props.w} onChange={(v) => patchProps(sel.id, { w: v })} />
-                  <SliderRow label="Height" min={140} max={800} value={sel.props.h} onChange={(v) => patchProps(sel.id, { h: v })} />
                   <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.5 }}>Series colors follow the brand palette. Bars stagger in, lines draw on, donuts sweep — all easing-finished.</div>
                 </Card>
               )}
@@ -366,19 +360,9 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                 </Card>
               )}
 
-              {sel.type !== "confetti" && (
+              {tProps.length > 0 && (
                 <Card title="Transform" hint="◆ keyframe · ‹ › jump">
-                  {(sel.type === "world" ? (sel.props.autoZoom !== false ? ["x", "y", "scale", "rotation", "opacity"] : ["x", "y", "scale", "rotation", "opacity", "focus"]) : sel.props.path ? ["prog", "scale", "rotation", "opacity"] : ["x", "y", "scale", "rotation", "opacity"]).map((p) => (
-                    <PropRow key={p} obj={sel} prop={p} time={time} ctxDur={ctxDur} stage={stage}
-                      onEdit={(v) => editProp(sel.id, p, v)}
-                      onKfToggle={(has, v) => { if (has) removeKeyframe(sel.id, p, Math.round(time / 10) * 10); else { const T = setKeyframe(sel.id, p, time, v); setSelKf({ objId: sel.id, prop: p, t: T }); } }}
-                      onNav={(dir) => kfNav(sel, p, dir)} />
-                  ))}
-                </Card>
-              )}
-              {sel.type === "confetti" && (
-                <Card title="Position">
-                  {["x", "y"].map((p) => (
+                  {tProps.map((p) => (
                     <PropRow key={p} obj={sel} prop={p} time={time} ctxDur={ctxDur} stage={stage}
                       onEdit={(v) => editProp(sel.id, p, v)}
                       onKfToggle={(has, v) => { if (has) removeKeyframe(sel.id, p, Math.round(time / 10) * 10); else { const T = setKeyframe(sel.id, p, time, v); setSelKf({ objId: sel.id, prop: p, t: T }); } }}

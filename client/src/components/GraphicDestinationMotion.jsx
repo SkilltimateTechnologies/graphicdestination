@@ -240,6 +240,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   const [path, setPath] = useState([]);
   const [selIds, setSelIds] = useState([]);
   const [selKf, setSelKf] = useState(null);
+  const [rotLive, setRotLive] = useState(null); /* {id, deg} while a rotation-grip drag is active — drives the on-canvas angle readout */
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [loop, setLoop] = useState(true);
@@ -868,42 +869,93 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     if (d && d.moved && d.live[obj.id] && d.live[obj.id][prop] !== undefined) return d.live[obj.id][prop];
     return valueAt(obj, prop, time);
   };
-  /* corner-handle resize — goes through editProp, so it records scale keyframes
-     exactly like moving records position keyframes (Animate on = keys; off = offset/static) */
-  const onResizeDown = (e, obj) => {
+  /* ---------- on-canvas direct manipulation: 8-way resize grips + rotation grip ----------
+     Both write BASE PROPS through patchProps — the same live-update path the move-drag
+     uses — so keyframe tracks stay untouched (exactly like the old Inspector inputs).
+     Resize target by type: w/h for box types (shape/image/chart), `w` for the map
+     types (their height is derived), fontSize for text/number. */
+  const onResizeDown = (e, obj, hid, cursor) => {
     e.stopPropagation();
     if (obj.locked) return;
-    setSelIds([obj.id]);
     const t = timeRef.current;
-    const s0 = valueAt(obj, "scale", t);
-    const { w, h } = objSize(obj, t);
-    const base = Math.max(60, Math.hypot(w * s0, h * s0) / 2);
+    const s0 = Math.max(0.05, valueAt(obj, "scale", t)); /* object scale — w/h render under it */
+    let sz0 = objSize(obj, t); /* current size in prop units */
+    /* ring counters render a fixed circle box around the digits (see StageObject) —
+       use its real size, not the text-flow estimate, so the delta ratio tracks the pointer */
+    if (obj.type === "number" && (obj.props.ring || "none") !== "none") {
+      const rs = (obj.props.fontSize || 96) * 1.15 * 2 + (obj.props.ringW || 8) * 2 + 10;
+      sz0 = { w: rs, h: rs };
+    }
+    const fs0 = obj.props.fontSize || 0;
+    const w0 = obj.props.w || 0;
+    const rot = valueAt(obj, "rotation", t) || 0;
+    const th = (rot * Math.PI) / 180, cos = Math.cos(th), sin = Math.sin(th);
+    const hx = hid.includes("e") ? 1 : hid.includes("w") ? -1 : 0; /* grip's horizontal side */
+    const hy = hid.includes("s") ? 1 : hid.includes("n") ? -1 : 0; /* grip's vertical side */
+    const textual = obj.type === "text" || obj.type === "number"; /* fontSize-driven */
+    const singleW = obj.type === "map" || obj.type === "continent" || obj.type === "world"; /* w-only, h derived */
     const sx = e.clientX, sy = e.clientY;
+    const prevCursor = document.body.style.cursor;
+    if (cursor) document.body.style.cursor = cursor;
     const move = (ev) => {
-      const d = ((ev.clientX - sx) + (ev.clientY - sy)) / (2 * stageScale);
-      const ns = Math.max(0.05, Math.min(6, +(s0 * (1 + d / base)).toFixed(3)));
-      editProp(obj.id, "scale", ns);
+      /* pointer delta → stage units → the object's local axes (undo its rotation) → prop units (undo its scale) */
+      const dx = (ev.clientX - sx) / stageScale, dy = (ev.clientY - sy) / stageScale;
+      const ddx = (dx * cos + dy * sin) / s0, ddy = (-dx * sin + dy * cos) / s0;
+      let patch;
+      if (textual) {
+        /* scale fontSize proportionally — the vertical delta ratio drives (corners + N/S);
+           E/W grips fall back to the horizontal ratio so no grip is dead on auto-width text */
+        const f = hy !== 0 ? (sz0.h + 2 * hy * ddy) / sz0.h : (sz0.w + 2 * hx * ddx) / sz0.w;
+        patch = { fontSize: Math.max(10, Math.round(fs0 * Math.max(0.05, f))) };
+      } else if (singleW) {
+        const fx = hx !== 0 ? (sz0.w + 2 * hx * ddx) / sz0.w : 1;
+        const fy = hy !== 0 ? (sz0.h + 2 * hy * ddy) / sz0.h : 1;
+        const f = Math.max(0.05, hx !== 0 && hy !== 0 ? Math.max(fx, fy) : hx !== 0 ? fx : fy);
+        patch = { w: Math.max(10, Math.round(w0 * f)) };
+      } else {
+        let nw = hx !== 0 ? sz0.w + 2 * hx * ddx : sz0.w;
+        let nh = hy !== 0 ? sz0.h + 2 * hy * ddy : sz0.h;
+        if (ev.shiftKey) { /* uniform scale — aspect locked */
+          const f = hx !== 0 && hy !== 0 ? Math.max(nw / sz0.w, nh / sz0.h) : hx !== 0 ? nw / sz0.w : nh / sz0.h;
+          nw = sz0.w * f; nh = sz0.h * f;
+        }
+        patch = { w: Math.max(10, Math.round(nw)), h: Math.max(10, Math.round(nh)) };
+      }
+      patchProps(obj.id, patch);
     };
-    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.style.cursor = prevCursor;
+    };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
-  /* rotation grip — drag around the object's center; shift snaps to 15° */
+  /* rotation grip — drag around the object's center; 1° steps, shift snaps to 15°.
+     Writes the base `rotation` prop only (tracks untouched); rotLive feeds the readout. */
   const onRotateDown = (e, obj) => {
     e.stopPropagation();
     if (obj.locked) return;
-    setSelIds([obj.id]);
-    const wrap = e.currentTarget.parentElement.getBoundingClientRect();
+    const wrap = e.currentTarget.parentElement.getBoundingClientRect(); /* the object wrapper — its AABB center is the rotation center */
     const cx = wrap.left + wrap.width / 2, cy = wrap.top + wrap.height / 2;
-    const r0 = valueAt(obj, "rotation", timeRef.current);
+    const r0 = obj.props.rotation || 0;
     const a0 = Math.atan2(e.clientY - cy, e.clientX - cx);
+    const prevCursor = document.body.style.cursor;
+    document.body.style.cursor = "grabbing";
     const move = (ev) => {
       const a = Math.atan2(ev.clientY - cy, ev.clientX - cx);
       let nr = Math.round(r0 + ((a - a0) * 180) / Math.PI);
       if (ev.shiftKey) nr = Math.round(nr / 15) * 15;
-      editProp(obj.id, "rotation", Math.max(-360, Math.min(360, nr)));
+      nr = Math.max(-360, Math.min(360, nr));
+      patchProps(obj.id, { rotation: nr });
+      setRotLive({ id: obj.id, deg: nr });
     };
-    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.style.cursor = prevCursor;
+      setRotLive(null);
+    };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
@@ -1162,6 +1214,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
         .gd-tl-handle-line{opacity:0;transition:opacity 120ms ease-out}
         .gd-tl-handle:hover .gd-tl-handle-line{opacity:1}
         .gd-tl-handle.gd-dragging .gd-tl-handle-line{opacity:1}
+        .gd-rzh::after{content:"";position:absolute;inset:-55%} /* fat-finger hit zone around the 8px selection grips */
       `}</style>
       <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onPickImage} />
       <input ref={assetFileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" style={{ display: "none" }} onChange={onPickAsset} />
@@ -1193,7 +1246,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
         {/* ---- stage ---- */}
         <StageView stageWrapRef={stageWrapRef} stageScrollRef={stageScrollRef} tlDragging={tlDragging} zoomed={zoomed}
           stage={stage} stageScale={stageScale} stageBg={stageBg} inClip={inClip} ctx={ctx} ctxLayers={ctxLayers} time={time}
-          selIds={selIds} sel={sel} overflowShow={overflowShow} zoomMode={zoomMode}
+          selIds={selIds} sel={sel} overflowShow={overflowShow} zoomMode={zoomMode} playing={playing} rotLive={rotLive}
           onObjectDown={onObjectDown} enterClip={enterClip} displayValue={displayValue} onResizeDown={onResizeDown} onRotateDown={onRotateDown}
           onPathPtDown={onPathPtDown} patchPath={patchPath} setOverflowShow={setOverflowShow}
           setSelIds={setSelIds} setSelKf={setSelKf} setAudioSel={setAudioSel} setShapesOpen={setShapesOpen} setMapsOpen={setMapsOpen} setImagesOpen={setImagesOpen} setAudioOpen={setAudioOpen}

@@ -10,6 +10,19 @@ import { valueAt, colorAt, lerpColor, clipLocalTime, clipTransition } from "../e
 import { MAPS, WORLD_H, CONTINENTS, WORLD_EXT, ringsToPath, arcPath, mapBox, WORLD_D, normHi } from "../engine/maps.js";
 import { SWATCHES, CONFETTI_LIFE, confettiParticles, charFx, numberValue, numberColumns, parseChart, highlightFlick, worldCameraAt } from "../engine/fx.js";
 
+/* ---------- on-canvas selection handles (direct manipulation) ----------
+   Rendered inside the SAME transformed wrapper as the selection outline, so they
+   track position/rotation/scale for free. `u = 1/stageScale` counter-scales them
+   so grips stay ~8px on screen at any zoom. Base-prop edits only (w/h, the map
+   types' `w`, fontSize for text/number, rotation) — keyframe tracks untouched. */
+const RESIZE_CURSORS = ["ew", "nwse", "ns", "nesw"]; /* indexed by drag-axis angle: 0°, 45°, 90°, 135° (mod 180°) */
+const resizeCursor = (axis, rot) => RESIZE_CURSORS[Math.round(((((axis + rot) % 180) + 180) % 180) / 45) % 4] + "-resize";
+const HANDLE_DEFS = [ /* [id, left, top, drag-axis°] — corners + edge midpoints */
+  ["nw", "0%", "0%", 45], ["n", "50%", "0%", 90], ["ne", "100%", "0%", 135], ["e", "100%", "50%", 0],
+  ["se", "100%", "100%", 45], ["s", "50%", "100%", 90], ["sw", "0%", "100%", 135], ["w", "0%", "50%", 0],
+];
+const ROTATE_OFFSET = 22; /* screen px the rotation grip floats above top-center */
+
 /* box styling for text/number layers */
 function boxStyleOf(P, time) {
   if (!P.bg && !P.borderW) return null;
@@ -71,7 +84,7 @@ function MapEffectPaths({ id, d, P, time }) {
     </>
   );
 }
-function MapEffectShape({ id, d, box, P, time, down, common, rz }) {
+function MapEffectShape({ id, d, box, P, time, down, common, handles }) {
   const h = (P.w * box.h) / box.w;
   const ox = box.ox || 0, oy = box.oy || 0;
   return (
@@ -79,12 +92,12 @@ function MapEffectShape({ id, d, box, P, time, down, common, rz }) {
       <svg width={P.w} height={h} viewBox={`${ox - 7} ${oy - 7} ${box.w + 14} ${box.h + 14}`} style={{ display: "block", overflow: "visible" }}>
         <MapEffectPaths id={id} d={d} P={P} time={time} />
       </svg>
-      {rz}
+      {handles}
     </div>
   );
 }
 
-export function StageObject({ obj, time, stage, selected, onDown, onEnterClip, displayValue, onResize, onRotate, interactive }) {
+export function StageObject({ obj, time, stage, selected, onDown, onEnterClip, displayValue, onResize, onRotate, interactive, stageScale = 1, playing = false, selCount = 1, rotLive = null }) {
   const P = obj.props;
   if (obj.hidden && !(interactive && selected)) return null;
   if (obj.type !== "clip") {
@@ -139,14 +152,31 @@ export function StageObject({ obj, time, stage, selected, onDown, onEnterClip, d
     );
   }
 
-  const rz = selected && interactive && !obj.locked && onResize
+  /* selection handles: 8 resize grips (corners + edge midpoints) + a rotation grip
+     floating 22px above top-center on a 1px stem. Base-prop editing only — hidden
+     while playing, multi-selected (move-only), locked, or non-interactive (export). */
+  const canManip = selected && interactive && !obj.locked && !playing && selCount <= 1;
+  const u = 1 / Math.max(0.05, stageScale || 1); /* inverse zoom → constant screen size */
+  const handles = canManip && (onResize || onRotate)
     ? <>
-        <div onPointerDown={(e) => onResize(e, obj)} title="Drag to resize (records scale keyframes when Animate is on)"
-          style={{ position: "absolute", right: -9, bottom: -9, width: 13, height: 13, background: C.amber, border: "2px solid #fff", borderRadius: 3, cursor: "nwse-resize", zIndex: 6, pointerEvents: "auto" }} />
-        {onRotate && (
-          <div onPointerDown={(e) => onRotate(e, obj)} title="Drag to rotate · shift = 15° steps (records rotation keyframes when Animate is on)"
-            style={{ position: "absolute", top: -30, left: "50%", transform: "translateX(-50%)", width: 17, height: 17, borderRadius: "50%", background: "#10131A", border: `2px solid ${C.amber}`, cursor: "grab", zIndex: 6, pointerEvents: "auto", display: "flex", alignItems: "center", justifyContent: "center", color: C.amber, fontSize: 10, fontWeight: 800, lineHeight: 1 }}>↻</div>
-        )}
+        {onResize && HANDLE_DEFS.map(([hid, left, top, axis]) => (
+          <div key={hid} className="gd-rzh" onPointerDown={(e) => { e.stopPropagation(); onResize(e, obj, hid, resizeCursor(axis, rot)); }}
+            title="Drag to resize · Shift = keep aspect"
+            style={{ position: "absolute", left, top, width: 8 * u, height: 8 * u, transform: "translate(-50%,-50%)", background: "#fff", border: `${u}px solid ${C.amber}`, borderRadius: 0, cursor: resizeCursor(axis, rot), zIndex: 6, pointerEvents: "auto", touchAction: "none", boxSizing: "border-box" }} />
+        ))}
+        {onRotate && <>
+          {/* 1px stem from top-center up to the rotation grip */}
+          <div style={{ position: "absolute", left: "50%", top: -ROTATE_OFFSET * u, width: u, height: ROTATE_OFFSET * u, transform: "translateX(-50%)", background: C.amber, pointerEvents: "none", zIndex: 6 }} />
+          <div className="gd-rzh" onPointerDown={(e) => { e.stopPropagation(); onRotate(e, obj); }}
+            title="Drag to rotate · Shift = 15° steps"
+            style={{ position: "absolute", left: "50%", top: -ROTATE_OFFSET * u, width: 11 * u, height: 11 * u, transform: "translate(-50%,-50%)", borderRadius: "50%", background: "#fff", border: `${u}px solid ${C.amber}`, cursor: "grab", zIndex: 7, pointerEvents: "auto", touchAction: "none", boxSizing: "border-box" }} />
+          {/* live angle readout — counter-rotated so it stays upright while the object spins */}
+          {rotLive && rotLive.id === obj.id && (
+            <div style={{ position: "absolute", left: `calc(50% + ${13 * u}px)`, top: -ROTATE_OFFSET * u, transform: `translateY(-50%) rotate(${-rot}deg)`, fontFamily: "'JetBrains Mono'", fontSize: 10.5 * u, fontWeight: 700, fontVariantNumeric: "tabular-nums", color: C.amber, background: "rgba(16,19,26,.92)", border: `${u}px solid ${C.line}`, borderRadius: 4 * u, padding: `${2 * u}px ${5 * u}px`, whiteSpace: "nowrap", pointerEvents: "none", zIndex: 8 }}>
+              {rotLive.deg}°
+            </div>
+          )}
+        </>}
       </>
     : null;
   const common = {
@@ -167,7 +197,7 @@ export function StageObject({ obj, time, stage, selected, onDown, onEnterClip, d
         <svg width={P.w} height={P.h} viewBox="0 0 100 100" preserveAspectRatio="none" style={{ display: "block", overflow: "visible" }}>
           <polygon points={ptsToStr(pts)} fill={fm === "stroke" ? "none" : fill} stroke={fm !== "fill" ? P.sC : "none"} strokeWidth={fm !== "fill" ? P.sW : 0} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
         </svg>
-        {rz}
+        {handles}
       </div>
     );
   }
@@ -208,7 +238,7 @@ export function StageObject({ obj, time, stage, selected, onDown, onEnterClip, d
             return <span key={i} style={{ display: "inline-block", whiteSpace: "pre", opacity: f.o, transform: `translate(${f.dx}px, ${f.dy}px) scale(${f.s})` }}>{f.ch}</span>;
           })}
         </div>
-        {rz}
+        {handles}
       </div>
     );
   }
@@ -219,7 +249,7 @@ export function StageObject({ obj, time, stage, selected, onDown, onEnterClip, d
         {P.src
           ? <img src={P.src} alt="" draggable={false} style={{ width: P.w, height: P.h, maxWidth: "none", maxHeight: "none", objectFit: "cover", borderRadius: 8, display: "block", pointerEvents: "none" }} />
           : <div style={{ width: P.w, height: P.h, border: `2px dashed ${C.faint}`, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", color: C.faint, fontSize: 13 }}>No image</div>}
-        {rz}
+        {handles}
       </div>
     );
   }
@@ -266,14 +296,14 @@ export function StageObject({ obj, time, stage, selected, onDown, onEnterClip, d
             </svg>
             <div style={{ position: "relative", zIndex: 1, fontFamily: `'${P.fontFamily}'`, fontWeight: 700, fontSize: P.fontSize, color, lineHeight: 1, display: "flex", alignItems: "center" }}>{inner}</div>
           </div>
-          {rz}
+          {handles}
         </div>
       );
     }
     return (
       <div onPointerDown={down} style={common}>
         <div style={{ ...(box || {}), fontFamily: `'${P.fontFamily}'`, fontWeight: 600, fontSize: P.fontSize, color, lineHeight: 1, display: "flex", alignItems: "center" }}>{inner}</div>
-        {rz}
+        {handles}
       </div>
     );
   }
@@ -340,7 +370,7 @@ export function StageObject({ obj, time, stage, selected, onDown, onEnterClip, d
         <div style={{ width: W + pad * 2, height: Hh + pad * 2, padding: pad, boxSizing: "border-box", background: P.bg || "transparent", opacity: P.bg ? P.bgOp : 1, borderRadius: P.radius, border: P.borderW ? `${P.borderW}px solid ${P.borderC}` : "none" }}>
           <svg width={W} height={Hh} style={{ display: "block", overflow: "visible" }}>{els}</svg>
         </div>
-        {rz}
+        {handles}
       </div>
     );
   }
@@ -348,7 +378,7 @@ export function StageObject({ obj, time, stage, selected, onDown, onEnterClip, d
   if (obj.type === "map") {
     const m = MAPS[P.country];
     const box = mapBox(m);
-    return <MapEffectShape id={obj.id} d={ringsToPath(m.rings)} box={box} P={P} time={time} down={down} common={common} rz={rz} />;
+    return <MapEffectShape id={obj.id} d={ringsToPath(m.rings)} box={box} P={P} time={time} down={down} common={common} handles={handles} />;
   }
 
   if (obj.type === "continent") {
@@ -359,7 +389,7 @@ export function StageObject({ obj, time, stage, selected, onDown, onEnterClip, d
     if (mnx > mxx) return null;
     const box = { w: mxx - mnx, h: mxy - mny, ox: mnx, oy: mny };
     const his = normHi(P.hi).filter((hh) => codes.includes(hh.cc));
-    if (!his.length) return <MapEffectShape id={obj.id} d={d} box={box} P={P} time={time} down={down} common={common} rz={rz} />;
+    if (!his.length) return <MapEffectShape id={obj.id} d={d} box={box} P={P} time={time} down={down} common={common} handles={handles} />;
     /* highlights present: same zoom-and-spotlight behavior as the World map,
        just cropped to this continent's own bounding box instead of the globe */
     const fallbackCenter = { cx: (mnx + mxx) / 2, cy: (mny + mxy) / 2 };
@@ -415,7 +445,7 @@ export function StageObject({ obj, time, stage, selected, onDown, onEnterClip, d
             })}
           </g>
         </svg>
-        {rz}
+        {handles}
       </div>
     );
   }
@@ -489,7 +519,7 @@ export function StageObject({ obj, time, stage, selected, onDown, onEnterClip, d
             })}
           </g>
         </svg>
-        {rz}
+        {handles}
       </div>
     );
   }
