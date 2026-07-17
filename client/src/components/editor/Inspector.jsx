@@ -2,13 +2,28 @@
    INSPECTOR — right-hand property panel (per-type cards).
    Extracted VERBATIM from GraphicDestinationMotion.jsx (Refactor Pass 2).
    ============================================================ */
-import { C, PROP_LABEL, TEXTFX_LIST, NUM_STYLES, PRESETS, TRANSITIONS, STAGE_PRESETS, kfAt, inputStyle, chipStyle, sectionLabel } from "./model";
+import { C, PROP_LABEL, TEXTFX_LIST, NUM_STYLES, NUM_MODES, NUM_STYLE_PRESETS, NUM_STYLE_RESET, PRESETS, TRANSITIONS, STAGE_PRESETS, kfAt, inputStyle, chipStyle, sectionLabel } from "./model";
 import { Card, ChipRow, ColorKfRow, PropRow, FontControls, WorldPicker, Row, SliderRow, EaseCurve, NoteIcon, CamIcon } from "./ui";
 import { EASE, EASE_LABEL } from "../../engine/easing.js";
 import { SHAPE_IDS, SHAPE_DEFS, ptsToStr } from "../../engine/shapes.js";
 import { MAPS, CONTINENT_NAMES, CONTINENTS, normHi } from "../../engine/maps.js";
-import { CONFETTI_STYLES, confettiStyleOf } from "../../engine/fx.js";
+import { CONFETTI_STYLES, confettiStyleOf, NUM_FORMATS, numMode } from "../../engine/fx.js";
 import { CAM_PROPS, CAM_ZOOM_MIN, CAM_ZOOM_MAX, CAM_DEPTH_MIN, CAM_DEPTH_MAX, cameraAt, camTrackHost, clampDepth } from "../../engine/camera.js";
+
+/* tiny 56×34 inline-SVG swatch for the number style presets — renders "123"
+   in the preset's own style (bold / mono / outline / pill / neon / minimal) */
+function NumStyleSwatch({ id }) {
+  const T = (props) => <text x="28" y="23" textAnchor="middle" fontSize="16" fontFamily="'Space Grotesk'" {...props}>123</text>;
+  switch (id) {
+    case "bold": return <T fontWeight="800" fill="#E9ECF3" />;
+    case "mono": return <T fontWeight="600" fill={C.amber} fontFamily="'JetBrains Mono'" />;
+    case "outline": return <T fontWeight="800" fill="none" stroke="#E9ECF3" strokeWidth="1" />;
+    case "pill": return (<><rect x="5" y="7" width="46" height="20" rx="10" fill={C.amber} /><T y="22" fontSize="14" fontWeight="700" fill="#1A1405" /></>);
+    case "neon": return (<><T fontWeight="700" fill={C.amber} opacity="0.65" style={{ filter: "blur(2.5px)" }} /><T fontWeight="700" fill="#FFD984" /></>);
+    case "minimal": return <T fontWeight="400" fill={C.dim} letterSpacing="3" />;
+    default: return null;
+  }
+}
 
 /* per-layer parallax depth slider — lives in the FIRST card of every object
    type (absent for the audio lane / camera selection). 0 = world-locked
@@ -38,6 +53,14 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
     const d = clampDepth(v);
     if (Math.abs(d) < 1e-9) patchObject(sel.id, (o) => { const p = { ...o.props }; delete p.depth; return { ...o, props: p }; });
     else patchProps(sel.id, { depth: d });
+  };
+  /* number style preset click: reset every preset-controlled prop to inert,
+     apply the preset patch, remember the swatch (amber ring). Outline inks
+     its stroke from the layer's CURRENT fill so it never vanishes. */
+  const applyNumPreset = (p) => {
+    const patch = { ...NUM_STYLE_RESET, ...p.patch, numStyle: p.id };
+    if (p.id === "outline" && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(sel.props.fill || "")) patch.stroke = sel.props.fill;
+    patchProps(sel.id, patch);
   };
   /* x/y/w/h/rotation moved on-canvas (direct manipulation) — Transform keeps only
      the props that aren't canvas-editable; the card collapses if that list is empty */
@@ -239,9 +262,30 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
               {sel.type === "number" && (
                 <Card title="Number">
                   <DepthRow value={sel.props.depth} onChange={setDepth} />
+                  <ChipRow label="Mode" options={NUM_MODES.map((m) => [m.id, m.name])} value={numMode(sel.props)} onChange={(v) => patchProps(sel.id, { mode: v })} wrap />
+                  <ChipRow label="Format" options={NUM_FORMATS.map((f) => [f.id, f.name])} value={sel.props.format || "plain"} onChange={(v) => patchProps(sel.id, { format: v })} wrap />
+                  {(sel.props.format || "plain") === "time" && <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.5, margin: "-4px 0 8px" }}>Seconds in, mm:ss out — pairs with Countdown mode.</div>}
+                  <div style={{ color: C.dim, fontSize: 11, fontWeight: 600, marginBottom: 5 }}>Style presets</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 8 }}>
+                    {NUM_STYLE_PRESETS.map((p) => {
+                      const on = sel.props.numStyle === p.id;
+                      return (
+                        <button key={p.id} className="gd-btn" title={`${p.name} — ${p.hint}`} onClick={() => applyNumPreset(p)}
+                          style={{ background: C.bg1, border: `1px solid ${on ? C.amber : C.line}`, borderRadius: 6, padding: 3, cursor: "pointer", boxShadow: on ? `0 0 0 1px ${C.amber}` : "none" }}>
+                          <svg width="100%" height="34" viewBox="0 0 56 34" style={{ display: "block" }}><NumStyleSwatch id={p.id} /></svg>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {!!sel.props.stroke && (
+                    <Row label="Stroke"><input type="color" value={(sel.props.stroke || "#FFB224").slice(0, 7)} onChange={(e) => patchProps(sel.id, { stroke: e.target.value })} /></Row>
+                  )}
+                  {!!sel.props.pillBg && (
+                    <Row label="Pill"><input type="color" value={(sel.props.pillBg || "#FFB224").slice(0, 7)} onChange={(e) => patchProps(sel.id, { pillBg: e.target.value })} /></Row>
+                  )}
                   <Row label="From"><input type="number" value={sel.props.from} onChange={(e) => patchProps(sel.id, { from: Math.max(0, parseFloat(e.target.value) || 0) })} style={inputStyle} /></Row>
                   <Row label="To"><input type="number" value={sel.props.to} onChange={(e) => patchProps(sel.id, { to: Math.max(0, parseFloat(e.target.value) || 0) })} style={inputStyle} /></Row>
-                  <ChipRow label="Style" options={NUM_STYLES.map((s) => [s.id, s.name])} value={sel.props.style} onChange={(v) => patchProps(sel.id, { style: v })} wrap />
+                  <ChipRow label="Digits" options={NUM_STYLES.map((s) => [s.id, s.name])} value={sel.props.style} onChange={(v) => patchProps(sel.id, { style: v })} wrap />
                   <SliderRow label="Start" min={0} max={Math.max(100, ctxDur - 300)} step={10} value={sel.props.start} onChange={(v) => patchProps(sel.id, { start: v })} />
                   <SliderRow label="Duration" min={300} max={5000} step={10} value={sel.props.dur} onChange={(v) => patchProps(sel.id, { dur: v })} />
                   <SliderRow label="Decimals" min={0} max={2} value={sel.props.decimals} onChange={(v) => patchProps(sel.id, { decimals: v })} />
@@ -252,7 +296,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                   {(sel.props.ring || "none") !== "none" && <>
                     <Row label="Ring"><input type="color" value={sel.props.ringC} onChange={(e) => patchProps(sel.id, { ringC: e.target.value })} /></Row>
                     <SliderRow label="Ring W" min={3} max={22} value={sel.props.ringW} onChange={(v) => patchProps(sel.id, { ringW: v })} />
-                    <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.5 }}>Counting down (To &lt; From)? The circle depletes like a game timer. Counting up? It fills.</div>
+                    <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.5 }}>Counting down (To &lt; From, or Countdown mode)? The circle depletes like a game timer. Counting up? It fills.</div>
                   </>}
                   <FontControls P={sel.props} onChange={(patch) => patchProps(sel.id, patch)} brand={brand} />
                   <ColorKfRow label="Color" obj={sel} time={time} sw={SW} onEdit={(v) => editProp(sel.id, "fill", v)} onKf={(has, v) => { if (has) removeKeyframe(sel.id, "fill", Math.round(time / 10) * 10); else { const T = setKeyframe(sel.id, "fill", time, v); setSelKf({ objId: sel.id, prop: "fill", t: T }); } }} />

@@ -41,10 +41,22 @@ export function charFx(fx, i, n, time, ch) {
 
 /* ============================================================
    NUMBER ROLLERS (mechanical odometer cascade)
+   ------------------------------------------------------------
+   MODES (props.mode — optional; ABSENT = "countup", so projects
+   saved before modes existed render byte-identical):
+     "countup"   current behavior — value eases from → to
+     "countdown" same setup played end → start (from=0,to=10 ⇒ 10 → 0)
+     "odometer"  slot-machine digit roll settling left → right
+                 (extends the existing "slot" column machinery)
    ============================================================ */
+export function numMode(P) {
+  return P && (P.mode === "countdown" || P.mode === "odometer") ? P.mode : "countup";
+}
 export function numberValue(P, time) {
   const u = clamp01((time - P.start) / P.dur);
-  return P.from + (P.to - P.from) * (EASE[P.numEase] || EASE.easeOutCubic)(u);
+  const e = (EASE[P.numEase] || EASE.easeOutCubic)(u);
+  if (P.mode === "countdown") return P.to + (P.from - P.to) * e;
+  return P.from + (P.to - P.from) * e;
 }
 export function numberColumns(P, time) {
   const dec = P.decimals;
@@ -66,9 +78,11 @@ export function numberColumns(P, time) {
   for (let j = 0; j < totalDigits; j++) {
     const p = totalDigits - 1 - j;
     if (dec > 0 && j === intDigits) cols.push({ ch: "." });
-    if (P.style === "slot") {
+    if (P.style === "slot" || P.mode === "odometer") {
+      /* slot-machine roll (also the "odometer" MODE): wheels spin fast then
+         settle left → right on the final digits — deterministic, no RNG */
       const cu = clamp01((time - P.start - j * 130) / Math.max(300, P.dur * 0.75));
-      const finalW = Math.max(0, P.to) * Math.pow(10, dec);
+      const finalW = Math.max(0, P.mode === "countdown" ? P.from : P.to) * Math.pow(10, dec);
       const fd = Math.floor(finalW / Math.pow(10, p)) % 10;
       const spin = (1 - EASE.easeOutCubic(cu)) * (22 + j * 9);
       cols.push({ d: (fd + spin) % 10, dim: false });
@@ -77,6 +91,58 @@ export function numberColumns(P, time) {
     }
   }
   return cols;
+}
+
+/* ============================================================
+   NUMBER FORMATS (pure) — props.format, optional, default "plain".
+   "plain" is EXACTLY the legacy count rendering (toFixed(decimals)),
+   so absent format ⇒ old projects render unchanged. Non-plain formats
+   force the plain-text render path (they can't be column-rolled).
+   ============================================================ */
+export const NUM_FORMATS = [
+  { id: "plain", name: "Plain" },
+  { id: "compact", name: "Compact" },
+  { id: "currency", name: "Currency" },
+  { id: "percent", name: "Percent" },
+  { id: "time", name: "Time" },
+];
+export function formatNumber(value, format = "plain", decimals = 0) {
+  const v = Number.isFinite(value) ? value : 0;
+  const dec = Math.max(0, decimals | 0);
+  if (format === "compact") {
+    /* 12.4K / 3.2M / 2.5B — one decimal, trailing ".0" trimmed */
+    const a = Math.abs(v), sign = v < 0 ? "-" : "";
+    const trim = (n) => { const s = n.toFixed(1); return s.endsWith(".0") ? s.slice(0, -2) : s; };
+    if (a >= 1e9) return sign + trim(a / 1e9) + "B";
+    if (a >= 1e6) return sign + trim(a / 1e6) + "M";
+    if (a >= 1e3) return sign + trim(a / 1e3) + "K";
+    return v.toFixed(dec);
+  }
+  if (format === "currency") {
+    /* $1,234 — manual thousands grouping (deterministic, locale-free) */
+    const parts = Math.abs(v).toFixed(dec).split(".");
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return (v < 0 ? "-$" : "$") + parts.join(".");
+  }
+  if (format === "percent") return v.toFixed(dec) + "%";
+  if (format === "time") {
+    /* mm:ss from seconds — pairs naturally with countdown mode */
+    const s = Math.max(0, Math.round(v));
+    return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+  }
+  return v.toFixed(dec); /* "plain" + unknown formats → legacy */
+}
+
+/* pill-preset contrast ink: dark text on light pill backgrounds
+   (amber pill ⇒ dark digits), light text on dark pills. Pure WCAG
+   relative-luminance on #rrggbb / #rgb — identical in editor + export. */
+export function contrastOn(bg) {
+  let h = String(bg || "").replace("#", "");
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  if (h.length < 6) return "#F9F9F9";
+  const lin = (c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+  const r = lin(parseInt(h.slice(0, 2), 16) / 255), g = lin(parseInt(h.slice(2, 4), 16) / 255), b = lin(parseInt(h.slice(4, 6), 16) / 255);
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) > 0.35 ? "#1A1405" : "#F9F9F9";
 }
 
 /* ============================================================

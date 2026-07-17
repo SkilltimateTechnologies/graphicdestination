@@ -32,7 +32,30 @@ export const TEXTFX_LIST = [
 /* ============================================================
    NUMBER ROLLERS (mechanical odometer cascade)
    ============================================================ */
-export const NUM_STYLES = [{ id: "odometer", name: "Odometer" }, { id: "count", name: "Count Up" }, { id: "slot", name: "Slot Machine" }];
+export const NUM_STYLES = [{ id: "odometer", name: "Odometer" }, { id: "count", name: "Plain text" }, { id: "slot", name: "Slot Machine" }];
+
+/* ============================================================
+   NUMBER MODES + VISUAL STYLE PRESETS
+   modes (props.mode) + formats (props.format) are keyframe-free base
+   props — optional, defaults countup/plain, old projects untouched.
+   Style presets are one-click PATCHES: clicking a swatch writes the
+   concrete style props (fontWeight/fill/fontFamily/stroke/pillBg/
+   glow/ls/tnum), so renderer + export share ONE render path and the
+   free-form controls below keep working as overrides. numStyle only
+   remembers the last-picked swatch (amber ring).
+   ============================================================ */
+export const NUM_MODES = [{ id: "countup", name: "Count Up" }, { id: "countdown", name: "Countdown" }, { id: "odometer", name: "Odometer" }];
+/* preset-controlled props reset to inert values before each patch is
+   applied (inert = falsy ⇒ the renderer skips them) */
+export const NUM_STYLE_RESET = { stroke: "", strokeW: 0, pillBg: "", glow: "", ls: 0, tnum: false };
+export const NUM_STYLE_PRESETS = [
+  { id: "bold", name: "Bold", hint: "Heavy 800 · your color", patch: { fontWeight: 800 } },
+  { id: "mono", name: "Mono", hint: "JetBrains Mono · tabular · amber", patch: { fontFamily: "JetBrains Mono", fontWeight: 600, fill: "#FFB224", tnum: true } },
+  { id: "outline", name: "Outline", hint: "Hollow · 2px stroke", patch: { fontWeight: 800, fill: "transparent", stroke: "#FFB224", strokeW: 2 } },
+  { id: "pill", name: "Pill", hint: "Dark digits on an amber pill", patch: { fontWeight: 700, pillBg: "#FFB224" } },
+  { id: "neon", name: "Neon", hint: "Soft amber glow", patch: { fontWeight: 700, fill: "#FFD984", glow: "#FFB224" } },
+  { id: "minimal", name: "Minimal", hint: "Light · dim · wide tracking", patch: { fontWeight: 400, fill: "#939BAD", ls: 4 } },
+];
 
 /* ============================================================
    MOTION PRESETS

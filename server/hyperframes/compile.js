@@ -106,7 +106,10 @@ function renderLayerHTML(layer, id) {
     case "image":
       return `<img id="${id}" src="${esc(P.src)}" style="${commonStyle}width:${P.w}px;height:${P.h}px;object-fit:cover;" />`;
     case "number": {
-      const val = `${P.prefix || ""}${P.to}${P.suffix || ""}`;
+      /* countdown mode settles on From (plays To → From); everything else
+         settles on To — absent mode keeps the legacy final value */
+      const final = P.mode === "countdown" ? P.from : P.to;
+      const val = `${P.prefix || ""}${final}${P.suffix || ""}`;
       return `<div id="${id}" data-hf-note="number roller not animated in v1 — showing final value" style="${commonStyle}font-family:monospace;font-weight:700;font-size:${P.fontSize || 64}px;color:${esc(P.fill)};">${esc(val)}</div>`;
     }
     case "chart":

@@ -13,6 +13,7 @@ import { C, KF_PROPS, STAGE_PRESETS, kfAt, layerOut } from "./editor/model";
 import TopBar from "./editor/TopBar";
 import IconRail from "./editor/IconRail";
 import ShapesPanel from "./editor/panels/ShapesPanel";
+import NumberPanel from "./editor/panels/NumberPanel";
 import MapsPanel from "./editor/panels/MapsPanel";
 import ImagePanel from "./editor/panels/ImagePanel";
 import AudioPanel from "./editor/panels/AudioPanel";
@@ -32,7 +33,7 @@ export { mulberry32 } from "../engine/random.js";
 export { lerpPts, shapePtsOf, morphPtsAt, pointOnPath } from "../engine/shapes.js";
 export { valueAt, colorAt, lerpColor, posOf, fxDuration, clipLocalTime, clipTransition } from "../engine/keyframes.js";
 export { CAM_DEFAULTS, CAM_ZOOM_MIN, CAM_ZOOM_MAX, CAM_DEPTH_MIN, CAM_DEPTH_MAX, CAM_PROPS, clampZoom, clampDepth, depthFactor, cameraAt, cameraTransform, camIsIdentity, camTransformCss, cameraFromJson, cameraToJson, cameraKeyCount } from "../engine/camera.js";
-export { FONT_IMPORT, charFx, numberValue, numberColumns, confettiParticles, parseChart, highlightFlick, worldCameraAt } from "../engine/fx.js";
+export { FONT_IMPORT, charFx, numberValue, numberColumns, numMode, formatNumber, contrastOn, confettiParticles, parseChart, highlightFlick, worldCameraAt } from "../engine/fx.js";
 
 /* ============================================================
    GRAPHIC DESTINATION — Motion  (prototype v0.2)
@@ -257,6 +258,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   const [tlH, setTlH] = useState(() => { try { const v = parseFloat(localStorage.getItem(TL_H_KEY)); return Number.isFinite(v) ? clampTlH(v) : TL_H_DEFAULT; } catch { return TL_H_DEFAULT; } });
   const [tlDragging, setTlDragging] = useState(false);
   const [shapesOpen, setShapesOpen] = useState(false);
+  const [numbersOpen, setNumbersOpen] = useState(false);
   const [mapsOpen, setMapsOpen] = useState(false);
   const [imagesOpen, setImagesOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
@@ -585,6 +587,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     setLayers((ls) => [...ls, o]);
     setSelIds([o.id]);
     setShapesOpen(false);
+    setNumbersOpen(false);
     if (type === "clip" && !over.children) enterClip(o.id);
   };
   /* insert a gallery template as ONE editable clip at the playhead.
@@ -977,7 +980,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
      the playhead — the same write path the inspector sliders use. */
   const onStageEmptyDown = (e) => {
     setSelIds([]); setSelKf(null); setSelCamKf(null); setAudioSel(false); setCameraSel(false);
-    setShapesOpen(false); setMapsOpen(false); setImagesOpen(false); setAudioOpen(false);
+    setShapesOpen(false); setMapsOpen(false); setImagesOpen(false); setAudioOpen(false); setNumbersOpen(false);
     if (e.button !== 0 || path.length > 0 || selIds.length > 0) return;
     const t = timeRef.current;
     const c0 = cameraAt(camera, t);
@@ -1422,6 +1425,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
           audioOpen={audioOpen} setAudioOpen={setAudioOpen} mapsOpen={mapsOpen} setMapsOpen={setMapsOpen}
           templatesOpen={templatesOpen} setTemplatesOpen={setTemplatesOpen} chartsOpen={chartsOpen} setChartsOpen={setChartsOpen}
           confettiOpen={confettiOpen} setConfettiOpen={setConfettiOpen}
+          numbersOpen={numbersOpen} setNumbersOpen={setNumbersOpen}
           audioTrack={audioTrack} addObject={addObject} />
 
         {/* templates drawer: search + categories, inserts as one editable clip at the playhead */}
@@ -1432,6 +1436,9 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
 
         {/* charts drawer: 7 chart types as separate insertables */}
         {chartsOpen && <ChartsPanel addObject={addObject} setChartsOpen={setChartsOpen} />}
+
+        {/* numbers drawer: 3 counter modes (count up / countdown / odometer) */}
+        {numbersOpen && <NumberPanel addObject={addObject} setNumbersOpen={setNumbersOpen} />}
 
         {/* confetti drawer: 8 emission styles */}
         {confettiOpen && <ConfettiPanel addObject={addObject} setConfettiOpen={setConfettiOpen} />}

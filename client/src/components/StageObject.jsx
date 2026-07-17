@@ -9,7 +9,7 @@ import { ptsToStr, pathSamples, pointOnPath, morphPtsAt } from "../engine/shapes
 import { valueAt, colorAt, lerpColor, clipLocalTime, clipTransition } from "../engine/keyframes.js";
 import { cameraTransform, camTransformCss } from "../engine/camera.js";
 import { MAPS, WORLD_H, CONTINENTS, WORLD_EXT, ringsToPath, arcPath, mapBox, WORLD_D, normHi } from "../engine/maps.js";
-import { SWATCHES, CONFETTI_STYLES, confettiStyleOf, confettiLife, confettiParticles, charFx, numberValue, numberColumns, parseChart, highlightFlick, worldCameraAt } from "../engine/fx.js";
+import { SWATCHES, CONFETTI_STYLES, confettiStyleOf, confettiLife, confettiParticles, charFx, numberValue, numberColumns, formatNumber, contrastOn, parseChart, highlightFlick, worldCameraAt } from "../engine/fx.js";
 
 /* ---------- on-canvas selection handles (direct manipulation) ----------
    Rendered inside the SAME transformed wrapper as the selection outline, so they
@@ -354,8 +354,21 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
     const emH = 1.08;
     const box = boxStyleOf(P, time);
     const color = colorAt(obj, "fill", time);
-    const inner = P.style === "count"
-      ? <span style={{ whiteSpace: "pre" }}>{P.prefix}{Math.max(0, numberValue(P, time)).toFixed(P.decimals)}{P.suffix}</span>
+    const fmt = P.format || "plain";
+    /* optional style-preset ink (props from the Inspector swatches — all absent
+       on pre-preset projects, whose markup stays byte-identical):
+       stroke → -webkit-text-stroke · glow → layered text-shadow ·
+       ls → tracking · tnum → tabular figures · pillBg → rounded pill chip */
+    const numFx = {};
+    if (P.ls) numFx.letterSpacing = P.ls;
+    if (P.tnum) numFx.fontVariantNumeric = "tabular-nums";
+    if (P.stroke) numFx.WebkitTextStroke = `${P.strokeW || 2}px ${P.stroke}`;
+    if (P.glow) numFx.textShadow = `0 0 5px ${P.glow}A6, 0 0 16px ${P.glow}59, 0 0 38px ${P.glow}2E`;
+    /* formats (compact/currency/percent/time) can't be column-rolled → they
+       force the plain-text path; "plain" + style "count" is the legacy text
+       path (formatNumber(v,"plain",dec) === v.toFixed(dec), zero drift) */
+    const raw = (P.style === "count" || fmt !== "plain")
+      ? <span style={{ whiteSpace: "pre" }}>{P.prefix}{formatNumber(Math.max(0, numberValue(P, time)), fmt, P.decimals)}{P.suffix}</span>
       : (
         <span style={{ display: "flex", alignItems: "center" }}>
           {P.prefix && <span style={{ whiteSpace: "pre" }}>{P.prefix}</span>}
@@ -369,10 +382,16 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
           {P.suffix && <span style={{ whiteSpace: "pre" }}>{P.suffix}</span>}
         </span>
       );
+    const inner = P.pillBg
+      ? <span style={{ background: P.pillBg, color: contrastOn(P.pillBg), borderRadius: 999, padding: "0.1em 0.45em", display: "inline-flex", alignItems: "center" }}>{raw}</span>
+      : raw;
     const ring = P.ring || "none";
     if (ring !== "none") {
       const uLin = clamp01((time - P.start) / P.dur);
-      const p = P.to < P.from ? 1 - uLin : uLin; /* countdown depletes, count-up fills */
+      /* countdown depletes, count-up fills — reversed either by from > to
+         (legacy) or by the countdown MODE (value runs end → start) */
+      const depletes = P.mode === "countdown" ? P.from < P.to : P.to < P.from;
+      const p = depletes ? 1 - uLin : uLin;
       const R = P.fontSize * 1.15;
       const size = R * 2 + (P.ringW || 8) * 2 + 10;
       const c = size / 2;
@@ -390,7 +409,7 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
                 <circle cx={c} cy={c} r={R} fill="none" stroke={P.ringC} strokeWidth={P.ringW} strokeLinecap="round" pathLength={100} strokeDasharray={100} strokeDashoffset={100 * (1 - p)} transform={`rotate(-90 ${c} ${c})`} style={{ filter: `drop-shadow(0 0 6px ${P.ringC})` }} />
               </>}
             </svg>
-            <div style={{ position: "relative", zIndex: 1, fontFamily: `'${P.fontFamily}'`, fontWeight: 700, fontSize: P.fontSize, color, lineHeight: 1, display: "flex", alignItems: "center" }}>{inner}</div>
+            <div style={{ position: "relative", zIndex: 1, fontFamily: `'${P.fontFamily}'`, fontWeight: P.fontWeight || 700, fontSize: P.fontSize, color, lineHeight: 1, display: "flex", alignItems: "center", ...numFx }}>{inner}</div>
           </div>
           {handles}
         </div>
@@ -398,7 +417,7 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
     }
     return (
       <div onPointerDown={down} style={common}>
-        <div style={{ ...(box || {}), fontFamily: `'${P.fontFamily}'`, fontWeight: 600, fontSize: P.fontSize, color, lineHeight: 1, display: "flex", alignItems: "center" }}>{inner}</div>
+        <div style={{ ...(box || {}), fontFamily: `'${P.fontFamily}'`, fontWeight: P.fontWeight || 600, fontSize: P.fontSize, color, lineHeight: 1, display: "flex", alignItems: "center", ...numFx }}>{inner}</div>
         {handles}
       </div>
     );
