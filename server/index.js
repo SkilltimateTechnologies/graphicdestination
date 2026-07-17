@@ -7,12 +7,27 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { db, initSchema, usingTurso } from "./db.js";
 import { hashPassword, verifyPassword, signSession, requireAuth, COOKIE_NAME, COOKIE_OPTS } from "./auth.js";
+import { authLimiter } from "./ratelimit.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CRED_FILE = path.join(__dirname, "data", "admin-credentials.json");
 const CLIENT_DIST = path.join(__dirname, "..", "client", "dist");
 
 const app = express();
+
+// Security headers first, so they are present on every response (including
+// error responses produced by later middleware).
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'"
+  );
+  next();
+});
+
 app.use(express.json({ limit: "8mb" })); // project JSON payloads can be sizable
 app.use(cookieParser());
 app.use(cors({ origin: process.env.CLIENT_ORIGIN || true, credentials: true }));
@@ -20,9 +35,52 @@ app.use(cors({ origin: process.env.CLIENT_ORIGIN || true, credentials: true }));
 await initSchema();
 console.log(`Database: ${usingTurso ? "Turso cloud (embedded replica)" : "local SQLite file (no Turso env vars set)"}`);
 
+/* ---------------- health (no auth) ---------------- */
+
+app.get("/api/health", (req, res) => {
+  res.json({ ok: true, db: usingTurso ? "turso" : "local" });
+});
+
 /* ---------------- auth ---------------- */
 
-app.post("/api/auth/login", async (req, res) => {
+const USERNAME_RE = /^[a-zA-Z0-9_.-]+$/;
+
+app.post("/api/auth/signup", authLimiter, async (req, res) => {
+  const { username, password } = req.body || {};
+  if (typeof username !== "string" || username.length < 3 || username.length > 24 || !USERNAME_RE.test(username)) {
+    return res.status(400).json({ error: "Username must be 3-24 characters and contain only letters, numbers, dots, underscores, and hyphens" });
+  }
+  if (typeof password !== "string" || password.length < 8) {
+    return res.status(400).json({ error: "Password must be at least 8 characters" });
+  }
+
+  // Pre-check for a friendly 409 before doing the expensive hash.
+  const existing = await db.execute({ sql: "SELECT id FROM users WHERE username = ?", args: [username] });
+  if (existing.rows.length > 0) return res.status(409).json({ error: "Username is taken" });
+
+  const hash = await hashPassword(password);
+  let userId;
+  try {
+    const result = await db.execute({
+      sql: "INSERT INTO users (username, password_hash, role, must_change_password) VALUES (?, ?, 'user', 0)",
+      args: [username, hash],
+    });
+    userId = Number(result.lastInsertRowid);
+  } catch (err) {
+    // Lost the race against a concurrent signup with the same username.
+    if (String(err?.code || "").includes("CONSTRAINT") || /unique/i.test(String(err?.message || err))) {
+      return res.status(409).json({ error: "Username is taken" });
+    }
+    console.error("Signup failed:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+
+  const token = signSession({ id: userId, username, role: "user" });
+  res.cookie(COOKIE_NAME, token, COOKIE_OPTS);
+  res.status(201).json({ username, role: "user" });
+});
+
+app.post("/api/auth/login", authLimiter, async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: "Username and password required" });
 
@@ -65,15 +123,20 @@ app.post("/api/auth/change-password", requireAuth, async (req, res) => {
  * moment the admin changes their password (see /change-password above), and
  * you should delete server/data/admin-credentials.json (or just change the
  * password once) before any real deployment. See README "Security" section.
+ *
+ * The route is only registered when ENABLE_ADMIN_HINT === "1"; otherwise the
+ * endpoint does not exist at all (404).
  */
-app.get("/api/auth/admin-hint", (req, res) => {
-  try {
-    const raw = fs.readFileSync(CRED_FILE, "utf8");
-    res.json({ active: true, ...JSON.parse(raw) });
-  } catch {
-    res.json({ active: false });
-  }
-});
+if (process.env.ENABLE_ADMIN_HINT === "1") {
+  app.get("/api/auth/admin-hint", (req, res) => {
+    try {
+      const raw = fs.readFileSync(CRED_FILE, "utf8");
+      res.json({ active: true, ...JSON.parse(raw) });
+    } catch {
+      res.json({ active: false });
+    }
+  });
+}
 
 /* ---------------- projects (Turso-backed) ---------------- */
 

@@ -1,2 +1,65 @@
+/* ============================================================
+   GraphicDestination Motion — design tokens (design/design.md v1.0)
+   Dark-first, low saturation, warm amber accent.
+   ============================================================ */
+:root {
+  /* surfaces */
+  --bg-canvas: #0A0C10;
+  --bg-panel: #10131A;
+  --bg-raised: #171B24;
+  --bg-hover: #1E2330;
+  /* hairlines */
+  --border: #232936;
+  --border-strong: #2E3546;
+  /* text */
+  --text: #E9ECF3;
+  --text-dim: #939BAD;
+  --text-faint: #5D667A;
+  /* brand + status */
+  --accent: #F5A524;
+  --accent-dim: #B87A18;
+  --accent-soft: rgba(245, 165, 36, 0.12);
+  --success: #3FB68B;
+  --danger: #E5636A;
+  --info: #5B8DEF;
+  /* focus ring: 2px rgba(245,165,36,0.45) offset */
+  --focus-ring: rgba(245, 165, 36, 0.45);
+  /* shape */
+  --radius-control: 6px;
+  --radius-card: 8px;
+  --radius-modal: 10px;
+  --shadow-modal: 0 12px 40px rgba(0, 0, 0, 0.5);
+  /* type */
+  --font-ui: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  /* motion (UI chrome) */
+  --hover-dur: 120ms;
+  --enter-dur: 160ms;
+}
+
+/* --- minimal resets only (app is inline-style heavy) --- */
 * { box-sizing: border-box; }
-body { margin: 0; background: #0F1116; }
+body { margin: 0; }
+
+body {
+  background: var(--bg-canvas);
+  color: var(--text);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* thin dark scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+*::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
+*::-webkit-scrollbar-corner { background: transparent; }
+
+/* selection */
+::selection { background: var(--accent-soft); color: var(--text); }
+
+/* focus ring */
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-control); }

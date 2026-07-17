@@ -1,138 +1,79 @@
-# Graphic Destination — Motion
+# GraphicDestination Motion
 
-A real, deployable full-stack app: public landing page → login → the motion
-editor gated behind auth. Backend uses `@libsql/client` (Turso's driver),
-project data persists in a real database, and passwords are bcrypt-hashed
-behind JWT session cookies.
+**After Effects-grade motion graphics, in your browser.** A full-stack SaaS
+motion-design studio: keyframed layers, shape morphing, text FX, charts, maps —
+with instant in-browser WebM export and cloud-saved projects.
 
-## What's actually running right now
+## Features
 
-This was built and tested inside a sandboxed environment with **no access to
-a real Turso cloud account**, so it currently runs against a local SQLite
-file using the exact same `@libsql/client` API Turso uses. That's not a
-placeholder or a mock — it's the real database layer, genuinely tested
-end-to-end (auth, sessions, project CRUD, ownership isolation — see
-"What was tested" below). Pointing it at a real Turso database is a
-two-environment-variable change, described below.
+- **Motion editor** — 1280×720 stage, multi-track timeline, keyframe animation
+  (position / scale / rotation / opacity) with 10 easings, 64-point shape
+  morphing (11 shapes), per-character text FX, number rollers, charts, real
+  country maps with border FX, nested clips with speed/transition control.
+- **Instant WebM export (client-side)** — deterministic frame-stepped render of
+  the exact editor engine into a canvas → MediaRecorder (VP9/VP8). No server,
+  no render farm, works offline.
+- **Server MP4 render (beta)** — HyperFrames pipeline compiles project JSON →
+  HTML composition → MP4 streamed back (requires Chromium on the host).
+- **Accounts & cloud projects** — public signup, bcrypt password hashing,
+  JWT session cookies, per-user project isolation, Turso (libsql) cloud
+  persistence with local SQLite fallback for dev.
+- **Security** — rate-limited auth endpoints (20 req / 10 min / IP), strict
+  security headers + CSP, password bootstrap endpoint disabled unless
+  `ENABLE_ADMIN_HINT=1`.
 
-## Project layout
+## Architecture
 
 ```
-server/   Express API — auth, sessions, Turso-backed project storage
-client/   Vite + React — landing page, login, protected editor
+client/   React 19 + Vite — landing, auth, editor, in-browser export engine
+server/   Express 4 — auth (JWT cookies), projects API, HyperFrames render
+          @libsql/client 0.17 — Turso embedded replica (syncs to cloud primary)
 ```
 
-## Local setup
+| Route | Purpose |
+|---|---|
+| `POST /api/auth/signup` | Create account (auto-login) — rate limited |
+| `POST /api/auth/login` / `logout` / `me` / `change-password` | Session auth |
+| `GET/POST/PUT/DELETE /api/projects[/:id]` | Cloud project CRUD (owner-scoped) |
+| `POST /api/render/compile` | Project JSON → HyperFrames HTML |
+| `POST /api/projects/:id/render` | Server-side MP4 render stream |
+| `GET /api/health` | `{ok, db:"turso"|"local"}` |
+
+## Quickstart
 
 ```bash
-# 1. Server
-cd server
-npm install
-npm run seed        # creates the admin account, prints + saves its password
-npm start            # http://localhost:8787
+# Server
+cd server && npm ci
+cp .env.example .env   # set TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, JWT_SECRET
+npm run seed           # creates the admin account (prints password once)
+npm start              # http://localhost:8787
 
-# 2. Client (separate terminal)
-cd client
-npm install
-npm run dev           # http://localhost:5173 (proxies API calls to :8787)
+# Client (dev)
+cd client && npm ci && npm run dev   # http://localhost:5173
+
+# Production: client build is served by the server
+cd client && npm run build && cd ../server && npm start
 ```
 
-Visit `http://localhost:5173`. The login page shows the freshly-generated
-admin username/password in a banner until you change the password once.
+Server tests: `cd server && node test-api.mjs` (26 checks: auth, signup,
+rate limiting, headers, health).
 
-## Connecting a real Turso database
+## Environment variables
 
-1. Create a database with the [Turso CLI](https://docs.turso.tech) or dashboard:
-   ```bash
-   turso db create graphic-destination
-   turso db show graphic-destination        # gives you the URL
-   turso db tokens create graphic-destination  # gives you an auth token
-   ```
-2. In `server/.env`, uncomment and fill in:
-   ```
-   TURSO_DATABASE_URL=libsql://graphic-destination-yourorg.turso.io
-   TURSO_AUTH_TOKEN=eyJ...
-   ```
-3. Restart the server. It will log `Database: Turso cloud (embedded replica)`
-   instead of the local-file message — no other code changes needed. The
-   server keeps a local synced replica file for fast reads; writes sync to
-   your real Turso primary.
-4. Run `npm run seed` once against the new database to create the admin user.
+| Var | Required | Purpose |
+|---|---|---|
+| `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` | prod | Turso cloud DB (unset → local SQLite file) |
+| `JWT_SECRET` | prod | Session signing key |
+| `PORT` | no | Default 8787 |
+| `ENABLE_ADMIN_HINT` | no | `1` exposes the seeded-admin bootstrap endpoint (dev only) |
+| `CLIENT_ORIGIN` | no | CORS origin for the client |
 
-## Rendering to real MP4
+## Deploy
 
-There's a real HyperFrames-based export pipeline in `server/hyperframes/`
-— project JSON in, actual MP4 out, verified end-to-end (not just
-theoretically wired up). **See `RENDERING.md`** for exact scope (what's
-fully animated vs. rendered as a placeholder in v1), the real test
-evidence, and the one environment-specific setup step it needs
-(a headless Chromium binary — auto-detected where possible).
+- **Docker**: `docker build -t gd-motion . && docker run -p 8787:8787 --env-file server/.env gd-motion`
+- **Railway**: `railway.json` included (builds client, starts server).
 
-Quick start once the server is running:
-```bash
-# in server/, once:
-npm install hyperframes --ignore-scripts
+## Security notes
 
-# then, authenticated:
-curl -b cookies.txt -X POST http://localhost:8787/api/projects/1/render -o out.mp4
-```
-
-## Deploying (e.g. Railway)
-
-- Build the client (`cd client && npm run build`) — the server automatically
-  serves `client/dist` as static files and handles client-side routing, so
-  **one Railway service runs both** frontend and backend.
-- Set the environment variables from `server/.env.example` in Railway's
-  dashboard (`TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `JWT_SECRET`,
-  `NODE_ENV=production`, `CLIENT_ORIGIN=<your Railway domain>`).
-- Start command: `node server/index.js` (after the client build step runs).
-- Run `npm run seed` once (Railway shell, or a one-off job) against the
-  production database to create the admin account.
-
-## ⚠️ Security — read before real use
-
-- **The admin-hint banner is a bootstrap convenience, not a production
-  feature.** `/api/auth/admin-hint` returns the plaintext password of a
-  freshly-seeded admin account so it can be shown on the login page, exactly
-  as requested for this first pass. It **automatically stops returning data**
-  the moment the admin password is changed (the endpoint checks whether the
-  bootstrap credentials file still exists, and that file is deleted by
-  `/api/auth/change-password`). **Change the admin password immediately
-  after your first login**, before this is exposed anywhere real.
-- `JWT_SECRET` in `server/.env` was randomly generated for this delivery.
-  Generate a new one for your own deployment:
-  `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`
-- There's currently one role (`admin`) and no signup flow — this is a
-  single-tenant admin tool, not a multi-user product, unless you extend it.
-- Cookies are `httpOnly` + `sameSite=lax`; `secure` is auto-enabled when
-  `NODE_ENV=production`, which requires HTTPS (Railway gives you this by
-  default).
-
-## What was tested
-
-Before delivery, I ran real integration tests against the live server
-(not just read through the code):
-- Protected routes 401 without a session, 200 with a valid one
-- Wrong password rejected, correct password issues a working session cookie
-- Full project CRUD round-trips through the database with data integrity
-  intact, and a project is invisible to requests without the owning user's
-  session (ownership isolation)
-- Changing the password invalidates the old password and the admin-hint
-  banner permanently disables itself
-- The built client is correctly served by Express, client-side routes
-  fall back to `index.html`, unknown `/api/*` paths still 404 as JSON
-  rather than being swallowed by the SPA fallback, and static assets load
-- **Rendering**: the HyperFrames compiler's output was validated against
-  HyperFrames' own `lint` tool (0 errors), and a real MP4 was rendered
-  end-to-end through the actual HTTP API (login → create project →
-  render → real `video/mp4` file, dimensions/duration/codec confirmed
-  with `ffprobe`) — not just the CLI in isolation. Full detail in
-  `RENDERING.md`.
-
-## Extending
-
-`client/src/components/GraphicDestinationMotion.jsx` is the full editor —
-identical to what was iterated on in chat. `client/src/api.js` has
-`createProject` / `listProjects` / `getProject` / `updateProject` ready to
-wire into the editor's Save/Load UI in place of (or alongside) the existing
-copy-paste JSON flow.
+- Secrets live only in `server/.env` (git-ignored). Never commit credentials.
+- Rotate any credential that has ever been shared in chat/tickets.

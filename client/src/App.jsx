@@ -13,7 +13,7 @@ function ProtectedRoute({ children }) {
 
 function Loading() {
   return (
-    <div style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#0F1116", color: "#8B93A7", fontFamily: "Inter, system-ui, sans-serif" }}>
+    <div style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#0A0C10", color: "#939BAD", fontFamily: "Inter, system-ui, sans-serif", fontSize: 13, letterSpacing: "0.01em" }}>
       Checking session…
     </div>
   );

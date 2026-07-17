@@ -32,12 +32,24 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  const signup = useCallback(async (username, password) => {
+    setError("");
+    try {
+      const res = await api.signup(username, password);
+      setUser(res);
+      return res;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
   const logout = useCallback(async () => {
     await api.logout();
     setUser(null);
   }, []);
 
-  return <AuthContext.Provider value={{ user, error, login, logout, refresh }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ user, error, login, signup, logout, refresh }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import ExportDialog from "./ExportDialog";
 
 /* ============================================================
    GRAPHIC DESTINATION — Motion  (prototype v0.2)
@@ -12,9 +13,9 @@ const DUR = 5000;
 const FPS = 60;
 
 const C = {
-  bg0: "#0F1116", bg1: "#151820", bg2: "#1C2029", bg3: "#232834",
-  line: "#2B3140", txt: "#E9EBF2", dim: "#8B93A7", faint: "#5A6175",
-  amber: "#FFB224", danger: "#FF6B6B",
+  bg0: "#0A0C10", bg1: "#10131A", bg2: "#171B24", bg3: "#1E2330",
+  line: "#232936", lineStrong: "#2E3546", txt: "#E9ECF3", dim: "#939BAD", faint: "#5D667A",
+  amber: "#F5A524", amberDim: "#B87A18", amberSoft: "rgba(245,165,36,0.12)", danger: "#E5636A", info: "#5B8DEF",
 };
 const SWATCHES = ["#FFB224", "#FF6B6B", "#5B8CFF", "#6EE7B7", "#C084FC", "#F9F9F9", "#0F1116"];
 
@@ -29,8 +30,9 @@ export const EASE = {
   easeOutBack: (t) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); },
   easeOutElastic: (t) => { if (t === 0 || t === 1) return t; const c4 = (2 * Math.PI) / 3; return Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * c4) + 1; },
   easeOutBounce: (t) => { const n1 = 7.5625, d1 = 2.75; if (t < 1 / d1) return n1 * t * t; if (t < 2 / d1) return n1 * (t -= 1.5 / d1) * t + 0.75; if (t < 2.5 / d1) return n1 * (t -= 2.25 / d1) * t + 0.9375; return n1 * (t -= 2.625 / d1) * t + 0.984375; },
+  easeInOutSine: (t) => -(Math.cos(Math.PI * t) - 1) / 2,
 };
-const EASE_LABEL = { linear: "Linear", easeOutQuad: "Out Quad", easeInQuad: "In Quad", easeInOutCubic: "In-Out Cubic", easeOutCubic: "Out Cubic", easeInCubic: "In Cubic", easeOutBack: "Overshoot", easeOutElastic: "Elastic", easeOutBounce: "Bounce" };
+const EASE_LABEL = { linear: "Linear", easeOutQuad: "Out Quad", easeInQuad: "In Quad", easeInOutCubic: "In-Out Cubic", easeOutCubic: "Out Cubic", easeInCubic: "In Cubic", easeOutBack: "Overshoot", easeOutElastic: "Elastic", easeOutBounce: "Bounce", easeInOutSine: "In-Out Sine" };
 export const clamp01 = (v) => Math.min(1, Math.max(0, v));
 
 /* ---------- seeded RNG: deterministic FX (identical on scrub & export) ---------- */
@@ -851,6 +853,8 @@ export default function GraphicDestinationMotion() {
   const [ioCopied, setIoCopied] = useState(false);
   const [importText, setImportText] = useState("");
   const [importErr, setImportErr] = useState("");
+  const [name, setName] = useState("Untitled project");
+  const [exportOpen, setExportOpen] = useState(false);
 
   const timeRef = useRef(0);
   timeRef.current = time;
@@ -1463,25 +1467,34 @@ export default function GraphicDestinationMotion() {
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: C.bg0, color: C.txt, fontFamily: "'Inter', system-ui, sans-serif", fontSize: 13, userSelect: "none", overflow: "hidden" }}>
       <style>{`
         @import url('${FONT_IMPORT}');
-        *::-webkit-scrollbar{width:8px;height:8px} *::-webkit-scrollbar-thumb{background:#2B3140;border-radius:4px}
-        input[type=range]{-webkit-appearance:none;height:3px;background:#2B3140;border-radius:2px;outline:none;width:100%}
+        *::-webkit-scrollbar{width:8px;height:8px} *::-webkit-scrollbar-thumb{background:${C.line};border-radius:4px}
+        input[type=range]{-webkit-appearance:none;height:3px;background:${C.line};border-radius:2px;outline:none;width:100%}
         input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:${C.amber};cursor:pointer}
         input[type=color]{border:none;background:none;width:24px;height:24px;padding:0;cursor:pointer}
         input[type=color]::-webkit-color-swatch{border:1px solid ${C.line};border-radius:6px}
         button{font-family:inherit}
-        select{background:#1C2029;border:1px solid #2B3140;color:#E9EBF2;border-radius:7px;padding:5px 8px;font-size:12px;outline:none;width:100%}
+        select{background:${C.bg2};border:1px solid ${C.line};color:${C.txt};border-radius:6px;padding:5px 8px;font-size:12px;outline:none;width:100%}
+        .gd-btn{transition:background-color 120ms ease-out,border-color 120ms ease-out,color 120ms ease-out,filter 120ms ease-out}
         .gd-btn:hover{background:${C.bg3} !important}
+        .gd-btn-accent{transition:background 120ms ease-out}
+        .gd-btn-accent:hover{background:${C.amberDim} !important}
         .gd-kf:hover{transform:translate(-50%,-50%) rotate(45deg) scale(1.3) !important}
         .gd-kfc:hover{transform:translate(-50%,-50%) scale(1.3) !important}
+        @keyframes gdPanelIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+        .gd-panel{animation:gdPanelIn 160ms ease-out}
+        .gd-name-input{background:transparent;border:1px solid transparent;border-radius:6px;color:${C.txt};padding:4px 8px;font-size:12.5px;font-weight:600;font-family:inherit;outline:none;transition:border-color 120ms ease-out,background 120ms ease-out}
+        .gd-name-input:hover{border-color:${C.line}}
+        .gd-name-input:focus{border-color:${C.amber};background:${C.bg2}}
       `}</style>
       <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onPickImage} />
 
       {/* ============ TOP BAR ============ */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 14px", height: 48, background: C.bg1, borderBottom: `1px solid ${C.line}`, flexShrink: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 14px", height: 44, background: C.bg1, borderBottom: `1px solid ${C.line}`, flexShrink: 0 }}>
         <div style={{ fontFamily: "'Space Grotesk'", fontWeight: 700, fontSize: 15, letterSpacing: 0.4, whiteSpace: "nowrap" }}>
           Graphic<span style={{ color: C.amber }}>Destination</span>
           <span style={{ color: C.faint, fontWeight: 500, marginLeft: 8, fontSize: 12 }}>MOTION · v0.5</span>
         </div>
+        <input className="gd-name-input" value={name} onChange={(e) => setName(e.target.value)} title="Project name" aria-label="Project name" style={{ width: 150 }} />
         <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 8, overflow: "hidden" }}>
           <button className="gd-btn" onClick={() => exitToDepth(0)} style={{ background: !inClip ? C.bg3 : "transparent", border: "none", color: !inClip ? C.txt : C.dim, borderRadius: 6, padding: "4px 9px", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>Main</button>
           {ctx.names.map((nm, i) => (
@@ -1495,11 +1508,15 @@ export default function GraphicDestinationMotion() {
         <select value={`${stage.w}x${stage.h}`} onChange={(e) => { const p = STAGE_PRESETS.find((s) => `${s.w}x${s.h}` === e.target.value); if (p) setStage({ w: p.w, h: p.h }); }} style={{ width: 150 }}>
           {STAGE_PRESETS.map((p) => <option key={p.id} value={`${p.w}x${p.h}`}>{p.name}</option>)}
         </select>
-        <button className="gd-btn" onClick={() => setBrandOpen(true)} style={{ background: C.bg2, border: `1px solid ${C.line}`, color: C.txt, borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 7 }}>
+        <button className="gd-btn" onClick={() => setBrandOpen(true)} style={{ background: C.bg2, border: `1px solid ${C.line}`, color: C.txt, borderRadius: 6, padding: "6px 12px", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 7 }}>
           <span style={{ display: "flex", gap: 2 }}>{brand.colors.slice(0, 3).map((c, i) => <span key={i} style={{ width: 8, height: 8, borderRadius: 2, background: c }} />)}</span>
           Brand
         </button>
-        <button className="gd-btn" onClick={() => { setIoOpen(true); setImportErr(""); }} style={{ background: C.bg2, border: `1px solid ${C.line}`, color: C.txt, borderRadius: 8, padding: "6px 14px", cursor: "pointer", fontWeight: 600 }}>Save / Load</button>
+        <button className="gd-btn" onClick={() => { setIoOpen(true); setImportErr(""); }} style={{ background: C.bg2, border: `1px solid ${C.line}`, color: C.txt, borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontWeight: 600 }}>Save / Load</button>
+        <button className="gd-btn-accent" onClick={() => setExportOpen(true)} title="Export video — WebM in-browser, MP4 server render" style={{ background: C.amber, color: "#1A1405", border: "none", borderRadius: 6, padding: "6px 16px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
+          <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 1.5v6.2M3.7 5.6 6 7.9l2.3-2.3M1.8 9.2v.9a.9.9 0 0 0 .9.9h6.6a.9.9 0 0 0 .9-.9v-.9" /></svg>
+          Export
+        </button>
       </div>
 
       {/* ============ MAIN ============ */}
@@ -1518,12 +1535,12 @@ export default function GraphicDestinationMotion() {
 
         {/* shapes folder with search */}
         {shapesOpen && (
-          <div style={{ position: "absolute", left: 84, top: 12, width: 240, background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 12, padding: 12, zIndex: 30, boxShadow: "0 12px 40px rgba(0,0,0,.5)" }}>
+          <div className="gd-panel" style={{ position: "absolute", left: 84, top: 12, width: 240, background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 8, padding: 12, zIndex: 30, boxShadow: "0 12px 40px rgba(0,0,0,.5)" }}>
             <input autoFocus value={shapeQ} onChange={(e) => setShapeQ(e.target.value)} placeholder="Search shapes…" style={{ ...inputStyle, marginBottom: 9 }} />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 7, maxHeight: 210, overflowY: "auto" }}>
               {SHAPE_IDS.filter((sid) => SHAPE_DEFS[sid].name.toLowerCase().includes(shapeQ.toLowerCase())).map((sid) => (
                 <button key={sid} className="gd-btn" title={SHAPE_DEFS[sid].name} onClick={() => addObject("shape", { shape: sid })}
-                  style={{ background: C.bg1, border: `1px solid ${C.line}`, borderRadius: 9, padding: 7, cursor: "pointer", aspectRatio: "1" }}>
+                  style={{ background: C.bg1, border: `1px solid ${C.line}`, borderRadius: 6, padding: 7, cursor: "pointer", aspectRatio: "1" }}>
                   <svg width="100%" height="100%" viewBox="-6 -6 112 112"><polygon points={ptsToStr(SHAPE_DEFS[sid].pts)} fill={C.dim} /></svg>
                 </button>
               ))}
@@ -1533,21 +1550,21 @@ export default function GraphicDestinationMotion() {
 
         {/* maps drawer */}
         {mapsOpen && (
-          <div style={{ position: "absolute", left: 84, top: 12, width: 240, background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 12, padding: 12, zIndex: 30, boxShadow: "0 12px 40px rgba(0,0,0,.5)" }}>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: C.dim, marginBottom: 10 }}>Maps</div>
+          <div className="gd-panel" style={{ position: "absolute", left: 84, top: 12, width: 240, background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 8, padding: 12, zIndex: 30, boxShadow: "0 12px 40px rgba(0,0,0,.5)" }}>
+            <div style={{ ...sectionLabel, marginBottom: 10 }}>Maps</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
               <button className="gd-btn" onClick={() => { addObject("map"); setMapsOpen(false); }}
-                style={{ display: "flex", alignItems: "center", gap: 10, background: C.bg1, border: `1px solid ${C.line}`, borderRadius: 9, padding: "9px 10px", cursor: "pointer", textAlign: "left" }}>
+                style={{ display: "flex", alignItems: "center", gap: 10, background: C.bg1, border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 10px", cursor: "pointer", textAlign: "left" }}>
                 <svg width="26" height="26" viewBox="0 0 100 102" style={{ flexShrink: 0 }}><path d={ringsToPath(MAPS.IND.rings)} fill="none" stroke={C.amber} strokeWidth="6" /></svg>
                 <span><div style={{ fontSize: 12.5, fontWeight: 700, color: C.txt }}>Country Map</div><div style={{ fontSize: 10, color: C.faint }}>One real country outline · border FX</div></span>
               </button>
               <button className="gd-btn" onClick={() => { addObject("world"); setMapsOpen(false); }}
-                style={{ display: "flex", alignItems: "center", gap: 10, background: C.bg1, border: `1px solid ${C.line}`, borderRadius: 9, padding: "9px 10px", cursor: "pointer", textAlign: "left" }}>
+                style={{ display: "flex", alignItems: "center", gap: 10, background: C.bg1, border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 10px", cursor: "pointer", textAlign: "left" }}>
                 <div style={{ width: 26, height: 26, borderRadius: "50%", border: `2px solid ${C.amber}`, position: "relative", flexShrink: 0 }}><div style={{ position: "absolute", inset: "4px 9px", borderLeft: `1.5px solid ${C.amber}`, borderRight: `1.5px solid ${C.amber}`, borderRadius: "50%" }} /></div>
                 <span><div style={{ fontSize: 12.5, fontWeight: 700, color: C.txt }}>World Map</div><div style={{ fontSize: 10, color: C.faint }}>177 countries · timed reveals + auto-zoom</div></span>
               </button>
               <button className="gd-btn" onClick={() => { addObject("continent"); setMapsOpen(false); }}
-                style={{ display: "flex", alignItems: "center", gap: 10, background: C.bg1, border: `1px solid ${C.line}`, borderRadius: 9, padding: "9px 10px", cursor: "pointer", textAlign: "left" }}>
+                style={{ display: "flex", alignItems: "center", gap: 10, background: C.bg1, border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 10px", cursor: "pointer", textAlign: "left" }}>
                 <svg width="26" height="26" viewBox="0 0 100 100" style={{ flexShrink: 0 }}><circle cx="50" cy="50" r="42" fill="none" stroke={C.amber} strokeWidth="6" strokeDasharray="16 10" /></svg>
                 <span><div style={{ fontSize: 12.5, fontWeight: 700, color: C.txt }}>Continent Map</div><div style={{ fontSize: 10, color: C.faint }}>All countries in a region · same border FX</div></span>
               </button>
@@ -1568,30 +1585,30 @@ export default function GraphicDestinationMotion() {
               <div style={{ position: "absolute", left: -4000, top: "100%", width: 9000, height: 4000, background: "rgba(8,10,14,.58)", zIndex: 70, pointerEvents: "none" }} />
               <div style={{ position: "absolute", left: -4000, top: 0, width: 4000, height: "100%", background: "rgba(8,10,14,.58)", zIndex: 70, pointerEvents: "none" }} />
               <div style={{ position: "absolute", left: "100%", top: 0, width: 4000, height: "100%", background: "rgba(8,10,14,.58)", zIndex: 70, pointerEvents: "none" }} />
-              <div style={{ position: "absolute", inset: 0, border: "1px dashed rgba(255,178,36,.4)", zIndex: 71, pointerEvents: "none" }} />
+              <div style={{ position: "absolute", inset: 0, border: "1px dashed rgba(245,165,36,.4)", zIndex: 71, pointerEvents: "none" }} />
             </>}
             {sel && sel.props.path && (sel.props.path.show || selIds.includes(sel.id)) && (
               <PathEditor obj={sel} onPtDown={onPathPtDown} patchPath={patchPath} locked={sel.locked} />
             )}
           </div>
           {inClip && (
-            <div style={{ position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)", background: "#2a2110", border: `1px solid ${C.amber}`, color: C.amber, borderRadius: 999, padding: "5px 14px", fontSize: 11.5, fontWeight: 700 }}>
+            <div style={{ position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)", background: C.amberSoft, border: `1px solid ${C.amber}`, color: C.amber, borderRadius: 999, padding: "5px 14px", fontSize: 11.5, fontWeight: 700 }}>
               Editing clip: {ctx.names[ctx.names.length - 1]} — Esc to go back
             </div>
           )}
-          <div style={{ position: "absolute", bottom: 8, left: 14, color: C.faint, fontSize: 10.5, fontFamily: "'JetBrains Mono'" }}>
+          <div style={{ position: "absolute", bottom: 8, left: 14, color: C.faint, fontSize: 10.5, fontFamily: "'JetBrains Mono'", fontVariantNumeric: "tabular-nums" }}>
             <span onClick={() => setOverflowShow(!overflowShow)} style={{ cursor: "pointer", color: overflowShow ? C.amber : C.faint, marginRight: 8 }}>[{overflowShow ? "workspace: showing off-canvas" : "workspace: hidden"}]</span>{stage.w}×{stage.h} · space play · ⌘click multi · ⌘G group · ⌘D dup · right-click timeline = easing
           </div>
         </div>
 
         {/* ---- inspector ---- */}
-        <div style={{ width: 284, background: C.bg1, borderLeft: `1px solid ${C.line}`, overflowY: "auto", flexShrink: 0, padding: "12px 12px 30px" }}>
+        <div style={{ width: 280, background: C.bg1, borderLeft: `1px solid ${C.line}`, overflowY: "auto", flexShrink: 0, padding: "12px 12px 30px" }}>
           {selMany.length > 1 ? (
             <Card title={`${selMany.length} layers selected`}>
-              <button className="gd-btn" onClick={groupSelection} style={{ width: "100%", background: C.amber, color: "#1a1405", border: "none", borderRadius: 8, padding: "9px 0", cursor: "pointer", fontWeight: 700, marginBottom: 12 }}>⌘G · Group into Clip</button>
+              <button className="gd-btn" onClick={groupSelection} style={{ width: "100%", background: C.amber, color: "#1a1405", border: "none", borderRadius: 6, padding: "9px 0", cursor: "pointer", fontWeight: 700, marginBottom: 12 }}>⌘G · Group into Clip</button>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, marginBottom: 10 }}>
                 {[["left", "⇤"], ["hcenter", "↔"], ["right", "⇥"], ["top", "⤒"], ["vcenter", "↕"], ["bottom", "⤓"]].map(([m, ic]) => (
-                  <button key={m} className="gd-btn" onClick={() => align(m)} style={{ ...chipStyle, cursor: "pointer", borderRadius: 8, padding: "7px 0", textAlign: "center" }}>{ic}</button>
+                  <button key={m} className="gd-btn" onClick={() => align(m)} style={{ ...chipStyle, cursor: "pointer", borderRadius: 6, padding: "7px 0", textAlign: "center" }}>{ic}</button>
                 ))}
               </div>
               <button className="gd-btn" onClick={duplicateSelected} style={{ ...chipStyle, cursor: "pointer", marginRight: 6 }}>⧉ Duplicate</button>
@@ -1617,7 +1634,7 @@ export default function GraphicDestinationMotion() {
 
               {sel.type === "clip" && (
                 <Card title="Clip">
-                  <button className="gd-btn" onClick={() => enterClip(sel.id)} style={{ width: "100%", background: C.amber, color: "#1a1405", border: "none", borderRadius: 8, padding: "8px 0", cursor: "pointer", fontWeight: 700, marginBottom: 10 }}>Open clip timeline →</button>
+                  <button className="gd-btn" onClick={() => enterClip(sel.id)} style={{ width: "100%", background: C.amber, color: "#1a1405", border: "none", borderRadius: 6, padding: "8px 0", cursor: "pointer", fontWeight: 700, marginBottom: 10 }}>Open clip timeline →</button>
                   <SliderRow label="Start" min={0} max={Math.max(100, ctxDur - 100)} step={10} value={sel.props.start} onChange={(v) => patchProps(sel.id, { start: v })} />
                   <SliderRow label="Duration" min={300} max={15000} step={100} value={sel.props.dur} onChange={(v) => stretchClipDur(sel.id, v)} />
                   <label style={{ display: "flex", alignItems: "center", gap: 7, color: C.dim, fontSize: 11.5, fontWeight: 600, marginBottom: 9, cursor: "pointer" }}>
@@ -1657,7 +1674,7 @@ export default function GraphicDestinationMotion() {
                       const isCur = atNow ? atNow.v === sid : (!sel.tracks.shape?.length && sel.props.shape === sid);
                       return (
                         <button key={sid} className="gd-btn" title={SHAPE_DEFS[sid].name} onClick={() => setShapeAt(sel.id, sid)}
-                          style={{ background: C.bg2, border: `1px solid ${isCur ? C.amber : C.line}`, borderRadius: 7, padding: 4, cursor: "pointer", aspectRatio: "1" }}>
+                          style={{ background: C.bg2, border: `1px solid ${isCur ? C.amber : C.line}`, borderRadius: 6, padding: 4, cursor: "pointer", aspectRatio: "1" }}>
                           <svg width="100%" height="100%" viewBox="-6 -6 112 112"><polygon points={ptsToStr(SHAPE_DEFS[sid].pts)} fill={isCur ? C.amber : C.dim} /></svg>
                         </button>
                       );
@@ -1683,13 +1700,13 @@ export default function GraphicDestinationMotion() {
                   <FontControls P={sel.props} onChange={(patch) => patchProps(sel.id, patch)} showSpacing brand={brand} />
                   <ColorKfRow label="Color" obj={sel} time={time} sw={SW} onEdit={(v) => editProp(sel.id, "fill", v)} onKf={(has, v) => { if (has) removeKeyframe(sel.id, "fill", Math.round(time / 10) * 10); else { const T = setKeyframe(sel.id, "fill", time, v); setSelKf({ objId: sel.id, prop: "fill", t: T }); } }} />
                   {flowText && <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.5, margin: "8px 0" }}>Flowing on a path — animate with <b style={{ color: C.txt }}>Path progress</b>, <b style={{ color: C.txt }}>Rotation</b> (spins around the loop), <b style={{ color: C.txt }}>Scale</b> and <b style={{ color: C.txt }}>Opacity</b> (flow in, fade out). Text FX and boxes apply in normal or Travel mode.</div>}
-                  {!flowText && <div style={{ fontSize: 10.5, fontWeight: 700, color: C.dim, margin: "10px 0 6px" }}>TEXT FX · starts at playhead</div>}
+                  {!flowText && <div style={{ ...sectionLabel, margin: "10px 0 6px" }}>TEXT FX · starts at playhead</div>}
                   {!flowText && sel.props.textFx && <SliderRow label="FX speed" min={0.25} max={3} step={0.05} value={sel.props.textFx.speed || 1} onChange={(v) => patchProps(sel.id, { textFx: { ...sel.props.textFx, speed: v } })} />}
                   {!flowText && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
                     {TEXTFX_LIST.map((fx) => {
                       const on = (sel.props.textFx?.type || "none") === fx.id;
                       return <button key={fx.id} className="gd-btn" onClick={() => patchProps(sel.id, { textFx: fx.id === "none" ? null : { type: fx.id, start: Math.round(timeRef.current / 10) * 10, seed: Math.floor(Math.random() * 9999) } })}
-                        style={{ background: C.bg2, border: `1px solid ${on ? C.amber : C.line}`, color: on ? C.amber : C.txt, borderRadius: 8, padding: "6px 5px", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>{fx.name}</button>;
+                        style={{ background: C.bg2, border: `1px solid ${on ? C.amber : C.line}`, color: on ? C.amber : C.txt, borderRadius: 6, padding: "6px 5px", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>{fx.name}</button>;
                     })}
                   </div>}
                 </Card>
@@ -1780,7 +1797,7 @@ export default function GraphicDestinationMotion() {
                   <SliderRow label="Base op." min={0.05} max={1} step={0.01} value={sel.props.baseOp} onChange={(v) => patchProps(sel.id, { baseOp: v })} />
                   <Row label="Outlines"><input type="color" value={sel.props.stroke} onChange={(e) => patchProps(sel.id, { stroke: e.target.value })} /></Row>
                   <ChipRow label="Glow" options={[[true, "On"], [false, "Off"]]} value={sel.props.glow} onChange={(v) => patchProps(sel.id, { glow: v })} />
-                  <div style={{ fontSize: 10.5, fontWeight: 700, color: C.dim, margin: "10px 0 5px" }}>ZOOM CAMERA</div>
+                  <div style={{ ...sectionLabel, margin: "10px 0 5px" }}>ZOOM CAMERA</div>
                   <ChipRow label="Mode" options={[[true, "Automatic"], [false, "Manual"]]} value={sel.props.autoZoom !== false} onChange={(v) => patchProps(sel.id, { autoZoom: v })} />
                   {sel.props.autoZoom !== false ? (
                     <>
@@ -1899,7 +1916,7 @@ export default function GraphicDestinationMotion() {
                         <button className="gd-btn" onClick={() => patchProps(sel.id, { path: null })} style={{ ...chipStyle, cursor: "pointer", color: C.danger }}>✕ Remove</button>
                       </div>
                       {sel.type === "text" && <ChipRow label="Text" options={[["flow", "Flows on path"], ["travel", "Travels the path"]]} value={sel.props.pathMode || "flow"} onChange={(v) => patchProps(sel.id, { pathMode: v })} />}
-                      <button className="gd-btn" onClick={() => animateAlongPath(sel.id)} style={{ width: "100%", background: C.bg2, border: `1px solid ${C.amber}`, color: C.amber, borderRadius: 8, padding: "7px 0", cursor: "pointer", fontWeight: 700, marginBottom: 6 }}>▶ Animate along path (adds ◆ 0 → 1)</button>
+                      <button className="gd-btn" onClick={() => animateAlongPath(sel.id)} style={{ width: "100%", background: C.bg2, border: `1px solid ${C.amber}`, color: C.amber, borderRadius: 6, padding: "7px 0", cursor: "pointer", fontWeight: 700, marginBottom: 6 }}>▶ Animate along path (adds ◆ 0 → 1)</button>
                       <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.5 }}>Drag the round handles on stage to reshape · drag the object to move the whole path · keyframe "Path progress" below.</div>
                     </>
                   )}
@@ -1945,7 +1962,7 @@ export default function GraphicDestinationMotion() {
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
                     {PRESETS.map((pr) => (
                       <button key={pr.id} className="gd-btn" onClick={() => applyPreset(pr)}
-                        style={{ background: C.bg2, border: `1px solid ${C.line}`, color: C.txt, borderRadius: 8, padding: "7px 5px", cursor: "pointer", fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", gap: 5, justifyContent: "center" }}>
+                        style={{ background: C.bg2, border: `1px solid ${C.line}`, color: C.txt, borderRadius: 6, padding: "7px 5px", cursor: "pointer", fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", gap: 5, justifyContent: "center" }}>
                         <span style={{ color: C.amber }}>{pr.icon}</span>{pr.name}
                       </button>
                     ))}
@@ -1958,22 +1975,22 @@ export default function GraphicDestinationMotion() {
       </div>
 
       {/* ============ TIMELINE ============ */}
-      <div style={{ height: 250, background: C.bg1, borderTop: `1px solid ${C.line}`, display: "flex", flexDirection: "column", flexShrink: 0 }}>
+      <div style={{ height: 240, background: C.bg1, borderTop: `1px solid ${C.line}`, display: "flex", flexDirection: "column", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 12px", height: 44, borderBottom: `1px solid ${C.line}` }}>
           <button className="gd-btn" onClick={() => { setPlaying(false); setTime(0); }} style={transportBtn}>⏮</button>
           <button onClick={() => setPlaying(!playing)} style={{ ...transportBtn, width: 34, height: 28, background: C.amber, color: "#1a1405", border: "none", fontWeight: 800 }}>{playing ? "❚❚" : "▶"}</button>
-          <span style={{ fontFamily: "'JetBrains Mono'", fontSize: 13, fontWeight: 600, color: C.amber, minWidth: 88 }}>{fmt(time)} <span style={{ color: C.faint }}>/ {fmt(ctxDur)}</span></span>
+          <span style={{ fontFamily: "'JetBrains Mono'", fontSize: 13, fontWeight: 600, color: C.amber, minWidth: 88, fontVariantNumeric: "tabular-nums" }}>{fmt(time)} <span style={{ color: C.faint }}>/ {fmt(ctxDur)}</span></span>
           <span style={{ color: C.faint, fontSize: 11, fontWeight: 600 }}>Dur</span>
           <input type="number" min={1} max={30} step={0.5} value={+(ctxDur / 1000).toFixed(1)}
             onChange={(e) => setCtxDurMs((parseFloat(e.target.value) || 1) * 1000, stretchClips)}
-            style={{ ...inputStyle, width: 56, padding: "4px 6px", fontFamily: "'JetBrains Mono'", fontSize: 12 }} />
+            style={{ ...inputStyle, width: 56, padding: "4px 6px", fontFamily: "'JetBrains Mono'", fontSize: 12, fontVariantNumeric: "tabular-nums" }} />
           <label title="When duration changes, keyframes rescale proportionally" style={{ display: "flex", alignItems: "center", gap: 5, color: C.dim, fontSize: 10.5, fontWeight: 600, cursor: "pointer" }}>
             <input type="checkbox" checked={stretchClips} onChange={(e) => setStretchClips(e.target.checked)} /> scale
           </label>
           <div style={{ width: 1, height: 20, background: C.line }} />
-          <button className="gd-btn" onClick={() => setLoop(!loop)} style={{ background: C.bg2, border: `1px solid ${C.line}`, color: loop ? C.txt : C.faint, borderRadius: 8, padding: "5px 10px", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>Loop</button>
+          <button className="gd-btn" onClick={() => setLoop(!loop)} style={{ background: C.bg2, border: `1px solid ${C.line}`, color: loop ? C.txt : C.faint, borderRadius: 6, padding: "5px 10px", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>Loop</button>
           <button className="gd-btn" onClick={() => setAutokey(!autokey)} title="Animate — ON: edits & drags record keyframes at the playhead. OFF: edits move the layer (or its whole animation) without adding keyframes."
-            style={{ display: "flex", alignItems: "center", gap: 6, background: autokey ? "#2a2110" : C.bg2, border: `1px solid ${autokey ? C.amber : C.line}`, color: autokey ? C.amber : C.dim, borderRadius: 8, padding: "5px 10px", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
+            style={{ display: "flex", alignItems: "center", gap: 6, background: autokey ? C.amberSoft : C.bg2, border: `1px solid ${autokey ? C.amber : C.line}`, color: autokey ? C.amber : C.dim, borderRadius: 6, padding: "5px 10px", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
             <span style={{ width: 7, height: 7, borderRadius: "50%", background: autokey ? C.amber : C.faint, boxShadow: autokey ? `0 0 8px ${C.amber}` : "none" }} />Animate
           </button>
           <div style={{ flex: 1 }} />
@@ -1998,7 +2015,7 @@ export default function GraphicDestinationMotion() {
                     style={{ background: "none", border: "none", cursor: "pointer", fontSize: 10, padding: 0, width: 15, color: o.locked ? C.amber : C.faint }}>{o.locked ? "🔒" : "🔓"}</button>
                   {o.type === "clip"
                     ? <span style={{ width: 11, height: 10, flexShrink: 0, position: "relative" }}><span style={{ position: "absolute", inset: "0 2px 2px 0", border: `1.5px solid ${C.amber}`, borderRadius: 2 }} /><span style={{ position: "absolute", inset: "2px 0 0 2px", border: `1.5px solid ${C.amber}`, borderRadius: 2, background: C.bg1 }} /></span>
-                    : <span style={{ width: 9, height: 9, borderRadius: 3, background: o.type === "confetti" ? "linear-gradient(135deg,#FFB224,#FF6B6B)" : o.type === "map" || o.type === "world" ? o.props.stroke : o.type === "image" ? "#8B93A7" : colorAt(o, "fill", time), flexShrink: 0, border: `1px solid ${C.line}` }} />}
+                    : <span style={{ width: 9, height: 9, borderRadius: 3, background: o.type === "confetti" ? "linear-gradient(135deg,#F5A524,#E5636A)" : o.type === "map" || o.type === "world" ? o.props.stroke : o.type === "image" ? "#939BAD" : colorAt(o, "fill", time), flexShrink: 0, border: `1px solid ${C.line}` }} />}
                   <span style={{ fontSize: 12, fontWeight: 600, color: isSel ? C.txt : C.dim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>
                     {o.name}{o.type === "clip" && <span style={{ color: C.faint, fontWeight: 500 }}> ·{o.children.length}</span>}
                   </span>
@@ -2020,7 +2037,7 @@ export default function GraphicDestinationMotion() {
               {Array.from({ length: 11 }).map((_, i) => (
                 <div key={i} style={{ position: "absolute", left: `${i * 10}%`, top: 0, bottom: 0 }}>
                   <div style={{ width: 1, height: i % 2 === 0 ? 10 : 6, background: C.faint, opacity: 0.6 }} />
-                  {i % 2 === 0 && <span style={{ position: "absolute", top: 9, left: 3, fontSize: 9.5, color: C.faint, fontFamily: "'JetBrains Mono'" }}>{((i * ctxDur) / 10000).toFixed(1)}s</span>}
+                  {i % 2 === 0 && <span style={{ position: "absolute", top: 9, left: 3, fontSize: 9.5, color: C.faint, fontFamily: "'JetBrains Mono'", fontVariantNumeric: "tabular-nums" }}>{((i * ctxDur) / 10000).toFixed(1)}s</span>}
                 </div>
               ))}
             </div>
@@ -2035,7 +2052,7 @@ export default function GraphicDestinationMotion() {
                 const isSel = selIds.includes(o.id);
                 return (
                   <div key={o.id} onDoubleClick={() => isClip && enterClip(o.id)} onContextMenu={(e) => onLaneContext(e, o)}
-                    style={{ height: 30, position: "relative", borderBottom: `1px solid ${C.bg2}`, background: isSel ? "rgba(255,178,36,.04)" : "transparent" }}>
+                    style={{ height: 30, position: "relative", borderBottom: `1px solid ${C.bg2}`, background: isSel ? "rgba(245,165,36,.04)" : "transparent" }}>
                     {/* layer bar: dark, draggable, trim handles */}
                     <div onPointerDown={(e) => onBarDown(e, o, "move")}
                       title={o.locked ? `${o.name} · locked` : isClip ? `${o.name} · drag to retime · dbl-click to open` : "Drag to move (keyframes travel with the bar) · drag edges to trim"}
@@ -2057,7 +2074,7 @@ export default function GraphicDestinationMotion() {
                       return (
                         <span key={i} className={isColor || isShape ? "gd-kfc" : "gd-kf"} onPointerDown={(e) => onKfDown(e, o.id, p, k)}
                           title={`${PROP_LABEL[p]} @ ${fmt(k.t)}${isColor ? ` · ${k.v}` : ""} · ${EASE_LABEL[k.ease] || "Linear"}`}
-                          style={{ position: "absolute", left: `${(k.t / ctxDur) * 100}%`, top: "50%", width: 9, height: 9, transform: isColor || isShape ? "translate(-50%,-50%)" : "translate(-50%,-50%) rotate(45deg)", background: bg, borderRadius: isColor || isShape ? "50%" : 1.5, border: isColor ? `1.5px solid #fff` : "none", cursor: "ew-resize", transition: "transform .1s", boxShadow: isSelK ? "0 0 0 3px rgba(255,178,36,.4)" : "none", zIndex: 2 }} />
+                          style={{ position: "absolute", left: `${(k.t / ctxDur) * 100}%`, top: "50%", width: 9, height: 9, transform: isColor || isShape ? "translate(-50%,-50%)" : "translate(-50%,-50%) rotate(45deg)", background: bg, borderRadius: isColor || isShape ? "50%" : 1.5, border: isColor ? `1.5px solid #fff` : "none", cursor: "ew-resize", transition: "transform .1s", boxShadow: isSelK ? "0 0 0 3px rgba(245,165,36,.4)" : "none", zIndex: 2 }} />
                       );
                     })}
                     {o.type === "world" && normHi(o.props.hi).map((hh, wi) => {
@@ -2073,10 +2090,10 @@ export default function GraphicDestinationMotion() {
                         {hh.zoom !== false && <>
                           <span onPointerDown={(e) => onWorldKfDown(e, o.id, hh.cc, "zoomIn", zw.zin)}
                             title={`${WORLD[hh.cc]?.n || hh.cc} zoom-in @ ${fmt(zw.zin)}${zw.zinAuto ? " (auto — drag to set)" : " · drag to retime"}`}
-                            style={{ position: "absolute", left: `${(zw.zin / ctxDur) * 100}%`, top: "50%", width: 0, height: 0, transform: "translate(-2px,-50%)", borderTop: "5px solid transparent", borderBottom: "5px solid transparent", borderLeft: "8px solid #38BDF8", opacity: zw.zinAuto ? 0.4 : 1, cursor: "ew-resize", zIndex: 2 }} />
+                            style={{ position: "absolute", left: `${(zw.zin / ctxDur) * 100}%`, top: "50%", width: 0, height: 0, transform: "translate(-2px,-50%)", borderTop: "5px solid transparent", borderBottom: "5px solid transparent", borderLeft: "8px solid #5B8DEF", opacity: zw.zinAuto ? 0.4 : 1, cursor: "ew-resize", zIndex: 2 }} />
                           <span onPointerDown={(e) => onWorldKfDown(e, o.id, hh.cc, "zoomOut", zw.zout)}
                             title={`${WORLD[hh.cc]?.n || hh.cc} zoom-out @ ${fmt(zw.zout)}${zw.zoutAuto ? " (auto — drag to set)" : " · drag to retime"}`}
-                            style={{ position: "absolute", left: `${(zw.zout / ctxDur) * 100}%`, top: "50%", width: 0, height: 0, transform: "translate(-6px,-50%)", borderTop: "5px solid transparent", borderBottom: "5px solid transparent", borderRight: "8px solid #38BDF8", opacity: zw.zoutAuto ? 0.4 : 1, cursor: "ew-resize", zIndex: 2 }} />
+                            style={{ position: "absolute", left: `${(zw.zout / ctxDur) * 100}%`, top: "50%", width: 0, height: 0, transform: "translate(-6px,-50%)", borderTop: "5px solid transparent", borderBottom: "5px solid transparent", borderRight: "8px solid #5B8DEF", opacity: zw.zoutAuto ? 0.4 : 1, cursor: "ew-resize", zIndex: 2 }} />
                         </>}
                       </span>
                       );
@@ -2094,11 +2111,11 @@ export default function GraphicDestinationMotion() {
 
       {/* ============ CONTEXT MENU ============ */}
       {menu && (
-        <div onPointerDown={(e) => e.stopPropagation()}
-          style={{ position: "fixed", left: Math.min(menu.x, window.innerWidth - 250), top: Math.min(menu.y, window.innerHeight - 260), width: 236, background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 12, padding: 10, zIndex: 200, boxShadow: "0 16px 50px rgba(0,0,0,.6)" }}>
+        <div className="gd-panel" onPointerDown={(e) => e.stopPropagation()}
+          style={{ position: "fixed", left: Math.min(menu.x, window.innerWidth - 250), top: Math.min(menu.y, window.innerHeight - 260), width: 236, background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 10, padding: 10, zIndex: 200, boxShadow: "0 12px 40px rgba(0,0,0,0.5)" }}>
           {menu.kind === "segment" && (
             <>
-              <div style={{ fontSize: 10.5, fontWeight: 700, color: C.dim, marginBottom: 7, letterSpacing: 0.6 }}>SEGMENT EASING</div>
+              <div style={{ ...sectionLabel, marginBottom: 7 }}>SEGMENT EASING</div>
               {menu.locked && <div style={{ color: C.amber, fontSize: 11 }}>Layer is locked.</div>}
               {!menu.locked && menu.segs.length === 0 && <div style={{ color: C.faint, fontSize: 11.5, lineHeight: 1.5 }}>No keyframe segment under the cursor — right-click between two ◆ of the same property.</div>}
               {!menu.locked && menu.segs.map((sg, i) => (
@@ -2133,7 +2150,7 @@ export default function GraphicDestinationMotion() {
       {/* ============ BRAND MODAL ============ */}
       {brandOpen && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(8,9,12,.7)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onPointerDown={() => setBrandOpen(false)}>
-          <div onPointerDown={(e) => e.stopPropagation()} style={{ width: 460, maxWidth: "92vw", background: C.bg1, border: `1px solid ${C.line}`, borderRadius: 14, padding: 20, boxShadow: "0 24px 80px rgba(0,0,0,.6)" }}>
+          <div className="gd-panel" onPointerDown={(e) => e.stopPropagation()} style={{ width: 460, maxWidth: "92vw", background: C.bg1, border: `1px solid ${C.line}`, borderRadius: 10, padding: 20, boxShadow: "0 12px 40px rgba(0,0,0,0.5)" }}>
             <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
               <div style={{ fontFamily: "'Space Grotesk'", fontWeight: 700, fontSize: 15 }}>Brand profiles</div>
               <button onClick={() => setBrandOpen(false)} style={{ marginLeft: "auto", background: "none", border: "none", color: C.dim, cursor: "pointer", fontSize: 16 }}>✕</button>
@@ -2164,26 +2181,31 @@ export default function GraphicDestinationMotion() {
       {/* ============ SAVE / LOAD MODAL ============ */}
       {ioOpen && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(8,9,12,.7)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onPointerDown={() => setIoOpen(false)}>
-          <div onPointerDown={(e) => e.stopPropagation()} style={{ width: 560, maxWidth: "92vw", background: C.bg1, border: `1px solid ${C.line}`, borderRadius: 14, padding: 20, boxShadow: "0 24px 80px rgba(0,0,0,.6)" }}>
+          <div className="gd-panel" onPointerDown={(e) => e.stopPropagation()} style={{ width: 560, maxWidth: "92vw", background: C.bg1, border: `1px solid ${C.line}`, borderRadius: 10, padding: 20, boxShadow: "0 12px 40px rgba(0,0,0,0.5)" }}>
             <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
               <div style={{ fontFamily: "'Space Grotesk'", fontWeight: 700, fontSize: 15 }}>Save / Load project</div>
               <button onClick={() => setIoOpen(false)} style={{ marginLeft: "auto", background: "none", border: "none", color: C.dim, cursor: "pointer", fontSize: 16 }}>✕</button>
             </div>
             <div style={{ color: C.faint, fontSize: 11.5, lineHeight: 1.55, marginBottom: 12 }}>This preview sandbox blocks file downloads, so projects travel as JSON — copy to save, paste to load. Clips, brands, paths and stage size included.</div>
             <button className="gd-btn" onClick={copyProject}
-              style={{ background: ioCopied ? "#1d3325" : C.amber, color: ioCopied ? "#6EE7B7" : "#1a1405", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontWeight: 700, marginBottom: 14 }}>
+              style={{ background: ioCopied ? "rgba(63,182,139,0.12)" : C.amber, color: ioCopied ? "#3FB68B" : "#1a1405", border: "none", borderRadius: 6, padding: "8px 16px", cursor: "pointer", fontWeight: 700, marginBottom: 14 }}>
               {ioCopied ? "✓ Copied to clipboard" : "Copy project JSON"}
             </button>
-            <div style={{ fontSize: 11, fontWeight: 700, color: C.dim, marginBottom: 6 }}>LOAD — paste a composition</div>
+            <div style={{ ...sectionLabel, marginBottom: 6 }}>LOAD — paste a composition</div>
             <textarea value={importText} onChange={(e) => setImportText(e.target.value)} placeholder='{"app":"graphic-destination-motion", ...}'
               style={{ ...inputStyle, height: 88, resize: "none", fontFamily: "'JetBrains Mono'", fontSize: 10.5 }} />
             {importErr && <div style={{ color: C.danger, fontSize: 11, marginTop: 6 }}>{importErr}</div>}
             <button className="gd-btn" onClick={importProject} disabled={!importText.trim()}
-              style={{ background: C.bg2, border: `1px solid ${C.line}`, color: importText.trim() ? C.txt : C.faint, borderRadius: 8, padding: "8px 16px", cursor: importText.trim() ? "pointer" : "default", fontWeight: 700, marginTop: 8 }}>
+              style={{ background: C.bg2, border: `1px solid ${C.line}`, color: importText.trim() ? C.txt : C.faint, borderRadius: 6, padding: "8px 16px", cursor: importText.trim() ? "pointer" : "default", fontWeight: 700, marginTop: 8 }}>
               Load project
             </button>
           </div>
         </div>
+      )}
+
+      {/* ============ EXPORT DIALOG ============ */}
+      {exportOpen && (
+        <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} project={JSON.parse(projectJson())} projectId={null} projectName={name} />
       )}
     </div>
   );
@@ -2381,7 +2403,7 @@ export function StageObject({ obj, time, stage, selected, onDown, onEnterClip, d
           style={{ position: "absolute", right: -9, bottom: -9, width: 13, height: 13, background: C.amber, border: "2px solid #fff", borderRadius: 3, cursor: "nwse-resize", zIndex: 6, pointerEvents: "auto" }} />
         {onRotate && (
           <div onPointerDown={(e) => onRotate(e, obj)} title="Drag to rotate · shift = 15° steps (records rotation keyframes when Animate is on)"
-            style={{ position: "absolute", top: -30, left: "50%", transform: "translateX(-50%)", width: 17, height: 17, borderRadius: "50%", background: "#151820", border: `2px solid ${C.amber}`, cursor: "grab", zIndex: 6, pointerEvents: "auto", display: "flex", alignItems: "center", justifyContent: "center", color: C.amber, fontSize: 10, fontWeight: 800, lineHeight: 1 }}>↻</div>
+            style={{ position: "absolute", top: -30, left: "50%", transform: "translateX(-50%)", width: 17, height: 17, borderRadius: "50%", background: "#10131A", border: `2px solid ${C.amber}`, cursor: "grab", zIndex: 6, pointerEvents: "auto", display: "flex", alignItems: "center", justifyContent: "center", color: C.amber, fontSize: 10, fontWeight: 800, lineHeight: 1 }}>↻</div>
         )}
       </>
     : null;
@@ -2749,7 +2771,7 @@ function PathEditor({ obj, onPtDown, patchPath, locked }) {
           <circle cx={p[0]} cy={p[1]} r={13} fill="transparent" style={{ cursor: "grab" }}
             onPointerDown={(e) => { e.stopPropagation(); onPtDown(e, obj.id, i); }}
             onDoubleClick={() => path.pts.length > 2 && patchPath(obj.id, (pp) => ({ ...pp, pts: pp.pts.filter((_, j) => j !== i) }))} />
-          <circle cx={p[0]} cy={p[1]} r={6.5} fill="#0F1116" stroke="#6EE7B7" strokeWidth={2.5} style={{ pointerEvents: "none" }} />
+          <circle cx={p[0]} cy={p[1]} r={6.5} fill="#0A0C10" stroke="#6EE7B7" strokeWidth={2.5} style={{ pointerEvents: "none" }} />
         </g>
       ))}
       {!locked && path.pts.slice(0, -1).map((p, i) => {
@@ -2758,7 +2780,7 @@ function PathEditor({ obj, onPtDown, patchPath, locked }) {
         return (
           <g key={"m" + i} style={{ pointerEvents: "auto", cursor: "copy" }}
             onPointerDown={(e) => { e.stopPropagation(); patchPath(obj.id, (pp) => { const pts = [...pp.pts]; pts.splice(i + 1, 0, [Math.round(mx), Math.round(my)]); return { ...pp, pts }; }); }}>
-            <circle cx={mx} cy={my} r={8} fill="#151820" stroke="#6EE7B7" strokeWidth={1.5} strokeOpacity={0.7} />
+            <circle cx={mx} cy={my} r={8} fill="#10131A" stroke="#6EE7B7" strokeWidth={1.5} strokeOpacity={0.7} />
             <text x={mx} y={my + 3.5} textAnchor="middle" fill="#6EE7B7" fontSize={11} fontWeight={700} style={{ pointerEvents: "none" }}>+</text>
           </g>
         );
@@ -2772,8 +2794,8 @@ function PathEditor({ obj, onPtDown, patchPath, locked }) {
    ============================================================ */
 function Card({ title, hint, children }) {
   return (
-    <div style={{ background: "#191D25", border: `1px solid ${C.line}`, borderRadius: 12, padding: "11px 12px", marginBottom: 10 }}>
-      <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: C.dim, marginBottom: 9 }}>
+    <div style={{ background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 8, padding: "11px 12px", marginBottom: 10 }}>
+      <div style={{ ...sectionLabel, marginBottom: 9 }}>
         {title} {hint && <span style={{ fontWeight: 500, textTransform: "none", letterSpacing: 0, color: C.faint }}>· {hint}</span>}
       </div>
       {children}
@@ -2830,7 +2852,7 @@ function PropRow({ obj, prop, time, ctxDur, stage, onEdit, onKfToggle, onNav }) 
       ) : <span style={{ width: 26 }} />}
       <span style={{ width: 56, color: C.dim, fontSize: 10.5, fontWeight: 600 }}>{PROP_LABEL[prop]}</span>
       <input type="range" min={cfg[0]} max={cfg[1]} step={cfg[2]} value={v} onChange={(e) => onEdit(parseFloat(e.target.value))} style={{ flex: 1 }} />
-      <span style={{ width: 38, textAlign: "right", fontFamily: "'JetBrains Mono'", fontSize: 10.5 }}>{prop === "opacity" || prop === "scale" || prop === "prog" ? v.toFixed(2) : Math.round(v)}</span>
+      <span style={{ width: 38, textAlign: "right", fontFamily: "'JetBrains Mono'", fontSize: 10.5, fontVariantNumeric: "tabular-nums" }}>{prop === "opacity" || prop === "scale" || prop === "prog" ? v.toFixed(2) : Math.round(v)}</span>
     </div>
   );
 }
@@ -2873,39 +2895,39 @@ function WorldPicker({ hi, onAdd, onRetime, onRemove, onSetOut, onClearOut, onSe
             const zw = worldZoomWindow(h, { zoomHoldMs });
             const zoomOn = h.zoom !== false;
             return (
-              <div key={h.cc} style={{ background: "#1C2029", border: "1px solid #2B3140", borderRadius: 9, padding: "8px 9px" }}>
+              <div key={h.cc} style={{ background: "#171B24", border: "1px solid #232936", borderRadius: 8, padding: "8px 9px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}>
-                  <span style={{ fontWeight: 700, fontSize: 12, color: "#FFB224", flex: 1 }}>{WORLD[h.cc]?.n || h.cc}</span>
+                  <span style={{ fontWeight: 700, fontSize: 12, color: "#F5A524", flex: 1 }}>{WORLD[h.cc]?.n || h.cc}</span>
                   <span onClick={() => onToggleZoom(h.cc)} title={zoomOn ? "Camera pushes in for this country — click to disable" : "Camera ignores this country — click to enable"}
-                    style={{ ...chipStyle, cursor: "pointer", fontSize: 10, borderColor: zoomOn ? "#38BDF8" : "#2B3140", color: zoomOn ? "#38BDF8" : "#5A6175" }}>{zoomOn ? "🔍 zoom on" : "🔍 zoom off"}</span>
-                  <span onClick={() => onRemove(h.cc)} title="Remove country" style={{ cursor: "pointer", color: "#FF6B6B", fontWeight: 800, fontSize: 13 }}>✕</span>
+                    style={{ ...chipStyle, cursor: "pointer", fontSize: 10, borderColor: zoomOn ? "#5B8DEF" : "#232936", color: zoomOn ? "#5B8DEF" : "#5D667A" }}>{zoomOn ? "🔍 zoom on" : "🔍 zoom off"}</span>
+                  <span onClick={() => onRemove(h.cc)} title="Remove country" style={{ cursor: "pointer", color: "#E5636A", fontWeight: 800, fontSize: 13 }}>✕</span>
                 </div>
                 {/* 4 independent points, each: label • time • click-to-retime, click-to-set when unset */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
-                  <PointBtn label="Appears" time={h.t} onClick={() => onRetime(h.cc)} color="#FFB224" />
-                  <PointBtn label="Hides" time={h.out} auto={h.out == null} onClick={() => onSetOut(h.cc)} onClear={h.out != null ? () => onClearOut(h.cc) : null} color="#FF6B6B" placeholder="never" />
-                  {zoomOn && <PointBtn label="Zoom in" time={zw.zin} auto={zw.zinAuto} onClick={() => onSetZoomIn(h.cc)} onClear={!zw.zinAuto ? () => onClearZoomIn(h.cc) : null} color="#38BDF8" />}
-                  {zoomOn && <PointBtn label="Zoom out" time={zw.zout} auto={zw.zoutAuto} onClick={() => onSetZoomOut(h.cc)} onClear={!zw.zoutAuto ? () => onClearZoomOut(h.cc) : null} color="#38BDF8" />}
+                  <PointBtn label="Appears" time={h.t} onClick={() => onRetime(h.cc)} color="#F5A524" />
+                  <PointBtn label="Hides" time={h.out} auto={h.out == null} onClick={() => onSetOut(h.cc)} onClear={h.out != null ? () => onClearOut(h.cc) : null} color="#E5636A" placeholder="never" />
+                  {zoomOn && <PointBtn label="Zoom in" time={zw.zin} auto={zw.zinAuto} onClick={() => onSetZoomIn(h.cc)} onClear={!zw.zinAuto ? () => onClearZoomIn(h.cc) : null} color="#5B8DEF" />}
+                  {zoomOn && <PointBtn label="Zoom out" time={zw.zout} auto={zw.zoutAuto} onClick={() => onSetZoomOut(h.cc)} onClear={!zw.zoutAuto ? () => onClearZoomOut(h.cc) : null} color="#5B8DEF" />}
                 </div>
               </div>
             );
           })}
         </div>
       )}
-      <div style={{ color: "#5A6175", fontSize: 10, marginTop: 6, lineHeight: 1.5 }}>Timeline markers: ■ filled = appear, ◻ hollow = hide, ▶/◀ blue triangles = zoom in/out (faint = auto, solid = set by you). Drag any of them, or click a point above to set it at the playhead.</div>
+      <div style={{ color: "#5D667A", fontSize: 10, marginTop: 6, lineHeight: 1.5 }}>Timeline markers: ■ filled = appear, ◻ hollow = hide, ▶/◀ blue triangles = zoom in/out (faint = auto, solid = set by you). Drag any of them, or click a point above to set it at the playhead.</div>
     </div>
   );
 }
 function PointBtn({ label, time, auto, onClick, onClear, color, placeholder }) {
   return (
     <div onClick={onClick} title={time == null ? `Set ${label.toLowerCase()} at the playhead` : `Click to re-time to the playhead`}
-      style={{ cursor: "pointer", background: "#151820", border: `1px solid ${time != null && !auto ? color : "#2B3140"}`, borderRadius: 7, padding: "4px 7px" }}>
-      <div style={{ fontSize: 9, fontWeight: 700, color: "#5A6175", textTransform: "uppercase", letterSpacing: 0.4 }}>{label}</div>
+      style={{ cursor: "pointer", background: "#10131A", border: `1px solid ${time != null && !auto ? color : "#232936"}`, borderRadius: 6, padding: "4px 7px" }}>
+      <div style={{ fontSize: 9, fontWeight: 700, color: "#5D667A", textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
       <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-        <span style={{ fontSize: 11.5, fontFamily: "'JetBrains Mono'", fontWeight: 600, color: time == null ? "#5A6175" : auto ? "#8B93A7" : color }}>
+        <span style={{ fontSize: 11.5, fontFamily: "'JetBrains Mono'", fontWeight: 600, fontVariantNumeric: "tabular-nums", color: time == null ? "#5D667A" : auto ? "#939BAD" : color }}>
           {time == null ? (placeholder || "+ set") : fmtMs(time)}{auto && time != null ? " · auto" : ""}
         </span>
-        {onClear && <span onClick={(e) => { e.stopPropagation(); onClear(); }} title="Clear — back to auto" style={{ marginLeft: "auto", color: "#5A6175", fontSize: 10, fontWeight: 800 }}>∅</span>}
+        {onClear && <span onClick={(e) => { e.stopPropagation(); onClear(); }} title="Clear — back to auto" style={{ marginLeft: "auto", color: "#5D667A", fontSize: 10, fontWeight: 800 }}>∅</span>}
       </div>
     </div>
   );
@@ -2920,7 +2942,7 @@ function MiniBtn({ children, onClick, title, danger }) {
 function RailBtn({ label, glyph, onClick, active }) {
   return (
     <button className="gd-btn" onClick={onClick}
-      style={{ width: 56, height: 50, background: active ? C.bg3 : C.bg2, border: `1px solid ${active ? C.amber : C.line}`, borderRadius: 10, cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, flexShrink: 0 }}>
+      style={{ width: 56, height: 50, background: active ? C.bg3 : C.bg2, border: `1px solid ${active ? C.amber : C.line}`, borderRadius: 6, cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, flexShrink: 0 }}>
       {glyph}
       <span style={{ fontSize: 9, color: active ? C.amber : C.dim, fontWeight: 600 }}>{label}</span>
     </button>
@@ -2939,7 +2961,7 @@ function SliderRow({ label, min, max, step = 1, value, onChange }) {
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
       <span style={{ width: 62, color: C.dim, fontSize: 11, fontWeight: 600, flexShrink: 0 }}>{label}</span>
       <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(parseFloat(e.target.value))} style={{ flex: 1 }} />
-      <span style={{ width: 40, textAlign: "right", fontFamily: "'JetBrains Mono'", fontSize: 10.5 }}>{step < 1 ? (+value).toFixed(step < 0.1 ? 2 : 1) : Math.round(value)}</span>
+      <span style={{ width: 40, textAlign: "right", fontFamily: "'JetBrains Mono'", fontSize: 10.5, fontVariantNumeric: "tabular-nums" }}>{step < 1 ? (+value).toFixed(step < 0.1 ? 2 : 1) : Math.round(value)}</span>
     </div>
   );
 }
@@ -2954,7 +2976,8 @@ function EaseCurve({ ease }) {
     </svg>
   );
 }
-const inputStyle = { width: "100%", background: "#1C2029", border: "1px solid #2B3140", borderRadius: 7, color: "#E9EBF2", padding: "6px 9px", fontSize: 12.5, outline: "none", fontFamily: "inherit", boxSizing: "border-box" };
-const chipStyle = { background: "#1C2029", border: "1px solid #2B3140", borderRadius: 999, color: "#8B93A7", padding: "4px 10px", fontSize: 11, fontWeight: 600 };
-const transportBtn = { width: 30, height: 28, background: "#1C2029", border: "1px solid #2B3140", borderRadius: 7, color: "#E9EBF2", cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" };
-const navBtn = { width: 13, height: 17, background: "none", border: "none", color: "#8B93A7", cursor: "pointer", fontSize: 12, padding: 0, lineHeight: 1, fontWeight: 700 };
+const inputStyle = { width: "100%", background: "#171B24", border: "1px solid #232936", borderRadius: 6, color: "#E9ECF3", padding: "6px 9px", fontSize: 12.5, outline: "none", fontFamily: "inherit", boxSizing: "border-box" };
+const chipStyle = { background: "#171B24", border: "1px solid #232936", borderRadius: 6, color: "#939BAD", padding: "4px 10px", fontSize: 11, fontWeight: 600 };
+const transportBtn = { width: 30, height: 28, background: "#171B24", border: "1px solid #232936", borderRadius: 6, color: "#E9ECF3", cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" };
+const navBtn = { width: 13, height: 17, background: "none", border: "none", color: "#939BAD", cursor: "pointer", fontSize: 12, padding: 0, lineHeight: 1, fontWeight: 700 };
+const sectionLabel = { fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#5D667A" };
