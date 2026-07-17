@@ -1,9 +1,14 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
-const JWT_SECRET = process.env.JWT_SECRET;
+let JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
-  throw new Error("JWT_SECRET is not set. Generate one and put it in .env (see .env.example).");
+  // Zero-config boot (previews, demos, first-run Docker): fall back to a random
+  // ephemeral secret instead of crashing. Sessions are invalidated on restart.
+  // Real deployments MUST set JWT_SECRET via the environment.
+  const { randomBytes } = await import("crypto");
+  JWT_SECRET = randomBytes(48).toString("hex");
+  console.warn("WARNING: JWT_SECRET is not set — using an ephemeral secret. Sessions will not survive restarts. Set JWT_SECRET in the environment for production.");
 }
 
 export const COOKIE_NAME = "gd_session";
