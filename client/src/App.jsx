@@ -1,0 +1,42 @@
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { AuthProvider, useAuth } from "./AuthContext";
+import Landing from "./pages/Landing";
+import Login from "./pages/Login";
+import Editor from "./pages/Editor";
+
+function ProtectedRoute({ children }) {
+  const { user } = useAuth();
+  if (user === undefined) return <Loading />;
+  if (user === null) return <Navigate to="/login" replace />;
+  return children;
+}
+
+function Loading() {
+  return (
+    <div style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#0F1116", color: "#8B93A7", fontFamily: "Inter, system-ui, sans-serif" }}>
+      Checking session…
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/login" element={<Login />} />
+          <Route
+            path="/editor"
+            element={
+              <ProtectedRoute>
+                <Editor />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
+  );
+}

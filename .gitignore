@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+server/data/*.db
+server/data/*.db-*
+server/data/admin-credentials.json
+*.log
+server/hyperframes/__test_output__/
+*.mp4
