@@ -238,6 +238,36 @@ app.get("/api/share/:token", shareLimiter, async (req, res) => {
   res.json({ name: row.name, data: JSON.parse(row.data) });
 });
 
+/*
+ * Token-scoped public asset serving: anonymous viewers of a shared project
+ * need its uploaded images/audio, but the asset API itself is owner-auth'd.
+ * This route serves an asset ONLY when the shared project's JSON actually
+ * references it — token holders get exactly that project's media, nothing
+ * else in the owner's library.
+ */
+app.get("/api/share/:token/assets/:assetId", shareLimiter, async (req, res) => {
+  const project = await db.execute({
+    sql: "SELECT data FROM projects WHERE share_token = ?",
+    args: [req.params.token],
+  });
+  const row = project.rows[0];
+  if (!row) return res.status(404).json({ error: "Not found" });
+  if (!row.data.includes(`"/api/assets/${req.params.assetId}"`)) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  const asset = await db.execute({
+    sql: "SELECT mime, data FROM assets WHERE id = ?",
+    args: [req.params.assetId],
+  });
+  const a = asset.rows[0];
+  if (!a) return res.status(404).json({ error: "Not found" });
+  const buf = Buffer.from(a.data, "base64");
+  res.setHeader("Content-Type", a.mime);
+  res.setHeader("Content-Length", buf.length);
+  res.setHeader("Cache-Control", "private, max-age=3600");
+  res.send(buf);
+});
+
 /* ---------------- asset library ----------------
  * Owner-scoped image and audio uploads. Payloads arrive as data URLs and are
  * stored as base64 text in the assets table (the remote-only Turso client

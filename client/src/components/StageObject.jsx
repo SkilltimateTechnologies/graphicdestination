@@ -1,0 +1,498 @@
+/* ============================================================
+   STAGE OBJECT (recursive renderer) + map effect helpers.
+   Extracted VERBATIM from GraphicDestinationMotion.jsx (Refactor Pass 2);
+   GraphicDestinationMotion.jsx re-exports StageObject from here.
+   ============================================================ */
+import { C } from "./editor/model";
+import { EASE, clamp01 } from "../engine/easing.js";
+import { ptsToStr, pathSamples, pointOnPath, morphPtsAt } from "../engine/shapes.js";
+import { valueAt, colorAt, lerpColor, clipLocalTime, clipTransition } from "../engine/keyframes.js";
+import { MAPS, WORLD_H, CONTINENTS, WORLD_EXT, ringsToPath, arcPath, mapBox, WORLD_D, normHi } from "../engine/maps.js";
+import { SWATCHES, CONFETTI_LIFE, confettiParticles, charFx, numberValue, numberColumns, parseChart, highlightFlick, worldCameraAt } from "../engine/fx.js";
+
+/* box styling for text/number layers */
+function boxStyleOf(P, time) {
+  if (!P.bg && !P.borderW) return null;
+  const gc = P.borderC || P.bg || "#FFB224";
+  const glow = P.boxFx === "glow" ? `0 0 16px ${gc}99, 0 0 40px ${gc}44`
+    : P.boxFx === "pulse" ? `0 0 ${10 + 7 * Math.sin(time / 280)}px ${gc}BB` : "none";
+  return { background: P.bg || "transparent", border: P.borderW ? `${P.borderW}px solid ${P.borderC}` : "none", borderRadius: P.radius, padding: `${Math.round(P.pad * 0.45)}px ${P.pad}px`, boxShadow: glow };
+}
+
+/* Shared border-effect renderer for both single-country maps and
+   multi-country continent maps — same styles (plain/draw/comet/neon/
+   reveal/pulse), driven by a precomputed path `d` and its bbox. */
+function MapEffectPaths({ id, d, P, time }) {
+  const S = P.mapStyle === "march" ? "pulse" : P.mapStyle;
+  const u = clamp01((time - P.start) / P.dur);
+  const eu = EASE.easeInOutCubic(u);
+  const gid = "g" + id, cid = "c" + id;
+  const hot = lerpColor(P.stroke, "#ffffff", 0.75);
+  const animDraw = S === "draw" || S === "reveal";
+  const fillNow = animDraw ? P.fillOp * clamp01(u * 1.15) : P.fillOp;
+  const drawDash = animDraw ? { strokeDasharray: 100, strokeDashoffset: 100 * (1 - eu) } : {};
+  const gw = Math.min(P.strokeW, 2);
+  let g = 0;
+  if (S === "neon") g = 1;
+  if (S === "reveal") g = clamp01((time - P.start - P.dur) / 550);
+  if (S === "pulse") g = 0.55 + 0.45 * Math.sin(time / 430);
+  if (S === "comet") g = 0.2;
+  const tipOn = animDraw && u > 0.005 && u < 0.995;
+  const lead = eu * 100;
+  const off = -((time / 26) % 100);
+  return (
+    <>
+      <defs>
+        <linearGradient id={gid} x1="0" y1="0" x2="0.3" y2="1">
+          <stop offset="0" stopColor={lerpColor(P.fillC, "#ffffff", 0.14)} />
+          <stop offset="1" stopColor={lerpColor(P.fillC, "#000000", 0.34)} />
+        </linearGradient>
+        <clipPath id={cid}><path d={d} /></clipPath>
+      </defs>
+      <path d={d} fill={`url(#${gid})`} fillOpacity={fillNow} stroke="none" style={{ filter: "drop-shadow(0 3px 10px rgba(0,0,0,.35))" }} />
+      {fillNow > 0.2 && (
+        <g clipPath={`url(#${cid})`}>
+          <path d={d} fill="none" stroke={P.stroke} strokeOpacity={0.22 * (animDraw ? eu : 1)} strokeWidth={gw * 3.2} pathLength={100} style={{ filter: "blur(2.5px)" }} {...drawDash} />
+        </g>
+      )}
+      {g > 0.02 && <path d={d} fill="none" stroke={P.stroke} strokeOpacity={0.12 * g} strokeWidth={gw * 5.5} pathLength={100} strokeLinejoin="round" style={{ filter: "blur(4.5px)" }} {...drawDash} />}
+      {g > 0.02 && <path d={d} fill="none" stroke={P.stroke} strokeOpacity={0.32 * g} strokeWidth={gw * 2.4} pathLength={100} strokeLinejoin="round" style={{ filter: "blur(1.8px)" }} {...drawDash} />}
+      <path d={d} fill="none" stroke={S === "neon" ? hot : P.stroke} strokeWidth={P.strokeW * (S === "neon" ? 1.15 : 1)} vectorEffect="non-scaling-stroke" pathLength={100} strokeLinejoin="round"
+        style={g > 0.25 ? { filter: `drop-shadow(0 0 3px ${P.stroke})` } : {}} {...drawDash} />
+      {tipOn && <>
+        <path d={d} fill="none" stroke={P.stroke} strokeOpacity={0.75} strokeWidth={P.strokeW * 2.6} pathLength={100} strokeDasharray="5 95" strokeDashoffset={-(lead - 5)} strokeLinecap="round" style={{ filter: "blur(2px)" }} />
+        <path d={d} fill="none" stroke={hot} strokeWidth={P.strokeW * 1.3} pathLength={100} strokeDasharray="2 98" strokeDashoffset={-(lead - 2)} strokeLinecap="round" style={{ filter: `drop-shadow(0 0 4px ${P.stroke})` }} />
+      </>}
+      {S === "comet" && <>
+        <path d={d} fill="none" stroke={P.stroke} strokeOpacity={0.45} strokeWidth={P.strokeW * 3} pathLength={100} strokeDasharray="11 89" strokeDashoffset={off + 8} strokeLinecap="round" style={{ filter: "blur(3px)" }} />
+        <path d={d} fill="none" stroke={P.stroke} strokeOpacity={0.9} strokeWidth={P.strokeW * 1.8} pathLength={100} strokeDasharray="6 94" strokeDashoffset={off + 3} strokeLinecap="round" style={{ filter: "blur(1px)" }} />
+        <path d={d} fill="none" stroke={hot} strokeWidth={P.strokeW * 1.1} pathLength={100} strokeDasharray="3 97" strokeDashoffset={off} strokeLinecap="round" style={{ filter: `drop-shadow(0 0 3.5px ${P.stroke}) drop-shadow(0 0 8px ${P.stroke})` }} />
+      </>}
+    </>
+  );
+}
+function MapEffectShape({ id, d, box, P, time, down, common, rz }) {
+  const h = (P.w * box.h) / box.w;
+  const ox = box.ox || 0, oy = box.oy || 0;
+  return (
+    <div onPointerDown={down} style={common}>
+      <svg width={P.w} height={h} viewBox={`${ox - 7} ${oy - 7} ${box.w + 14} ${box.h + 14}`} style={{ display: "block", overflow: "visible" }}>
+        <MapEffectPaths id={id} d={d} P={P} time={time} />
+      </svg>
+      {rz}
+    </div>
+  );
+}
+
+export function StageObject({ obj, time, stage, selected, onDown, onEnterClip, displayValue, onResize, onRotate, interactive }) {
+  const P = obj.props;
+  if (obj.hidden && !(interactive && selected)) return null;
+  if (obj.type !== "clip") {
+    const inT = P.inT || 0;
+    if (time < inT || (P.outT != null && time > P.outT)) return null;
+  }
+  const dv = interactive && displayValue ? displayValue : (o, p) => valueAt(o, p, time);
+  const [x, y] = P.path && P.path.pts?.length >= 2 ? pointOnPath(P.path, valueAt(obj, "prog", time)) : [dv(obj, "x"), dv(obj, "y")];
+  const scale = valueAt(obj, "scale", time);
+  const rot = valueAt(obj, "rotation", time);
+  const op = valueAt(obj, "opacity", time);
+
+  if (obj.type === "clip") {
+    const local = clipLocalTime(P, time);
+    const tr = clipTransition(P, time);
+    if (local === null && !interactive) return null;
+    return (
+      <div style={{ position: "absolute", left: 0, top: 0, width: stage.w, height: stage.h, transform: `translate(${x - stage.w / 2 + tr.tx}px, ${y - stage.h / 2 + tr.ty}px) rotate(${rot}deg) scale(${scale * tr.s})`, transformOrigin: `${stage.w / 2}px ${stage.h / 2}px`, opacity: local === null ? (interactive ? 0.15 : 0) : op * tr.o, pointerEvents: "none" }}>
+        {local !== null && P.bg && <div style={{ position: "absolute", left: 0, top: 0, width: stage.w, height: stage.h, background: P.bg }} />}
+        {/* full-canvas click target — a clip IS the canvas, so selecting/entering it works anywhere on the frame, not just around its content */}
+        {interactive && (
+          <div onPointerDown={(e) => onDown(e, obj)} onDoubleClick={() => onEnterClip(obj.id)}
+            title={`${obj.name} — click empty space to select, double-click to open`}
+            style={{ position: "absolute", left: 0, top: 0, width: stage.w, height: stage.h, pointerEvents: "auto", cursor: obj.locked ? "default" : "grab" }} />
+        )}
+        {local !== null && obj.children.map((ch) => <StageObject key={ch.id} obj={ch} time={local} stage={stage} selected={false} interactive={false} />)}
+        {interactive && selected && (
+          <div style={{ position: "absolute", left: 0, top: 0, width: stage.w, height: stage.h, pointerEvents: "none", border: `1.5px solid ${C.amber}` }}>
+            <span style={{ position: "absolute", top: -20, left: 0, fontSize: 10, fontWeight: 700, color: "#1a1405", background: C.amber, borderRadius: 5, padding: "2px 7px", whiteSpace: "nowrap" }}>{obj.name} · clip{obj.locked ? " 🔒" : ""}{local === null ? " · out of range" : ""}</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (obj.type === "confetti") {
+    const parts = confettiParticles(obj);
+    const dt = (time - P.burst) / 1000;
+    const active = dt >= 0 && dt <= CONFETTI_LIFE / 1000;
+    return (
+      <div onPointerDown={interactive && !obj.locked ? (e) => onDown(e, obj) : undefined}
+        style={{ position: "absolute", left: x, top: y, transform: "translate(-50%,-50%)", width: 44, height: 44, cursor: interactive && !obj.locked ? "grab" : "default", zIndex: 50, pointerEvents: interactive ? "auto" : "none" }}>
+        {(selected || (!active && interactive)) && <div style={{ position: "absolute", inset: 0, border: selected ? `1.5px dashed ${C.amber}` : "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, opacity: active ? 1 : 0.35 }}>🎉</div>}
+        {active && parts.map((p, i) => {
+          const g = 1.9;
+          const px = p.vx * 620 * dt + p.drift * dt * Math.sin(p.wob + dt * 5);
+          const py = p.vy * 620 * dt + 0.5 * g * 620 * dt * dt;
+          const fade = dt > 1.7 ? 1 - (dt - 1.7) / 0.7 : 1;
+          return <div key={i} style={{ position: "absolute", left: 22 + px, top: 22 + py, width: p.size, height: p.size * (p.round ? 1 : 0.55), background: p.color, borderRadius: p.round ? "50%" : 1.5, transform: `rotate(${p.spin * dt}deg)`, opacity: Math.max(0, fade), pointerEvents: "none" }} />;
+        })}
+      </div>
+    );
+  }
+
+  const rz = selected && interactive && !obj.locked && onResize
+    ? <>
+        <div onPointerDown={(e) => onResize(e, obj)} title="Drag to resize (records scale keyframes when Animate is on)"
+          style={{ position: "absolute", right: -9, bottom: -9, width: 13, height: 13, background: C.amber, border: "2px solid #fff", borderRadius: 3, cursor: "nwse-resize", zIndex: 6, pointerEvents: "auto" }} />
+        {onRotate && (
+          <div onPointerDown={(e) => onRotate(e, obj)} title="Drag to rotate · shift = 15° steps (records rotation keyframes when Animate is on)"
+            style={{ position: "absolute", top: -30, left: "50%", transform: "translateX(-50%)", width: 17, height: 17, borderRadius: "50%", background: "#10131A", border: `2px solid ${C.amber}`, cursor: "grab", zIndex: 6, pointerEvents: "auto", display: "flex", alignItems: "center", justifyContent: "center", color: C.amber, fontSize: 10, fontWeight: 800, lineHeight: 1 }}>↻</div>
+        )}
+      </>
+    : null;
+  const common = {
+    position: "absolute", left: x, top: y,
+    transform: `translate(-50%,-50%) rotate(${rot}deg) scale(${scale})`,
+    opacity: obj.hidden ? op * 0.32 : op, cursor: interactive && !obj.locked ? "grab" : "default",
+    outline: selected ? `1.5px solid ${obj.hidden ? C.faint : C.amber}` : "none", outlineOffset: 4,
+    pointerEvents: interactive ? "auto" : "none",
+  };
+  const down = interactive && !obj.locked ? (e) => onDown(e, obj) : interactive ? (e) => { e.stopPropagation(); onDown(e, obj); } : undefined;
+
+  if (obj.type === "shape") {
+    const pts = morphPtsAt(obj, time);
+    const fill = colorAt(obj, "fill", time);
+    const fm = P.fillMode || "fill";
+    return (
+      <div onPointerDown={down} style={common}>
+        <svg width={P.w} height={P.h} viewBox="0 0 100 100" preserveAspectRatio="none" style={{ display: "block", overflow: "visible" }}>
+          <polygon points={ptsToStr(pts)} fill={fm === "stroke" ? "none" : fill} stroke={fm !== "fill" ? P.sC : "none"} strokeWidth={fm !== "fill" ? P.sW : 0} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+        </svg>
+        {rz}
+      </div>
+    );
+  }
+
+  if (obj.type === "text" && P.path && P.path.pts.length >= 2 && (P.pathMode || "flow") === "flow") {
+    const sp = pathSamples(P.path);
+    const dPath = sp.map((p, i) => (i === 0 ? "M" : "L") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join("");
+    const prog = valueAt(obj, "prog", time);
+    const color = colorAt(obj, "fill", time);
+    const raw = P.upper ? P.text.toUpperCase() : P.text;
+    let pcx = 0, pcy = 0;
+    sp.forEach((p) => { pcx += p[0]; pcy += p[1]; });
+    pcx /= Math.max(1, sp.length); pcy /= Math.max(1, sp.length);
+    return (
+      <svg style={{ position: "absolute", left: 0, top: 0, width: "100%", height: "100%", overflow: "visible", opacity: op, pointerEvents: "none" }}>
+        <defs><path id={"tp" + obj.id} d={dPath} /></defs>
+        <g transform={`translate(${pcx} ${pcy}) rotate(${rot}) scale(${scale}) translate(${-pcx} ${-pcy})`}>
+          {selected && <path d={dPath} fill="none" stroke={C.amber} strokeOpacity={0.35} strokeWidth={2} strokeDasharray="4 4" />}
+          <text onPointerDown={down} letterSpacing={P.ls} style={{ fontFamily: `'${P.fontFamily}'`, fontWeight: P.fontWeight, fontSize: P.fontSize, letterSpacing: P.ls, cursor: interactive && !obj.locked ? "grab" : "default", pointerEvents: interactive ? "auto" : "none" }} fill={color}>
+            <textPath href={"#tp" + obj.id} startOffset={`${(prog * 100).toFixed(2)}%`}>{raw}</textPath>
+          </text>
+        </g>
+      </svg>
+    );
+  }
+
+  if (obj.type === "text") {
+    const fx = P.textFx;
+    const raw = P.upper ? P.text.toUpperCase() : P.text;
+    const chars = fx ? raw.split("") : null;
+    const box = boxStyleOf(P, time);
+    const color = colorAt(obj, "fill", time);
+    return (
+      <div onPointerDown={down} style={common}>
+        <div style={{ ...(box || {}), whiteSpace: "pre", fontFamily: `'${P.fontFamily}'`, fontWeight: P.fontWeight, fontSize: P.fontSize, color, letterSpacing: P.ls, display: "flex", alignItems: "center" }}>
+          {!fx ? raw : chars.map((ch, i) => {
+            const f = charFx(fx, i, chars.length, time, ch);
+            return <span key={i} style={{ display: "inline-block", whiteSpace: "pre", opacity: f.o, transform: `translate(${f.dx}px, ${f.dy}px) scale(${f.s})` }}>{f.ch}</span>;
+          })}
+        </div>
+        {rz}
+      </div>
+    );
+  }
+
+  if (obj.type === "image") {
+    return (
+      <div onPointerDown={down} style={{ ...common, width: P.w, height: P.h }}>
+        {P.src
+          ? <img src={P.src} alt="" draggable={false} style={{ width: P.w, height: P.h, maxWidth: "none", maxHeight: "none", objectFit: "cover", borderRadius: 8, display: "block", pointerEvents: "none" }} />
+          : <div style={{ width: P.w, height: P.h, border: `2px dashed ${C.faint}`, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", color: C.faint, fontSize: 13 }}>No image</div>}
+        {rz}
+      </div>
+    );
+  }
+
+  if (obj.type === "number") {
+    const emH = 1.08;
+    const box = boxStyleOf(P, time);
+    const color = colorAt(obj, "fill", time);
+    const inner = P.style === "count"
+      ? <span style={{ whiteSpace: "pre" }}>{P.prefix}{Math.max(0, numberValue(P, time)).toFixed(P.decimals)}{P.suffix}</span>
+      : (
+        <span style={{ display: "flex", alignItems: "center" }}>
+          {P.prefix && <span style={{ whiteSpace: "pre" }}>{P.prefix}</span>}
+          {numberColumns(P, time).map((c, i) => c.ch
+            ? <span key={i}>{c.ch}</span>
+            : <span key={i} style={{ display: "inline-block", height: `${emH}em`, overflow: "hidden", opacity: c.dim ? 0.22 : 1 }}>
+                <span style={{ display: "block", transform: `translateY(${-c.d * emH}em)` }}>
+                  {"01234567890".split("").map((d, j) => <span key={j} style={{ display: "block", height: `${emH}em` }}>{d}</span>)}
+                </span>
+              </span>)}
+          {P.suffix && <span style={{ whiteSpace: "pre" }}>{P.suffix}</span>}
+        </span>
+      );
+    const ring = P.ring || "none";
+    if (ring !== "none") {
+      const uLin = clamp01((time - P.start) / P.dur);
+      const p = P.to < P.from ? 1 - uLin : uLin; /* countdown depletes, count-up fills */
+      const R = P.fontSize * 1.15;
+      const size = R * 2 + (P.ringW || 8) * 2 + 10;
+      const c = size / 2;
+      return (
+        <div onPointerDown={down} style={common}>
+          <div style={{ position: "relative", width: size, height: size, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <svg width={size} height={size} style={{ position: "absolute", inset: 0, overflow: "visible" }}>
+              {ring === "pie" ? <>
+                <circle cx={c} cy={c} r={R} fill={P.bg || "rgba(0,0,0,.55)"} />
+                <path d={arcPath(c, c, R, -90, -90 + 359.9 * p)} fill={P.ringC} fillOpacity={0.38} />
+                <circle cx={c} cy={c} r={R} fill="none" stroke={P.ringC} strokeWidth={2} strokeOpacity={0.9} />
+              </> : <>
+                {P.bg && <circle cx={c} cy={c} r={R} fill={P.bg} />}
+                <circle cx={c} cy={c} r={R} fill="none" stroke={P.ringC} strokeOpacity={0.16} strokeWidth={P.ringW} />
+                <circle cx={c} cy={c} r={R} fill="none" stroke={P.ringC} strokeWidth={P.ringW} strokeLinecap="round" pathLength={100} strokeDasharray={100} strokeDashoffset={100 * (1 - p)} transform={`rotate(-90 ${c} ${c})`} style={{ filter: `drop-shadow(0 0 6px ${P.ringC})` }} />
+              </>}
+            </svg>
+            <div style={{ position: "relative", zIndex: 1, fontFamily: `'${P.fontFamily}'`, fontWeight: 700, fontSize: P.fontSize, color, lineHeight: 1, display: "flex", alignItems: "center" }}>{inner}</div>
+          </div>
+          {rz}
+        </div>
+      );
+    }
+    return (
+      <div onPointerDown={down} style={common}>
+        <div style={{ ...(box || {}), fontFamily: `'${P.fontFamily}'`, fontWeight: 600, fontSize: P.fontSize, color, lineHeight: 1, display: "flex", alignItems: "center" }}>{inner}</div>
+        {rz}
+      </div>
+    );
+  }
+
+  if (obj.type === "chart") {
+    const data = parseChart(P.dataStr);
+    const n = data.length;
+    const W = P.w, Hh = P.h;
+    const padL = 14, padB = P.showVals ? 30 : 18, padT = 20;
+    const plotW = W - padL * 2, plotH = Hh - padT - padB;
+    const vmax = Math.max(1, ...data.map((d) => d.v));
+    const eAll = EASE.easeInOutSine(clamp01((time - P.start) / P.dur));
+    const els = [];
+    /* faint grid */
+    for (let gI = 1; gI <= 3; gI++) els.push(<line key={"g" + gI} x1={padL} x2={W - padL} y1={padT + (plotH * gI) / 4} y2={padT + (plotH * gI) / 4} stroke="#FFFFFF" strokeOpacity={0.07} />);
+    if (P.chartType === "bar" && n) {
+      const bw = Math.min(72, (plotW / n) * 0.56);
+      data.forEach((d, i) => {
+        const ui = clamp01((time - P.start - i * 110) / Math.max(300, P.dur * 0.55));
+        const eh = Math.min(1.04, EASE.easeOutBack(ui)) * (d.v / vmax) * plotH;
+        const bx = padL + (plotW / n) * (i + 0.5) - bw / 2;
+        const col = SWATCHES[i % 5];
+        els.push(<rect key={"b" + i} x={bx} y={padT + plotH - Math.max(0, eh)} width={bw} height={Math.max(0, eh)} rx={Math.min(8, bw / 4)} fill={col} style={{ filter: `drop-shadow(0 4px 10px ${col}44)` }} />);
+        els.push(<text key={"l" + i} x={bx + bw / 2} y={Hh - 4} textAnchor="middle" fill="#98A0B4" fontSize={12} fontFamily="'Inter'" fontWeight={600} opacity={eAll}>{d.l}</text>);
+        if (P.showVals) els.push(<text key={"v" + i} x={bx + bw / 2} y={padT + plotH - Math.max(0, eh) - 7} textAnchor="middle" fill="#E9EBF2" fontSize={13} fontFamily="'JetBrains Mono'" fontWeight={600} opacity={clamp01(ui * 1.4)}>{Math.round(d.v * EASE.easeOutCubic(ui))}</text>);
+      });
+    }
+    if (P.chartType === "line" && n > 1) {
+      const pts2 = data.map((d, i) => [padL + (plotW * i) / (n - 1), padT + plotH - (d.v / vmax) * plotH]);
+      const dStr = pts2.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join("");
+      const areaStr = dStr + `L${(padL + plotW).toFixed(1)} ${(padT + plotH).toFixed(1)}L${padL} ${(padT + plotH).toFixed(1)}Z`;
+      els.push(<path key="ar" d={areaStr} fill={SWATCHES[2]} fillOpacity={0.12 * eAll} />);
+      els.push(<path key="ln" d={dStr} fill="none" stroke={SWATCHES[2]} strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" pathLength={100} strokeDasharray={100} strokeDashoffset={100 * (1 - eAll)} style={{ filter: `drop-shadow(0 0 6px ${SWATCHES[2]}66)` }} />);
+      pts2.forEach((p, i) => {
+        const ui = clamp01((eAll * (n - 1) - i + 0.5) * 2);
+        els.push(<circle key={"d" + i} cx={p[0]} cy={p[1]} r={4.5 * Math.min(1.15, EASE.easeOutBack(ui))} fill="#fff" stroke={SWATCHES[2]} strokeWidth={2.5} opacity={ui} />);
+        if (P.showVals) els.push(<text key={"v" + i} x={p[0]} y={p[1] - 12} textAnchor="middle" fill="#E9EBF2" fontSize={12.5} fontFamily="'JetBrains Mono'" fontWeight={600} opacity={ui}>{data[i].v}</text>);
+        els.push(<text key={"l" + i} x={p[0]} y={Hh - 4} textAnchor="middle" fill="#98A0B4" fontSize={12} fontFamily="'Inter'" fontWeight={600} opacity={eAll}>{data[i].l}</text>);
+      });
+    }
+    if (P.chartType === "donut" && n) {
+      const total = data.reduce((a, d) => a + d.v, 0) || 1;
+      const cx2 = W / 2, cy2 = padT + plotH / 2, R2 = Math.min(plotW, plotH) / 2 - 6;
+      const sweep = eAll * 359.9;
+      let acc = 0;
+      data.forEach((d, i) => {
+        const a0 = (acc / total) * 359.9;
+        acc += d.v;
+        const a1 = (acc / total) * 359.9;
+        const vis0 = Math.min(a0, sweep), vis1 = Math.min(a1, sweep);
+        if (vis1 <= vis0) return;
+        els.push(<path key={"s" + i} d={arcPath(cx2, cy2, R2, -90 + vis0, -90 + vis1)} fill={SWATCHES[i % 5]} style={{ filter: `drop-shadow(0 3px 8px ${SWATCHES[i % 5]}33)` }} />);
+      });
+      els.push(<circle key="hole" cx={cx2} cy={cy2} r={R2 * 0.62} fill="#12151C" />);
+      if (P.showVals) els.push(<text key="tot" x={cx2} y={cy2 + 6} textAnchor="middle" fill="#E9EBF2" fontSize={Math.max(16, R2 * 0.34)} fontFamily="'JetBrains Mono'" fontWeight={700}>{Math.round(total * EASE.easeOutCubic(eAll))}</text>);
+      data.forEach((d, i) => {
+        els.push(<circle key={"lg" + i} cx={14} cy={16 + i * 18} r={5} fill={SWATCHES[i % 5]} opacity={eAll} />);
+        els.push(<text key={"lt" + i} x={25} y={20 + i * 18} fill="#98A0B4" fontSize={11.5} fontFamily="'Inter'" fontWeight={600} opacity={eAll}>{d.l}</text>);
+      });
+    }
+    const pad = P.pad || 0;
+    return (
+      <div onPointerDown={down} style={common}>
+        <div style={{ width: W + pad * 2, height: Hh + pad * 2, padding: pad, boxSizing: "border-box", background: P.bg || "transparent", opacity: P.bg ? P.bgOp : 1, borderRadius: P.radius, border: P.borderW ? `${P.borderW}px solid ${P.borderC}` : "none" }}>
+          <svg width={W} height={Hh} style={{ display: "block", overflow: "visible" }}>{els}</svg>
+        </div>
+        {rz}
+      </div>
+    );
+  }
+
+  if (obj.type === "map") {
+    const m = MAPS[P.country];
+    const box = mapBox(m);
+    return <MapEffectShape id={obj.id} d={ringsToPath(m.rings)} box={box} P={P} time={time} down={down} common={common} rz={rz} />;
+  }
+
+  if (obj.type === "continent") {
+    const codes = CONTINENTS[P.continent] || [];
+    const d = codes.map((cc) => WORLD_D[cc]).filter(Boolean).join(" ");
+    let mnx = 1e9, mny = 1e9, mxx = -1e9, mxy = -1e9;
+    codes.forEach((cc) => { const e = WORLD_EXT[cc]; if (!e) return; mnx = Math.min(mnx, e[0]); mny = Math.min(mny, e[1]); mxx = Math.max(mxx, e[2]); mxy = Math.max(mxy, e[3]); });
+    if (mnx > mxx) return null;
+    const box = { w: mxx - mnx, h: mxy - mny, ox: mnx, oy: mny };
+    const his = normHi(P.hi).filter((hh) => codes.includes(hh.cc));
+    if (!his.length) return <MapEffectShape id={obj.id} d={d} box={box} P={P} time={time} down={down} common={common} rz={rz} />;
+    /* highlights present: same zoom-and-spotlight behavior as the World map,
+       just cropped to this continent's own bounding box instead of the globe */
+    const fallbackCenter = { cx: (mnx + mxx) / 2, cy: (mny + mxy) / 2 };
+    const zk = P.zoomK || 2.2;
+    const cam = P.autoZoom !== false ? worldCameraAt({ ...P, hi: his }, time, fallbackCenter) : { focus: 0, cx: fallbackCenter.cx, cy: fallbackCenter.cy };
+    const k = 1 + (zk - 1) * cam.focus;
+    const gT = `translate(${cam.cx.toFixed(2)} ${cam.cy.toFixed(2)}) scale(${k.toFixed(3)}) translate(${(-cam.cx).toFixed(2)} ${(-cam.cy).toFixed(2)})`;
+    const rd = Math.max(120, P.revealDur || 600);
+    const hh_ = (P.w * box.h) / box.w;
+    return (
+      <div onPointerDown={down} style={common}>
+        <svg width={P.w} height={hh_} viewBox={`${box.ox - 7} ${box.oy - 7} ${box.w + 14} ${box.h + 14}`} style={{ display: "block", overflow: "visible" }}>
+          <g transform={gT}>
+            <g style={{ filter: cam.focus > 0.02 ? `blur(${(2.5 * cam.focus).toFixed(2)}px)` : "none", opacity: 1 - 0.35 * cam.focus }}>
+              <MapEffectPaths id={obj.id} d={d} P={P} time={time} />
+            </g>
+            {his.map((hh) => {
+              const { cc, t } = hh;
+              if (!WORLD_D[cc]) return null;
+              const u = clamp01((time - t) / rd);
+              if (u <= 0) return null;
+              const ou = hh.out != null ? clamp01((time - hh.out) / Math.max(150, rd * 0.6)) : 0;
+              if (ou >= 1) return null;
+              const aMul = 1 - EASE.easeInQuad(ou);
+              const R = P.reveal || "simple";
+              const e = WORLD_EXT[cc] || [0, 0, 0, 0];
+              const ccx = (e[0] + e[2]) / 2, ccy = (e[1] + e[3]) / 2;
+              const glow = P.glow ? { filter: `drop-shadow(0 0 2.5px ${P.hiFill}) drop-shadow(0 0 ${(6 + 2.5 * Math.sin(time / 350)).toFixed(1)}px ${P.hiFill})` } : {};
+              let el = null;
+              if (R === "electric") {
+                if (!highlightFlick(u, cc.charCodeAt(0) * 7 + cc.charCodeAt(1))) return null;
+                el = <path d={WORLD_D[cc]} fill={P.hiFill} stroke={P.hiStroke} strokeWidth={P.strokeW * 2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" style={glow} />;
+              } else if (R === "pop") {
+                const sc = 0.2 + 0.8 * EASE.easeOutBack(u);
+                el = (
+                  <g transform={`translate(${ccx} ${ccy}) scale(${sc.toFixed(3)}) translate(${-ccx} ${-ccy})`} opacity={clamp01(u * 2)}>
+                    <path d={WORLD_D[cc]} fill={P.hiFill} stroke={P.hiStroke} strokeWidth={P.strokeW * 2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" style={glow} />
+                  </g>
+                );
+              } else if (R === "trace") {
+                const teu = EASE.easeInOutCubic(u);
+                el = (
+                  <g>
+                    <path d={WORLD_D[cc]} fill={P.hiFill} fillOpacity={clamp01((u - 0.6) / 0.4)} stroke="none" />
+                    <path d={WORLD_D[cc]} fill="none" stroke={P.hiStroke} strokeWidth={P.strokeW * 2.2} vectorEffect="non-scaling-stroke" pathLength={100} strokeDasharray={100} strokeDashoffset={100 * (1 - teu)} strokeLinejoin="round" style={glow} />
+                  </g>
+                );
+              } else {
+                const fillc = lerpColor(P.fillC, P.hiFill, EASE.easeOutCubic(u));
+                el = <path d={WORLD_D[cc]} fill={fillc} stroke={P.hiStroke} strokeOpacity={u} strokeWidth={P.strokeW * 2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" style={u > 0.5 ? glow : {}} />;
+              }
+              return <g key={cc} opacity={aMul}>{el}</g>;
+            })}
+          </g>
+        </svg>
+        {rz}
+      </div>
+    );
+  }
+
+  if (obj.type === "world") {
+    const h = (P.w * WORLD_H) / 200;
+    const his = normHi(P.hi);
+    const zk = P.zoomK || 2.6;
+    const auto = P.autoZoom !== false;
+    const cam = auto ? worldCameraAt(P, time) : (() => {
+      const fo2 = clamp01(valueAt(obj, "focus", time));
+      let gx2 = 100, gy2 = WORLD_H / 2;
+      if (his.length) {
+        let mnx = 1e9, mny = 1e9, mxx = -1e9, mxy = -1e9;
+        his.forEach(({ cc }) => { const e = WORLD_EXT[cc]; if (!e) return; mnx = Math.min(mnx, e[0]); mny = Math.min(mny, e[1]); mxx = Math.max(mxx, e[2]); mxy = Math.max(mxy, e[3]); });
+        if (mnx < 1e9) { gx2 = (mnx + mxx) / 2; gy2 = (mny + mxy) / 2; }
+      }
+      return { focus: fo2, cx: gx2, cy: gy2 };
+    })();
+    const fo = cam.focus, gx = cam.cx, gy = cam.cy;
+    const k = 1 + (zk - 1) * fo;
+    const tx = (100 - gx) * fo, ty = (WORLD_H / 2 - gy) * fo;
+    const gT = `translate(${(gx + tx).toFixed(2)} ${(gy + ty).toFixed(2)}) scale(${k.toFixed(3)}) translate(${(-gx).toFixed(2)} ${(-gy).toFixed(2)})`;
+    const rd = Math.max(120, P.revealDur || 600);
+    const flick = highlightFlick;
+    return (
+      <div onPointerDown={down} style={common}>
+        <svg width={P.w} height={h} viewBox={`-2 -2 204 ${WORLD_H + 4}`} style={{ display: "block", overflow: "visible" }}>
+          <g style={{ filter: fo > 0.02 ? `blur(${(3.5 * fo).toFixed(2)}px)` : "none", opacity: 1 - 0.45 * fo }}>
+            {Object.keys(WORLD_D).map((cc) => (
+              <path key={cc} d={WORLD_D[cc]} fill={P.base} fillOpacity={P.baseOp} stroke={P.stroke} strokeWidth={P.strokeW} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+            ))}
+          </g>
+          <g transform={gT}>
+            {his.map((hh) => {
+              const { cc, t } = hh;
+              if (!WORLD_D[cc]) return null;
+              const u = clamp01((time - t) / rd);
+              if (u <= 0) return null;
+              const ou = hh.out != null ? clamp01((time - hh.out) / Math.max(150, rd * 0.6)) : 0;
+              if (ou >= 1) return null;
+              const aMul = 1 - EASE.easeInQuad(ou);
+              const R = P.reveal || "simple";
+              const e = WORLD_EXT[cc] || [0, 0, 0, 0];
+              const ccx = (e[0] + e[2]) / 2, ccy = (e[1] + e[3]) / 2;
+              const glow = P.glow ? { filter: `drop-shadow(0 0 2.5px ${P.hiFill}) drop-shadow(0 0 ${(6 + 2.5 * Math.sin(time / 350)).toFixed(1)}px ${P.hiFill})` } : {};
+              let el = null;
+              if (R === "electric") {
+                if (!flick(u, cc.charCodeAt(0) * 7 + cc.charCodeAt(1))) return null;
+                el = <path d={WORLD_D[cc]} fill={P.hiFill} stroke={P.hiStroke} strokeWidth={P.strokeW * 2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" style={glow} />;
+              } else if (R === "pop") {
+                const sc = 0.2 + 0.8 * EASE.easeOutBack(u);
+                el = (
+                  <g transform={`translate(${ccx} ${ccy}) scale(${sc.toFixed(3)}) translate(${-ccx} ${-ccy})`} opacity={clamp01(u * 2)}>
+                    <path d={WORLD_D[cc]} fill={P.hiFill} stroke={P.hiStroke} strokeWidth={P.strokeW * 2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" style={glow} />
+                  </g>
+                );
+              } else if (R === "trace") {
+                const teu = EASE.easeInOutCubic(u);
+                el = (
+                  <g>
+                    <path d={WORLD_D[cc]} fill={P.hiFill} fillOpacity={clamp01((u - 0.6) / 0.4)} stroke="none" />
+                    <path d={WORLD_D[cc]} fill="none" stroke={P.hiStroke} strokeWidth={P.strokeW * 2.2} vectorEffect="non-scaling-stroke" pathLength={100} strokeDasharray={100} strokeDashoffset={100 * (1 - teu)} strokeLinejoin="round" style={glow} />
+                  </g>
+                );
+              } else {
+                const fillc = lerpColor(P.base, P.hiFill, EASE.easeOutCubic(u));
+                el = <path d={WORLD_D[cc]} fill={fillc} stroke={P.hiStroke} strokeOpacity={u} strokeWidth={P.strokeW * 2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" style={u > 0.5 ? glow : {}} />;
+              }
+              return <g key={cc} opacity={aMul}>{el}</g>;
+            })}
+          </g>
+        </svg>
+        {rz}
+      </div>
+    );
+  }
+
+  return null;
+}

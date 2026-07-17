@@ -71,7 +71,14 @@ export default function PublicPlayer() {
       .then((p) => {
         if (!live) return;
         if (!p || !p.data || !Array.isArray(p.data.objects)) { setStatus("missing"); return; }
-        setProj(p);
+        // Anonymous viewers can't hit the owner-auth'd asset API — rewrite
+        // asset refs to the token-scoped public route (server verifies the
+        // project actually references each asset before serving it).
+        const raw = JSON.stringify(p.data).replace(
+          /\/api\/assets\/(\d+)/g,
+          `/api/share/${encodeURIComponent(token)}/assets/$1`
+        );
+        setProj({ ...p, data: JSON.parse(raw) });
         setStatus("ready");
       })
       .catch((err) => {
