@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import ExportDialog from "./ExportDialog";
 import { api } from "../api";
 import { prepareImageFile } from "../lib/imagePrep";
+import { makeAudioTrack, audioToJson, audioFromJson, audioGainAt, audioWithinAt, validateAudioFile, AUDIO_ACCEPT_ATTR } from "../lib/audioTrack";
 import { EASE, EASE_LABEL, clamp01 } from "../engine/easing.js";
 import { SHAPE_DEFS, SHAPE_IDS, ptsToStr, pathSamples, pointOnPath, morphPtsAt } from "../engine/shapes.js";
 import { valueAt, colorAt, lerpColor, posOf, clipLocalTime, clipTransition } from "../engine/keyframes.js";
@@ -275,6 +276,13 @@ function assetErrorText(err) {
   if (err?.status === 409) return "Your asset storage is full — delete some assets to make room.";
   return err?.message || "Something went wrong — please try again.";
 }
+/* same mapping, audio-flavored copy (client-side type/size rejects come from validateAudioFile) */
+function audioErrorText(err) {
+  if (err?.status === 413) return "That audio file is too large for the server — try a shorter or more compressed one.";
+  if (err?.status === 415) return "That file type isn't supported. Use MP3, WAV, OGG, M4A or AAC.";
+  if (err?.status === 409) return "Your asset storage is full — delete some assets to make room.";
+  return err?.message || "Something went wrong — please try again.";
+}
 
 /* ============================================================
    APP
@@ -305,6 +313,13 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   const [assetsBusy, setAssetsBusy] = useState(false);
   const [assetErr, setAssetErr] = useState("");
   const [assetUploading, setAssetUploading] = useState(false);
+  /* project-level audio track: { src, name, startT, volume, fadeIn, fadeOut } | null — all times engine ms */
+  const [audioTrack, setAudioTrack] = useState(null);
+  const [audioSel, setAudioSel] = useState(false); /* audio lane selected → inspector shows audio props */
+  const [audioOpen, setAudioOpen] = useState(false);
+  const [audioErr, setAudioErr] = useState("");
+  const [audioUploading, setAudioUploading] = useState(false);
+  const [audioDurMs, setAudioDurMs] = useState(null); /* attached file's own duration once metadata loads (null = unknown) */
   const [shapeQ, setShapeQ] = useState("");
   const [morphQ, setMorphQ] = useState("");
   const [overflowShow, setOverflowShow] = useState(true);
@@ -326,6 +341,9 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   const rulerRef = useRef(null);
   const fileRef = useRef(null);
   const assetFileRef = useRef(null);
+  const audioFileRef = useRef(null);
+  const audioElRef = useRef(null); /* lazily-created HTMLAudioElement for preview sync */
+  const audioLoadedSrcRef = useRef(""); /* src currently assigned to that element */
   const zoomModeRef = useRef("fit");
   zoomModeRef.current = zoomMode;
 
@@ -458,6 +476,55 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     return () => cancelAnimationFrame(raf);
   }, [playing, loop, ctxDur]);
 
+  /* ---------- audio preview sync ----------
+     Project audio lives on the MAIN composition timeline only (startT is in
+     root ms), so it plays at root and pauses while editing inside a clip.
+     The <audio> element + file load are deferred until the first playing
+     frame (lazy preload); while paused (incl. scrubbing) it stays silent.
+     Per-frame: currentTime = (t - startT)/1000 with a small drift tolerance,
+     volume = track volume × fade-in/out gain. Never loops on its own — a
+     looping composition re-triggers it via the drift snap below. */
+  useEffect(() => {
+    const at = audioTrack;
+    const el0 = audioElRef.current;
+    if (!at || path.length > 0 || !playing) {
+      if (el0 && !el0.paused) el0.pause();
+      return;
+    }
+    if (!audioElRef.current) {
+      const el = new Audio();
+      el.preload = "auto";
+      el.loop = false;
+      el.addEventListener("loadedmetadata", () => {
+        setAudioDurMs(Number.isFinite(el.duration) ? Math.round(el.duration * 1000) : null);
+      });
+      audioElRef.current = el;
+    }
+    const el = audioElRef.current;
+    if (audioLoadedSrcRef.current !== at.src) {
+      audioLoadedSrcRef.current = at.src;
+      setAudioDurMs(null);
+      el.src = at.src; /* first assignment starts the (lazy) load */
+    }
+    if (!audioWithinAt(at, time, audioDurMs)) { if (!el.paused) el.pause(); return; }
+    const target = (time - at.startT) / 1000;
+    const drift = Math.abs(el.currentTime - target);
+    if (drift > 0.12) { try { el.currentTime = target; } catch { /* metadata not seekable yet — retried next frame */ } }
+    el.volume = audioGainAt(at, time, audioDurMs);
+    if (el.paused) {
+      /* don't retrigger right after a natural end while the playhead is still in the tail */
+      if (el.ended && drift <= 0.12) return;
+      el.play().catch(() => { /* autoplay policy / not ready — retried next frame */ });
+    }
+  }, [playing, time, audioTrack, path, audioDurMs]);
+
+  /* silence + release the audio element on unmount */
+  useEffect(() => () => {
+    if (audioElRef.current) { audioElRef.current.pause(); audioElRef.current.src = ""; }
+    audioElRef.current = null;
+    audioLoadedSrcRef.current = "";
+  }, []);
+
   useEffect(() => { setTime((t) => Math.min(t, ctxDur)); setSelKf(null); }, [path, ctxDur]);
 
   useEffect(() => {
@@ -472,6 +539,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
         if (menu) setMenu(null);
         else if (selKf) setSelKf(null);
         else if (selIds.length) setSelIds([]);
+        else if (audioSel) setAudioSel(false);
         else if (path.length) exitToDepth(path.length - 1);
       }
       if (e.key === "Delete" || e.key === "Backspace") {
@@ -680,7 +748,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     catch (err) { setAssetErr(assetErrorText(err)); }
     finally { setAssetsBusy(false); }
   }, []);
-  useEffect(() => { if (imagesOpen && assets === null) refreshAssets(); }, [imagesOpen, assets, refreshAssets]);
+  useEffect(() => { if ((imagesOpen || audioOpen) && assets === null) refreshAssets(); }, [imagesOpen, audioOpen, assets, refreshAssets]);
   const onPickAsset = async (e) => {
     const f = e.target.files?.[0];
     e.target.value = "";
@@ -707,6 +775,45 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     catch (err) { setAssetErr(assetErrorText(err)); }
   };
 
+  /* ---------- audio track (project-level, main timeline) ---------- */
+  const patchAudio = useCallback((patch) => setAudioTrack((a) => (a ? { ...a, ...patch } : a)), []);
+  const selectAudio = useCallback(() => { setAudioSel(true); setSelIds([]); setSelKf(null); }, []);
+  /* attach an asset-library audio file with the schema defaults */
+  const attachAudioAsset = useCallback((asset) => {
+    setAudioTrack(makeAudioTrack({ src: asset.url, name: asset.name }));
+    setAudioSel(true); setSelIds([]); setSelKf(null);
+  }, []);
+  const detachAudio = useCallback(() => { setAudioTrack(null); setAudioSel(false); }, []);
+  const onPickAudioAsset = async (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    const verdict = validateAudioFile(f);
+    if (!verdict.ok) { setAudioErr(verdict.error); return; }
+    setAudioUploading(true); setAudioErr("");
+    try {
+      const dataUrl = await new Promise((res, rej) => {
+        const rd = new FileReader();
+        rd.onload = () => res(rd.result);
+        rd.onerror = () => rej(new Error("Couldn't read that file — please try again."));
+        rd.readAsDataURL(f);
+      });
+      const asset = await api.uploadAsset({ name: f.name, mime: verdict.mime, dataUrl });
+      attachAudioAsset({ url: asset.url, name: asset.name || f.name });
+      refreshAssets();
+    } catch (err) { setAudioErr(audioErrorText(err)); }
+    finally { setAudioUploading(false); }
+  };
+  const onDeleteAudioAsset = async (asset) => {
+    if (!window.confirm(`Delete "${asset.name}" from your assets? If it's attached to this project, the audio will stop working.`)) return;
+    setAudioErr("");
+    try {
+      await api.deleteAsset(asset.id);
+      if (audioTrack?.src === asset.url) detachAudio();
+      refreshAssets();
+    } catch (err) { setAudioErr(audioErrorText(err)); }
+  };
+
   const applyPreset = (preset) => {
     if (!sel || sel.locked) return;
     const t = timeRef.current;
@@ -723,7 +830,8 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   };
 
   /* ---------- save / load ---------- */
-  const projectJson = () => JSON.stringify({ app: "graphic-destination-motion", v: 5, stage: { ...stage, dur: compDur, bg: stageBg }, brands, brandId, objects }, null, 2);
+  /* optional top-level "audio" field — OMITTED entirely when no track is attached (export-team contract) */
+  const projectJson = () => JSON.stringify({ app: "graphic-destination-motion", v: 5, stage: { ...stage, dur: compDur, bg: stageBg }, brands, brandId, objects, ...(audioToJson(audioTrack) ? { audio: audioToJson(audioTrack) } : {}) }, null, 2);
   const copyProject = async () => {
     const txt = projectJson();
     try { await navigator.clipboard.writeText(txt); setIoCopied(true); }
@@ -744,6 +852,8 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
       setObjects(data.objects);
       if (data.stage) { setStage({ w: data.stage.w || 1280, h: data.stage.h || 720 }); if (data.stage.dur) setCompDur(data.stage.dur); if (data.stage.bg) setStageBg(data.stage.bg); }
       if (Array.isArray(data.brands) && data.brands.length) { setBrands(data.brands); setBrandId(data.brandId || data.brands[0].id); }
+      setAudioTrack(audioFromJson(data.audio)); /* restore attached audio (null when the field is absent) */
+      setAudioSel(false);
       setPath([]); setSelIds([]); setSelKf(null); setTime(0); setImportErr(""); setIoOpen(false); setImportText("");
     } catch (err) { setImportErr("Couldn't parse that JSON: " + err.message); }
   };
@@ -767,7 +877,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     lastJsonRef.current = json;
     onChangeRef.current?.(json);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [objects, stage, compDur, stageBg, brands, brandId]);
+  }, [objects, stage, compDur, stageBg, brands, brandId, audioTrack]);
 
   /* ---------- stage drag (group + path aware, lock aware) ---------- */
   const dragRef = useRef(null);
@@ -1002,6 +1112,27 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
+  /* ---------- audio lane: click selects (opens the panel when empty), bar drag retimes startT ---------- */
+  const onAudioLaneDown = (e) => {
+    if (e.button === 2) return;
+    e.stopPropagation();
+    if (audioTrack) selectAudio();
+    else setAudioOpen(true);
+  };
+  /* bar body drag = move start offset, snapped to 100ms, clamped inside the composition */
+  const onAudioBarDown = (e) => {
+    if (e.button === 2) return;
+    e.stopPropagation();
+    selectAudio();
+    const r = rulerRef.current.getBoundingClientRect();
+    const move = (ev) => {
+      const nt = Math.round(clamp01((ev.clientX - r.left) / r.width) * ctxDur / 100) * 100;
+      patchAudio({ startT: Math.max(0, Math.min(ctxDur - 100, nt)) });
+    };
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
   /* drag a world-map country marker (appear/disappear) on the timeline */
   const onWorldKfDown = (e, objId, cc, kind, t0) => {
     if (e.button === 2) return;
@@ -1050,6 +1181,12 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
 
   const fmt = (ms) => `${Math.floor(ms / 1000)}:${String(Math.floor((ms % 1000) / 10)).padStart(2, "0")}`;
   const SW = brand.colors;
+  /* audio lane is selected only while no layer selection supersedes it */
+  const audioLaneSel = audioSel && !!audioTrack && selIds.length === 0;
+  /* bar length: the file's own duration once known, else to the end of the comp (min 100ms so it stays grabbable) */
+  const audioBarMs = audioTrack ? Math.max(100, Math.min(ctxDur - audioTrack.startT, audioDurMs != null ? Math.min(audioDurMs, ctxDur) : ctxDur - audioTrack.startT)) : 0;
+  const audioAssets = (assets || []).filter((a) => a.kind === "audio");
+  const fmtBytes = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
   const stageCX = stage.w / 2, stageCY = stage.h / 2;
   const flowText = !!(sel && sel.type === "text" && sel.props.path && (sel.props.pathMode || "flow") === "flow");
@@ -1083,6 +1220,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
       `}</style>
       <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onPickImage} />
       <input ref={assetFileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" style={{ display: "none" }} onChange={onPickAsset} />
+      <input ref={audioFileRef} type="file" accept={AUDIO_ACCEPT_ATTR} style={{ display: "none" }} onChange={onPickAudioAsset} />
 
       {/* ============ TOP BAR ============ */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 14px", height: 44, background: C.bg1, borderBottom: `1px solid ${C.line}`, flexShrink: 0 }}>
@@ -1121,6 +1259,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
           <RailBtn label="Shapes" active={shapesOpen} onClick={() => setShapesOpen(!shapesOpen)} glyph={<svg width="19" height="19" viewBox="0 0 100 100"><polygon points={ptsToStr(SHAPE_DEFS.star.pts)} fill={C.dim} /></svg>} />
           <RailBtn label="Text" onClick={() => addObject("text")} glyph={<div style={{ color: C.dim, fontWeight: 800, fontSize: 15 }}>T</div>} />
           <RailBtn label="Image" active={imagesOpen} onClick={() => setImagesOpen(!imagesOpen)} glyph={<div style={{ width: 18, height: 14, border: `2px solid ${C.dim}`, borderRadius: 3, position: "relative", overflow: "hidden" }}><div style={{ position: "absolute", width: 7, height: 7, background: C.dim, transform: "rotate(45deg)", bottom: -4, left: 3 }} /></div>} />
+          <RailBtn label="Audio" active={audioOpen} onClick={() => setAudioOpen(!audioOpen)} glyph={<NoteIcon size={18} color={audioTrack ? C.amber : C.dim} />} />
           <RailBtn label="Number" onClick={() => addObject("number")} glyph={<div style={{ color: C.dim, fontWeight: 800, fontSize: 12.5, fontFamily: "'JetBrains Mono'" }}>123</div>} />
           <RailBtn label="Charts" onClick={() => addObject("chart")} glyph={<div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 16 }}><div style={{ width: 4, height: 8, background: C.dim, borderRadius: 1 }} /><div style={{ width: 4, height: 15, background: C.dim, borderRadius: 1 }} /><div style={{ width: 4, height: 11, background: C.dim, borderRadius: 1 }} /></div>} />
           <RailBtn label="Maps" active={mapsOpen} onClick={() => setMapsOpen(!mapsOpen)} glyph={<svg width="19" height="19" viewBox="0 0 100 102"><path d={ringsToPath(MAPS.IND.rings)} fill="none" stroke={C.dim} strokeWidth="5" /></svg>} />
@@ -1203,8 +1342,65 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
           </div>
         )}
 
+        {/* audio drawer: upload + attached track + reusable audio assets */}
+        {audioOpen && (
+          <div className="gd-panel" style={{ position: "absolute", left: 84, top: 12, width: 240, background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 8, padding: 12, zIndex: 30, boxShadow: "0 12px 40px rgba(0,0,0,.5)" }}>
+            <button className="gd-btn-accent" onClick={() => audioFileRef.current?.click()} disabled={audioUploading}
+              style={{ width: "100%", background: C.amber, color: "#1A1405", border: "none", borderRadius: 6, padding: "8px 0", cursor: audioUploading ? "default" : "pointer", fontWeight: 700, fontSize: 12.5, opacity: audioUploading ? 0.65 : 1 }}>
+              {audioUploading ? "Uploading…" : "Upload audio"}
+            </button>
+            <div style={{ color: C.faint, fontSize: 10.5, marginTop: 6, lineHeight: 1.5 }}>MP3, WAV, OGG, M4A or AAC · 5 MB max</div>
+            {audioErr && <div style={{ color: C.danger, fontSize: 11.5, lineHeight: 1.5, marginTop: 9 }}>{audioErr}</div>}
+
+            <div style={{ ...sectionLabel, margin: "13px 0 8px" }}>Attached track</div>
+            {audioTrack ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, background: C.bg1, border: `1px solid ${C.amber}`, borderRadius: 8, padding: "8px 9px" }}>
+                <NoteIcon size={15} color={C.amber} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div title={audioTrack.name} style={{ fontSize: 12, fontWeight: 700, color: C.txt, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{audioTrack.name}</div>
+                  <div style={{ fontSize: 10, color: C.faint, fontFamily: "'JetBrains Mono'", fontVariantNumeric: "tabular-nums" }}>starts {fmt(audioTrack.startT)} · vol {audioTrack.volume.toFixed(2)}</div>
+                </div>
+                <button title="Detach audio from this project" aria-label="Detach audio" onClick={detachAudio}
+                  style={{ width: 18, height: 18, borderRadius: "50%", background: "rgba(10,12,16,0.88)", border: `1px solid ${C.lineStrong}`, color: C.dim, fontSize: 11, lineHeight: 1, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0, flexShrink: 0 }}>×</button>
+              </div>
+            ) : (
+              <div style={{ color: C.faint, fontSize: 12, lineHeight: 1.6 }}>Nothing attached — upload a track or pick one below.</div>
+            )}
+
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "13px 0 8px" }}>
+              <div style={sectionLabel}>Your audio</div>
+              {assetsBusy && <div style={{ fontSize: 10.5, color: C.faint }}>Loading…</div>}
+            </div>
+            {assets === null ? (
+              assetErr
+                ? <button className="gd-btn" onClick={refreshAssets} style={{ ...chipStyle, cursor: "pointer" }}>Retry</button>
+                : <div style={{ color: C.faint, fontSize: 12 }}>Loading…</div>
+            ) : audioAssets.length === 0 ? (
+              <div style={{ color: C.faint, fontSize: 12, lineHeight: 1.6 }}>No audio uploaded yet — it will appear here to reuse across projects.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto" }}>
+                {audioAssets.map((a) => (
+                  <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, background: C.bg1, border: `1px solid ${audioTrack?.src === a.url ? C.amber : C.line}`, borderRadius: 8, padding: "7px 9px" }}>
+                    <NoteIcon size={14} color={audioTrack?.src === a.url ? C.amber : C.faint} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div title={a.name} style={{ fontSize: 11.5, fontWeight: 600, color: C.txt, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.name}</div>
+                      <div style={{ fontSize: 9.5, color: C.faint }}>{fmtBytes(a.size)}</div>
+                    </div>
+                    <button className="gd-btn" onClick={() => attachAudioAsset(a)} disabled={audioTrack?.src === a.url}
+                      style={{ ...chipStyle, cursor: audioTrack?.src === a.url ? "default" : "pointer", padding: "3px 9px", fontSize: 10.5, flexShrink: 0, borderColor: audioTrack?.src === a.url ? C.amber : C.line, color: audioTrack?.src === a.url ? C.amber : C.dim }}>
+                      {audioTrack?.src === a.url ? "Attached" : "Attach"}
+                    </button>
+                    <button title={`Delete ${a.name}`} aria-label={`Delete ${a.name}`} onClick={() => onDeleteAudioAsset(a)}
+                      style={{ width: 16, height: 16, borderRadius: "50%", background: "rgba(10,12,16,0.88)", border: `1px solid ${C.lineStrong}`, color: C.dim, fontSize: 10, lineHeight: 1, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0, flexShrink: 0 }}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ---- stage ---- */}
-        <div ref={stageWrapRef} onPointerDown={() => { setSelIds([]); setSelKf(null); setShapesOpen(false); setMapsOpen(false); setImagesOpen(false); }}
+        <div ref={stageWrapRef} onPointerDown={() => { setSelIds([]); setSelKf(null); setAudioSel(false); setShapesOpen(false); setMapsOpen(false); setImagesOpen(false); setAudioOpen(false); }}
           style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: C.bg0, minWidth: 0, position: "relative", overflow: "hidden", pointerEvents: tlDragging ? "none" : undefined }}>
           {/* manual zoom: inner scroller pans the padded canvas area (margin:auto centers until larger than the viewport);
               floating overlays stay pinned because the scroller is a sibling. fit mode: display:contents = zero layout change */}
@@ -1254,7 +1450,31 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
 
         {/* ---- inspector ---- */}
         <div style={{ width: 280, background: C.bg1, borderLeft: `1px solid ${C.line}`, overflowY: "auto", flexShrink: 0, padding: "12px 12px 30px" }}>
-          {selMany.length > 1 ? (
+          {audioLaneSel ? (
+            <Card title="Audio track" hint="main timeline">
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                <NoteIcon size={16} color={C.amber} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div title={audioTrack.name} style={{ fontSize: 12.5, fontWeight: 700, color: C.txt, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{audioTrack.name}</div>
+                  <div style={{ fontSize: 10, color: C.faint, fontFamily: "'JetBrains Mono'", fontVariantNumeric: "tabular-nums" }}>starts {fmt(audioTrack.startT)} · drag the lane bar to retime</div>
+                </div>
+              </div>
+              <SliderRow label="Volume" min={0} max={1} step={0.01} value={audioTrack.volume} onChange={(v) => patchAudio({ volume: v })} />
+              <Row label="Fade in">
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <input type="number" min={0} step={100} value={audioTrack.fadeIn} onChange={(e) => patchAudio({ fadeIn: Math.max(0, Math.round(parseFloat(e.target.value) || 0)) })} style={{ ...inputStyle, fontFamily: "'JetBrains Mono'", fontSize: 12, fontVariantNumeric: "tabular-nums" }} />
+                  <span style={{ color: C.faint, fontSize: 10.5, flexShrink: 0 }}>ms</span>
+                </div>
+              </Row>
+              <Row label="Fade out">
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <input type="number" min={0} step={100} value={audioTrack.fadeOut} onChange={(e) => patchAudio({ fadeOut: Math.max(0, Math.round(parseFloat(e.target.value) || 0)) })} style={{ ...inputStyle, fontFamily: "'JetBrains Mono'", fontSize: 12, fontVariantNumeric: "tabular-nums" }} />
+                  <span style={{ color: C.faint, fontSize: 10.5, flexShrink: 0 }}>ms</span>
+                </div>
+              </Row>
+              <button className="gd-btn" onClick={detachAudio} style={{ ...chipStyle, cursor: "pointer", color: C.danger, width: "100%", padding: "7px 0", marginTop: 2 }}>✕ Remove audio from project</button>
+            </Card>
+          ) : selMany.length > 1 ? (
             <Card title={`${selMany.length} layers selected`}>
               <button className="gd-btn" onClick={groupSelection} style={{ width: "100%", background: C.amber, color: "#1a1405", border: "none", borderRadius: 6, padding: "9px 0", cursor: "pointer", fontWeight: 700, marginBottom: 12 }}>⌘G · Group into Clip</button>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, marginBottom: 10 }}>
@@ -1687,6 +1907,17 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
                 </div>
               );
             })}
+            {/* audio lane header (main timeline only — project audio lives at root) */}
+            {!inClip && (
+              <div onPointerDown={onAudioLaneDown} title={audioTrack ? `${audioTrack.name} — click to select` : "No audio attached — click to open the Audio panel"}
+                style={{ height: 36, display: "flex", alignItems: "center", gap: 6, padding: "0 8px", cursor: "pointer", borderTop: `1px solid ${C.line}`, background: audioLaneSel ? C.bg3 : "transparent", borderLeft: audioLaneSel ? `2px solid ${C.amber}` : "2px solid transparent", boxSizing: "border-box" }}>
+                <NoteIcon size={13} color={audioTrack ? C.amber : C.faint} />
+                <span style={{ fontSize: 12, fontWeight: 600, color: audioLaneSel ? C.txt : audioTrack ? C.dim : C.faint, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>
+                  {audioTrack ? audioTrack.name : "Audio"}
+                </span>
+                {audioTrack && <span style={{ fontSize: 9.5, color: C.faint, fontFamily: "'JetBrains Mono'", fontVariantNumeric: "tabular-nums" }}>{fmt(audioTrack.startT)}</span>}
+              </div>
+            )}
           </div>
 
           <div style={{ flex: 1, position: "relative", minWidth: 0 }}>
@@ -1758,6 +1989,25 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
                   </div>
                 );
               })}
+              {/* audio lane — flat labeled bar (waveform deliberately deferred); drag the bar to retime startT */}
+              {!inClip && (
+                <div onPointerDown={onAudioLaneDown} title={audioTrack ? undefined : "No audio attached — click to open the Audio panel"}
+                  style={{ height: 36, position: "relative", borderTop: `1px solid ${C.line}`, background: audioLaneSel ? "rgba(245,165,36,.04)" : "transparent" }}>
+                  {audioTrack ? (
+                    <div onPointerDown={onAudioBarDown}
+                      title={`${audioTrack.name} · starts ${fmt(audioTrack.startT)} · drag to retime (100ms snap)`}
+                      style={{ position: "absolute", left: `${(audioTrack.startT / ctxDur) * 100}%`, width: `${(audioBarMs / ctxDur) * 100}%`, minWidth: 48, top: 6, height: 24, background: "#1F3D33", filter: audioLaneSel ? "brightness(1.35)" : "none", border: `1px solid ${audioLaneSel ? C.amber : "rgba(255,255,255,.2)"}`, borderRadius: 6, cursor: "grab", overflow: "hidden", display: "flex", alignItems: "center", gap: 6, padding: "0 8px", boxSizing: "border-box" }}>
+                      <span style={{ display: "flex", flexShrink: 0, pointerEvents: "none" }}><NoteIcon size={12} color="#3FB68B" /></span>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: "#9AD9BE", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", pointerEvents: "none" }}>{audioTrack.name}</span>
+                      <span style={{ marginLeft: "auto", fontSize: 9, color: "#6FA98E", fontFamily: "'JetBrains Mono'", fontVariantNumeric: "tabular-nums", pointerEvents: "none", flexShrink: 0 }}>{fmt(audioTrack.startT)}</span>
+                    </div>
+                  ) : (
+                    <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", padding: "0 10px", gap: 6, color: C.faint, fontSize: 10.5, pointerEvents: "none" }}>
+                      <NoteIcon size={12} color={C.faint} /> No audio attached — open the Audio panel to add a track
+                    </div>
+                  )}
+                </div>
+              )}
               <div style={{ position: "absolute", top: -26, bottom: 0, left: `${(time / ctxDur) * 100}%`, width: 2, background: C.amber, boxShadow: "0 0 6px rgba(245,165,36,.45)", pointerEvents: "none", zIndex: 5 }}>
                 <div style={{ position: "absolute", top: 0, left: -5, width: 0, height: 0, borderLeft: "5.5px solid transparent", borderRight: "5.5px solid transparent", borderTop: `7px solid ${C.amber}` }} />
               </div>
@@ -2545,6 +2795,16 @@ function PointBtn({ label, time, auto, onClick, onClear, color, placeholder }) {
 function fmtMs(ms) { return `${Math.floor(ms / 1000)}:${String(Math.floor((ms % 1000) / 10)).padStart(2, "0")}`; }
 function MenuBtn({ children, onClick, danger }) {
   return <button className="gd-btn" onClick={onClick} style={{ background: "transparent", border: "none", color: danger ? C.danger : C.txt, borderRadius: 7, padding: "7px 9px", cursor: "pointer", fontWeight: 600, fontSize: 12, textAlign: "left" }}>{children}</button>;
+}
+/* music note — 1.5px stroke, matches the design system's minimal icon style */
+function NoteIcon({ size = 18, color = C.dim }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 18.25V5.5l10-2v12.75" />
+      <circle cx="6.75" cy="18.25" r="2.25" />
+      <circle cx="16.75" cy="16.25" r="2.25" />
+    </svg>
+  );
 }
 function MiniBtn({ children, onClick, title, danger }) {
   return <button title={title} onClick={onClick} style={{ width: 16, height: 16, background: "none", border: "none", color: danger ? C.danger : C.faint, cursor: "pointer", fontSize: 9, padding: 0, lineHeight: 1 }}>{children}</button>;

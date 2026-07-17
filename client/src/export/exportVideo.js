@@ -16,6 +16,12 @@
  * CJS lib that expects a global Buffer, so a minimal Uint8Array-backed shim
  * is installed first (only the APIs ts-ebml actually calls). Any failure in
  * this post-step is NON-fatal: the original blob is returned with a warning.
+ *
+ * Audio: when project.audio is set ({ src, startT, volume, fadeIn, fadeOut
+ * } — see audioMix.js), both paths mux an audio track (MP4: AAC via
+ * WebCodecs; WebM: Opus via MediaRecorder). Audio failures never crash an
+ * export: both exporters fall back to silent video and surface the reason
+ * in the returned warnings[], which this router passes through unchanged.
  */
 
 import { exportProjectToMp4, isMp4ExportSupported } from "./exportMp4.js";

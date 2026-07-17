@@ -28,7 +28,10 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: "8mb" })); // project JSON payloads can be sizable
+// Raised 8mb -> 12mb: audio assets up to 5 MB decoded arrive as base64 inside
+// the JSON envelope (~6.7 MB) plus field overhead, so 8mb would 413 valid
+// uploads; 12mb keeps headroom for sizable project JSON payloads too.
+app.use(express.json({ limit: "12mb" }));
 app.use(cookieParser());
 app.use(cors({ origin: process.env.CLIENT_ORIGIN || true, credentials: true }));
 
@@ -185,23 +188,30 @@ app.delete("/api/projects/:id", requireAuth, async (req, res) => {
 });
 
 /* ---------------- asset library ----------------
- * Owner-scoped image uploads. Payloads arrive as data URLs and are stored as
- * base64 text in the assets table (the remote-only Turso client binds no
- * BLOBS); GET /api/assets/:id decodes and serves the raw bytes. Same-origin
- * URLs plus the CSP's `img-src 'self' data:` keep these usable in <img> tags.
+ * Owner-scoped image and audio uploads. Payloads arrive as data URLs and are
+ * stored as base64 text in the assets table (the remote-only Turso client
+ * binds no BLOBS); GET /api/assets/:id decodes and serves the raw bytes.
+ * Same-origin URLs plus the CSP's `img-src 'self' data:` / `media-src 'self'
+ * blob:` keep these usable in <img> and <audio> tags.
  */
 
-const ASSET_MIMES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-const MAX_ASSET_BYTES = 3 * 1024 * 1024; // 3 MB decoded
+const IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+const AUDIO_MIMES = new Set(["audio/mpeg", "audio/wav", "audio/x-wav", "audio/ogg", "audio/mp4", "audio/aac", "audio/m4a", "audio/webm"]);
+const ASSET_MIMES = new Set([...IMAGE_MIMES, ...AUDIO_MIMES]);
+const MAX_IMAGE_BYTES = 3 * 1024 * 1024; // 3 MB decoded
+const MAX_AUDIO_BYTES = 5 * 1024 * 1024; // 5 MB decoded
 // Test hook: GD_ASSET_QUOTA overrides the default 50-assets-per-user limit.
 const ASSET_QUOTA = Math.max(1, Number.parseInt(process.env.GD_ASSET_QUOTA || "50", 10) || 50);
 const DATA_URL_RE = /^data:([^;,]+);base64,([\s\S]*)$/;
 const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 
+const assetKind = (mime) => (String(mime).startsWith("audio/") ? "audio" : "image");
+
 const assetMeta = (row) => ({
   id: row.id,
   name: row.name,
   mime: row.mime,
+  kind: assetKind(row.mime),
   size: row.size,
   url: `/api/assets/${row.id}`,
   createdAt: row.created_at,
@@ -216,15 +226,17 @@ app.post("/api/assets", requireAuth, async (req, res) => {
     return res.status(400).json({ error: "mime and dataUrl required" });
   }
   if (!ASSET_MIMES.has(mime)) {
-    return res.status(415).json({ error: "Unsupported image type (allowed: image/png, image/jpeg, image/webp, image/gif)" });
+    return res.status(415).json({ error: `Unsupported media type (allowed: ${[...ASSET_MIMES].join(", ")})` });
   }
   const m = DATA_URL_RE.exec(dataUrl);
   if (!m || m[1] !== mime || !m[2] || m[2].length % 4 !== 0 || !BASE64_RE.test(m[2])) {
     return res.status(400).json({ error: "Malformed dataUrl (expected data:<mime>;base64,<data>)" });
   }
   const buf = Buffer.from(m[2], "base64");
-  if (buf.length > MAX_ASSET_BYTES) {
-    return res.status(413).json({ error: "Image too large (max 3 MB)" });
+  // Per-kind size caps on decoded bytes: images 3 MB, audio 5 MB.
+  const kind = assetKind(mime);
+  if (buf.length > (kind === "audio" ? MAX_AUDIO_BYTES : MAX_IMAGE_BYTES)) {
+    return res.status(413).json({ error: kind === "audio" ? "Audio too large (max 5 MB)" : "Image too large (max 3 MB)" });
   }
   const count = await db.execute({ sql: "SELECT COUNT(*) AS n FROM assets WHERE owner_id = ?", args: [req.user.sub] });
   if (Number(count.rows[0].n) >= ASSET_QUOTA) {

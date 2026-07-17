@@ -32,7 +32,16 @@
  *    if that fetch fails, text falls back to system fonts and a warning is
  *    reported. Remote (non-data-URL) images are inlined up front; CORS
  *    failures are warnings too.
- * 4. Audio is out of scope — the engine has no audio tracks.
+ * 4. Audio (optional project.audio track — see audioMix.js for the schema)
+ *    is mixed live: a realtime AudioContext plays the decoded track through
+ *    a GainNode (same placement/volume/fade math as the MP4 path) into a
+ *    MediaStreamDestination, whose track is recorded alongside the canvas
+ *    video track (VP9/VP8 + Opus). Because MediaRecorder timestamps are
+ *    wall-clock (limitation 1), A/V sync is best-effort — the audio start is
+ *    scheduled on the audio clock when the recorder starts, which can drift
+ *    a few ms from the paced frame timeline. The MP4 export is sample-exact;
+ *    prefer it when audio sync matters. Any audio failure degrades to a
+ *    silent video with a warning — audio never crashes an export.
  *
  * API
  * ---
@@ -45,13 +54,16 @@
  */
 
 import { createFrameRenderer } from "./frameRenderer.js";
+import { fetchAudioBytes, decodeAudioBytes, computeAudioWindow, scheduleGainAutomation } from "./audioMix.js";
 
 const MIME_CANDIDATES = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+/* MediaRecorder always encodes WebM audio as Opus. */
+const MIME_CANDIDATES_AUDIO = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
 
 /** Best WebM mime type for MediaRecorder on this browser. "" = browser default, null = unsupported. */
-export function pickWebmMimeType() {
+export function pickWebmMimeType(withAudio = false) {
   if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") return null;
-  for (const c of MIME_CANDIDATES) if (MediaRecorder.isTypeSupported(c)) return c;
+  for (const c of withAudio ? MIME_CANDIDATES_AUDIO : MIME_CANDIDATES) if (MediaRecorder.isTypeSupported(c)) return c;
   return "";
 }
 
@@ -60,6 +72,62 @@ export function isWebmExportSupported() {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Build the live audio path for a WebM export: decoded project.audio played
+ * through a GainNode into a MediaStreamDestination. Returns null when the
+ * track lands entirely outside the composition (nothing audible to record).
+ * The gain curve and source start are scheduled by begin() at recorder
+ * start so audio lands on the same (wall-clock) timeline as the paced
+ * frames — same placement/volume/fade math as the MP4 path (audioMix.js).
+ *
+ * @returns {Promise<{dest: MediaStreamAudioDestinationNode, begin: () => void, stop: () => void} | null>}
+ */
+async function setupWebmAudioTrack({ audioCfg, durationMs, signal }) {
+  const bytes = await fetchAudioBytes(audioCfg.src, signal);
+  const decoded = await decodeAudioBytes(bytes); // AudioBuffer is context-independent
+  const win = computeAudioWindow({ startT: audioCfg.startT, audioDurationMs: decoded.duration * 1000, durationMs });
+  if (!win.audible) return null;
+
+  const ctx = new AudioContext();
+  /* Autoplay policy: exports are triggered by a user gesture, so resume()
+     normally resolves immediately; a headless browser may need
+     --autoplay-policy=no-user-gesture-required. */
+  await Promise.race([ctx.resume(), sleep(1000)]);
+  if (ctx.state !== "running") {
+    try { ctx.close(); } catch { /* noop */ }
+    throw new Error("the browser blocked audio playback (AudioContext suspended)");
+  }
+
+  const dest = ctx.createMediaStreamDestination();
+  const source = ctx.createBufferSource();
+  source.buffer = decoded;
+  const gain = ctx.createGain();
+  source.connect(gain);
+  gain.connect(dest);
+
+  let started = false;
+  return {
+    dest,
+    begin() {
+      const base = ctx.currentTime;
+      scheduleGainAutomation(gain.gain, {
+        t0s: base + win.t0 / 1000,
+        t1s: base + win.t1 / 1000,
+        volume: audioCfg.volume,
+        fadeInMs: audioCfg.fadeIn,
+        fadeOutMs: audioCfg.fadeOut,
+      });
+      source.start(base + win.t0 / 1000, win.skip / 1000, (win.t1 - win.t0) / 1000);
+      started = true;
+    },
+    stop() {
+      try { if (started) source.stop(); } catch { /* already ended */ }
+      try { for (const t of dest.stream.getTracks()) t.stop(); } catch { /* noop */ }
+      try { ctx.close(); } catch { /* noop */ }
+    },
+  };
+}
 
 /**
  * @param {object} opts
@@ -97,14 +165,38 @@ export async function exportProjectToWebM({
   canvas.height = height;
   const ctx = canvas.getContext("2d", { alpha: false });
 
+  /* Optional audio track (project.audio) — fetch+decode runs in parallel
+     with renderer setup; failures degrade to silent video + warning. */
+  const audioCfg = project?.audio && typeof project.audio.src === "string" && project.audio.src ? project.audio : null;
+  if (project?.audio && !audioCfg) warn("Audio track is missing its src — exporting without sound.");
+  const audioPrep = audioCfg ? setupWebmAudioTrack({ audioCfg, durationMs, signal }) : null;
+  audioPrep?.catch(() => {}); // rejection is handled below
+
   const renderer = await createFrameRenderer({ project, ctx, width, height, warn });
+
+  let audio = null;
+  if (audioPrep) {
+    try {
+      audio = await audioPrep;
+    } catch (err) {
+      if (signal?.aborted || err?.message === "Export cancelled") {
+        renderer.dispose();
+        throw new Error("Export cancelled");
+      }
+      warn(`Audio track${audioCfg.name ? ` "${audioCfg.name}"` : ""} could not be used — exporting without sound (${err?.message || err}).`);
+    }
+  }
 
   const stream = canvas.captureStream(0);
   const track = stream.getVideoTracks()[0];
-  const mimeType = pickWebmMimeType();
-  const recorder = new MediaRecorder(stream, {
+  const mimeType = pickWebmMimeType(!!audio);
+  /* One MediaStream for the recorder: canvas video track + (optional)
+     MediaStreamDestination audio track → VP9/VP8 + Opus. */
+  const combined = audio ? new MediaStream([track, ...audio.dest.stream.getAudioTracks()]) : stream;
+  const recorder = new MediaRecorder(combined, {
     ...(mimeType ? { mimeType } : {}),
     videoBitsPerSecond,
+    ...(audio ? { audioBitsPerSecond: 128_000 } : {}),
   });
   const chunks = [];
   recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
@@ -117,11 +209,13 @@ export async function exportProjectToWebM({
   const cleanup = () => {
     try { if (recorder.state !== "inactive") recorder.stop(); } catch { /* already stopped */ }
     try { track.stop(); } catch { /* noop */ }
+    audio?.stop();
     renderer.dispose();
   };
 
   recorder.start();
   const t0 = performance.now();
+  audio?.begin(); // schedule source start + gain curve on the audio clock
   try {
     for (let i = 0; i < totalFrames; i++) {
       if (signal?.aborted) throw new Error("Export cancelled");
@@ -145,6 +239,7 @@ export async function exportProjectToWebM({
   if (recorder.state !== "inactive") recorder.stop();
   await stopped;
   track.stop();
+  audio?.stop();
   renderer.dispose();
 
   if (!chunks.length) throw new Error("The encoder produced no data — export failed.");
