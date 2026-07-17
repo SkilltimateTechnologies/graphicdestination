@@ -13,8 +13,12 @@ with instant in-browser WebM export and cloud-saved projects.
 - **Instant WebM export (client-side)** — deterministic frame-stepped render of
   the exact editor engine into a canvas → MediaRecorder (VP9/VP8). No server,
   no render farm, works offline.
-- **Server MP4 render (beta)** — HyperFrames pipeline compiles project JSON →
-  HTML composition → MP4 streamed back (requires Chromium on the host).
+- **Server MP4 render (beta, opt-in)** — HyperFrames pipeline compiles project
+  JSON → HTML composition → MP4 streamed back. The `hyperframes` package is
+  intentionally NOT a declared dependency (heavy tree, slows deploys): the
+  endpoint degrades gracefully to `{rendered:false, hint}` without it. To
+  enable: `cd server && npm install hyperframes --ignore-scripts` + a Chromium
+  binary on the host. The compile endpoint works regardless.
 - **Accounts & cloud projects** — public signup, bcrypt password hashing,
   JWT session cookies, per-user project isolation, Turso (libsql) cloud
   persistence with local SQLite fallback for dev.
