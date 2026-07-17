@@ -37,13 +37,17 @@ export default function StageView({ stageWrapRef, stageScrollRef, tlDragging, zo
               Editing clip: {ctx.names[ctx.names.length - 1]} — Esc to go back
             </div>
           )}
-          <div style={{ position: "absolute", bottom: 8, left: 14, color: C.faint, fontSize: 10.5, fontFamily: "'JetBrains Mono'", fontVariantNumeric: "tabular-nums" }}>
-            <span onClick={() => setOverflowShow(!overflowShow)} style={{ cursor: "pointer", color: overflowShow ? C.amber : C.faint, marginRight: 8 }}>[{overflowShow ? "workspace: showing off-canvas" : "workspace: hidden"}]</span>{stage.w}×{stage.h} · space play · ⌘click multi · ⌘G group · ⌘D dup · right-click timeline = easing
-          </div>
-
           {/* ---- zoom controls (bottom-right) ---- */}
           <div onPointerDown={(e) => e.stopPropagation()}
             style={{ position: "absolute", right: 14, bottom: 8, display: "flex", alignItems: "center", gap: 2, background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 6, padding: 3, zIndex: 80 }}>
+            <button className="gd-btn" onClick={() => setOverflowShow(!overflowShow)}
+              title={overflowShow ? "Hide off-canvas layers" : "Show off-canvas layers"}
+              style={{ ...zoomCtlBtn, color: overflowShow ? C.amber : C.dim }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>
+              </svg>
+            </button>
+            <div style={{ width: 1, height: 16, background: C.line, margin: "0 2px" }} />
             <button className="gd-btn" onClick={() => stepZoom(-1)} title="Zoom out" style={zoomCtlBtn}>−</button>
             <button className="gd-btn" onClick={cycleZoom} title="Zoom — click to cycle Fit → 100% → 50% → 25%"
               style={{ ...zoomCtlBtn, minWidth: 52, fontFamily: "'JetBrains Mono'", fontVariantNumeric: "tabular-nums", fontSize: 11 }}>

@@ -114,8 +114,9 @@ export default function Editor() {
         .gd-signout:hover { background: #1E2330; }
         .gd-back { transition: color 120ms ease-out; }
         .gd-back:hover { color: #E9ECF3; }
-        .gd-save { transition: background 120ms ease-out; }
-        .gd-save:hover:not(:disabled) { background: #B87A18; }
+        .gd-save { transition: background 120ms ease-out, color 120ms ease-out, border-color 120ms ease-out, opacity 120ms ease-out; }
+        .gd-save-active:hover:not(:disabled) { background: #B87A18 !important; }
+        .gd-save:disabled { cursor: default; }
         .gd-sharedpill { transition: background 120ms ease-out, border-color 120ms ease-out; }
         .gd-sharedpill:hover { background: rgba(245,165,36,0.2); border-color: #F5A524; }
       `}</style>
@@ -155,8 +156,14 @@ export default function Editor() {
             </button>
           )}
           {id && (
-            <button onClick={saveNow} disabled={saveState === "saving"} className="gd-save" style={saveBtn}>
-              {saveState === "saving" ? "Saving…" : "Save"}
+            <button
+              onClick={saveNow}
+              disabled={saveState !== "dirty" && saveState !== "error"}
+              className={saveState === "dirty" ? "gd-save gd-save-active" : "gd-save"}
+              style={{ ...saveBtn, ...saveBtnState[saveState] }}
+              title={saveState === "dirty" ? "Save your changes" : saveState === "saved" ? "Everything is saved" : saveState === "error" ? "Save failed — click to retry" : "Saving"}
+            >
+              {saveState === "saving" ? "Saving…" : saveState === "dirty" ? "Save" : saveState === "error" ? "Retry save" : "Saved ✓"}
             </button>
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#939BAD", fontSize: 12.5 }}>
@@ -197,8 +204,16 @@ const signoutBtn = {
   padding: "5px 13px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
 };
 const saveBtn = {
-  background: "#F5A524", color: "#1A1405", border: "none", borderRadius: 6,
-  padding: "5px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+  borderRadius: 6, border: "none",
+  padding: "5px 16px", fontSize: 12, fontWeight: 700, fontFamily: "inherit",
+};
+/* per-state look: dirty = accent call-to-action; saving = muted; saved = calm
+   success tint; error = danger (clickable retry) */
+const saveBtnState = {
+  dirty: { background: "#F5A524", color: "#1A1405", cursor: "pointer" },
+  saving: { background: "#2A2415", color: "#939BAD" },
+  saved: { background: "rgba(63,182,139,0.12)", color: "#3FB68B", border: "1px solid rgba(63,182,139,0.35)" },
+  error: { background: "#E5636A", color: "#FFFFFF", cursor: "pointer" },
 };
 const sharedPill = {
   display: "flex", alignItems: "center", gap: 5, background: "rgba(245,165,36,0.12)",
