@@ -30,6 +30,12 @@ export const api = {
   updateProject: (id, patch) => request(`/api/projects/${id}`, { method: "PUT", body: JSON.stringify(patch) }),
   deleteProject: (id) => request(`/api/projects/${id}`, { method: "DELETE" }),
 
+  /* public share links — enable/disable are owner-only; getSharedProject is
+     the PUBLIC fetch behind the lenient server bucket (no session needed) */
+  enableShare: (id) => request(`/api/projects/${id}/share`, { method: "POST" }),
+  disableShare: (id) => request(`/api/projects/${id}/share`, { method: "DELETE" }),
+  getSharedProject: (token) => request(`/api/share/${encodeURIComponent(token)}`),
+
   listAssets: () => request("/api/assets"),
   uploadAsset: ({ name, mime, dataUrl }) => request("/api/assets", { method: "POST", body: JSON.stringify({ name, mime, dataUrl }) }),
   deleteAsset: (id) => request(`/api/assets/${id}`, { method: "DELETE" }),

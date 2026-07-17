@@ -18,8 +18,14 @@
  *   1. avc1.640028 — High profile, level 4.0
  *   2. avc1.4d0028 — Main profile, level 4.0
  *   3. avc1.42001f — Baseline profile, level 3.1
- * and the first supported config wins. The probe result is cached for the
- * session (isMp4ExportSupported / exportProjectToMp4 share it).
+ *   4. avc1.640032 — High profile, level 5.0 (tall/large-canvas fallback)
+ * and the first supported config wins. L4.0 covers 1080×1920@30 exactly
+ * (8160 of the 8192-macroblock cap), so portrait exports usually stay on
+ * candidate 1; L5.0 exists for encoders that reject level 4.0 at 1920 px.
+ * The probe runs at the REAL export geometry (a config that is fine at
+ * 1280×720 can be rejected at 1080×1920) and the result is cached per
+ * geometry for the session (isMp4ExportSupported / exportProjectToMp4
+ * share it).
  *
  * API
  * ---
@@ -55,34 +61,40 @@ import { Muxer, ArrayBufferTarget } from "mp4-muxer";
 import { createFrameRenderer } from "./frameRenderer.js";
 import { renderAudioPcm, AUDIO_SAMPLE_RATE } from "./audioMix.js";
 
-/** H.264 configs, in preference order: High L4.0 → Main L4.0 → Baseline L3.1. */
+/** H.264 configs, in preference order: High L4.0 → Main L4.0 → Baseline L3.1
+    → High L5.0 (fallback for tall/large canvases — see the file header). */
 const AVC_CODEC_CANDIDATES = [
   { codec: "avc1.640028", label: "H.264 High L4.0" },
   { codec: "avc1.4d0028", label: "H.264 Main L4.0" },
   { codec: "avc1.42001f", label: "H.264 Baseline L3.1" },
+  { codec: "avc1.640032", label: "H.264 High L5.0" },
 ];
 
-/* Probe result cache: Promise<string | null> — the chosen codec string, or
-   null when WebCodecs/H.264 is unavailable. Shared by isMp4ExportSupported()
-   and exportProjectToMp4() so probing happens once per session. */
-let _probePromise = null;
+/* Probe result cache: "WxH@fps/bitrate" → Promise<string | null> (the chosen
+   codec, or null when WebCodecs/H.264 is unavailable at that geometry). The
+   probe must run at the real export geometry — a config supported at
+   1280×720 can be rejected at 1080×1920 — so results are cached per
+   geometry. Shared by isMp4ExportSupported() and exportProjectToMp4(). */
+const _probeCache = new Map();
 
 /**
- * Probe WebCodecs for a usable H.264 encoder config.
+ * Probe WebCodecs for a usable H.264 encoder config at the given export
+ * geometry (defaults: the 1280×720@30 baseline).
  * @returns {Promise<string|null>} codec string (e.g. "avc1.640028") or null.
  */
-export function probeMp4Codec() {
-  if (!_probePromise) {
-    _probePromise = (async () => {
+export function probeMp4Codec({ width = 1280, height = 720, fps = 30, bitrate = 8_000_000 } = {}) {
+  const key = `${width}x${height}@${fps}/${bitrate}`;
+  if (!_probeCache.has(key)) {
+    _probeCache.set(key, (async () => {
       if (typeof VideoEncoder === "undefined" || typeof VideoEncoder.isConfigSupported !== "function") return null;
       for (const { codec } of AVC_CODEC_CANDIDATES) {
         try {
           const { supported } = await VideoEncoder.isConfigSupported({
             codec,
-            width: 1280,
-            height: 720,
-            bitrate: 8_000_000,
-            framerate: 30,
+            width,
+            height,
+            bitrate,
+            framerate: fps,
             latencyMode: "quality",
             hardwareAcceleration: "no-preference",
             avc: { format: "avc" },
@@ -91,9 +103,9 @@ export function probeMp4Codec() {
         } catch { /* config rejected — try the next one */ }
       }
       return null;
-    })();
+    })());
   }
-  return _probePromise;
+  return _probeCache.get(key);
 }
 
 /**
@@ -159,8 +171,8 @@ export async function exportProjectToMp4({
   signal,
 }) {
   if (!project || !Array.isArray(project.objects)) throw new Error("Nothing to export — project has no layers.");
-  const codec = await probeMp4Codec();
-  if (!codec) throw new Error("This browser cannot encode H.264 (WebCodecs VideoEncoder unsupported). Try Chrome/Edge, or use the WebM export.");
+  const codec = await probeMp4Codec({ width, height, fps, bitrate: videoBitsPerSecond });
+  if (!codec) throw new Error(`This browser cannot encode H.264 at ${width}×${height} (WebCodecs VideoEncoder unsupported). Try Chrome/Edge, or use the WebM export.`);
 
   /* Same duration/frame math as the WebM path. */
   const durationMs = Math.min(60_000, Math.max(200, Number(project?.stage?.dur) || 5000));

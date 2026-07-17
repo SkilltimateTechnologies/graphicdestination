@@ -262,10 +262,15 @@ function scaleLayerTimes(o, f) {
   return n;
 }
 
-const STAGE_PRESETS = [
-  { id: "land", name: "Landscape 16:9", w: 1280, h: 720 },
-  { id: "vert", name: "Reel · 9:16", w: 720, h: 1280 },
-  { id: "sq", name: "Square 1:1", w: 960, h: 960 },
+/* Stage size presets — the default (16:9 1280×720) matches the STAGE_W/STAGE_H
+   constants and every built-in template. Changing the preset only resizes the
+   stage; existing layers keep their coordinates (off-canvas layers still render
+   in the workspace and can be dragged back). Exported so node checks can verify
+   the preset dims without a DOM. */
+export const STAGE_PRESETS = [
+  { id: "land", name: "Landscape · 16:9", w: 1280, h: 720 },
+  { id: "vert", name: "Portrait · 9:16", w: 1080, h: 1920 },
+  { id: "sq", name: "Square · 1:1", w: 1080, h: 1080 },
 ];
 const DEFAULT_BRAND = { id: "b1", name: "Graphic Destination", colors: ["#FFB224", "#FF6B6B", "#5B8CFF", "#6EE7B7", "#F9F9F9"], headFont: "Space Grotesk", bodyFont: "Inter" };
 
@@ -1189,6 +1194,9 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   const fmtBytes = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
   const stageCX = stage.w / 2, stageCY = stage.h / 2;
+  /* stage size preset picker (top bar + inspector share it): apply by "WxH" value */
+  const applyStagePreset = (v) => { const p = STAGE_PRESETS.find((s) => `${s.w}x${s.h}` === v); if (p) setStage({ w: p.w, h: p.h }); };
+  const stageIsPreset = STAGE_PRESETS.some((s) => s.w === stage.w && s.h === stage.h);
   const flowText = !!(sel && sel.type === "text" && sel.props.path && (sel.props.pathMode || "flow") === "flow");
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: C.bg0, color: C.txt, fontFamily: "'Inter', system-ui, sans-serif", fontSize: 13, userSelect: "none", overflow: "hidden" }}>
@@ -1239,9 +1247,11 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
           ))}
         </div>
         <div style={{ flex: 1 }} />
-        <select value={`${stage.w}x${stage.h}`} onChange={(e) => { const p = STAGE_PRESETS.find((s) => `${s.w}x${s.h}` === e.target.value); if (p) setStage({ w: p.w, h: p.h }); }} style={{ width: 150 }}>
+        <select value={`${stage.w}x${stage.h}`} onChange={(e) => applyStagePreset(e.target.value)} title="Stage size preset" aria-label="Stage size preset" style={{ width: 142 }}>
+          {!stageIsPreset && <option value={`${stage.w}x${stage.h}`}>Custom</option>}
           {STAGE_PRESETS.map((p) => <option key={p.id} value={`${p.w}x${p.h}`}>{p.name}</option>)}
         </select>
+        <span style={{ fontFamily: "'JetBrains Mono'", fontSize: 11, color: C.faint, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{stage.w}×{stage.h}</span>
         <button className="gd-btn" onClick={() => setBrandOpen(true)} style={{ background: C.bg2, border: `1px solid ${C.line}`, color: C.txt, borderRadius: 6, padding: "6px 12px", cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 7 }}>
           <span style={{ display: "flex", gap: 2 }}>{brand.colors.slice(0, 3).map((c, i) => <span key={i} style={{ width: 8, height: 8, borderRadius: 2, background: c }} />)}</span>
           Brand
@@ -1487,6 +1497,17 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
             </Card>
           ) : !sel ? (
             <Card title={inClip ? `Clip: ${ctx.names[ctx.names.length - 1]}` : "Stage"}>
+              {!inClip && <Row label="Size">
+                <select value={`${stage.w}x${stage.h}`} onChange={(e) => applyStagePreset(e.target.value)} aria-label="Stage size preset">
+                  {!stageIsPreset && <option value={`${stage.w}x${stage.h}`}>Custom · {stage.w}×{stage.h}</option>}
+                  {STAGE_PRESETS.map((p) => <option key={p.id} value={`${p.w}x${p.h}`}>{p.name}</option>)}
+                </select>
+              </Row>}
+              {!inClip && (
+                <div style={{ color: C.faint, fontSize: 10.5, fontFamily: "'JetBrains Mono'", fontVariantNumeric: "tabular-nums", marginTop: -2, marginBottom: 8 }}>
+                  {stage.w}×{stage.h} px · exports at this size
+                </div>
+              )}
               {!inClip && <Row label="Background"><input type="color" value={stageBg} onChange={(e) => setStageBg(e.target.value)} /></Row>}
               <div style={{ color: C.faint, fontSize: 12, lineHeight: 1.65 }}>
                 {inClip ? "You're inside a clip — its timeline runs on local time." : "Add layers from the rail. Drag on stage with Autokey to record motion. Right-click between two ◆ on the timeline to set that segment's easing."}

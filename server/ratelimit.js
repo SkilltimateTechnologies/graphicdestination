@@ -83,3 +83,11 @@ export function createRateLimiter({
  * 20 requests per 10 minutes per client IP.
  */
 export const authLimiter = createRateLimiter();
+
+/**
+ * Public share-link fetches (GET /api/share/:token): deliberately lenient and
+ * kept in a SEPARATE bucket from the auth limiter, so a shared link going
+ * mildly viral can't lock the owner out of logging in — 120 requests per
+ * 10 minutes per client IP.
+ */
+export const shareLimiter = createRateLimiter({ max: 120, message: "Too many requests. Try again later." });

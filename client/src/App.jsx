@@ -5,6 +5,7 @@ import Login from "./pages/Login";
 import Editor from "./pages/Editor";
 import Dashboard from "./pages/Dashboard";
 import Templates from "./pages/Templates";
+import PublicPlayer from "./pages/PublicPlayer";
 
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
@@ -28,6 +29,8 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
+          {/* PUBLIC share-link player — deliberately outside ProtectedRoute */}
+          <Route path="/p/:token" element={<PublicPlayer />} />
           <Route
             path="/dashboard"
             element={

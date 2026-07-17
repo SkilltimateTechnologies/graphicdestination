@@ -225,8 +225,8 @@ export default function ExportDialog({ open, onClose, project, projectId, projec
             }}
           >✕</button>
         </div>
-        <div style={{ fontSize: 11.5, color: T.faint, marginBottom: 14 }}>
-          {stageW}×{stageH} · {(durationMs / 1000).toFixed(1)}s · {project?.objects?.length || 0} layers
+        <div style={{ fontSize: 11.5, color: T.faint, marginBottom: 14, fontFamily: "'JetBrains Mono', monospace", fontVariantNumeric: "tabular-nums" }}>
+          {stageW}×{stageH} · {fps}fps · {(durationMs / 1000).toFixed(1)}s · {project?.objects?.length || 0} layers
         </div>
 
         {(phase === "idle" || phase === "error") && (

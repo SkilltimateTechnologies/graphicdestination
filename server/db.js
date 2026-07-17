@@ -65,4 +65,13 @@ export async function initSchema() {
     ],
     "write"
   );
+
+  /* Public share links (v2.4): nullable per-project token. ALTER TABLE has no
+     IF NOT EXISTS, so guard with PRAGMA table_info to keep initSchema
+     idempotent across restarts on an existing database file. */
+  const cols = await db.execute(`PRAGMA table_info(projects)`);
+  if (!cols.rows.some((c) => c.name === "share_token")) {
+    await db.execute(`ALTER TABLE projects ADD COLUMN share_token TEXT`);
+  }
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_projects_share_token ON projects(share_token)`);
 }

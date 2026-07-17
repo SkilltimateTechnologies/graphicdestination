@@ -3,15 +3,18 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../AuthContext";
 import { api } from "../api";
 import GraphicDestinationMotion from "../components/GraphicDestinationMotion";
+import ShareDialog from "../components/ShareDialog";
 
 export default function Editor() {
   const { id } = useParams();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
-  const [proj, setProj] = useState(null); // { id, name, data } once loaded
+  const [proj, setProj] = useState(null); // { id, name, data, shareToken } once loaded
   const [loadErr, setLoadErr] = useState("");
   const [saveState, setSaveState] = useState("saved"); // "saved" | "dirty" | "saving" | "error"
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shared, setShared] = useState(false); // whether a public link is live
   const lastSavedRef = useRef(null);   // engine-serialized JSON last known to be on the server
   const skipFirstRef = useRef(false);  // swallow the engine's first onChange (echo of the loaded project)
   const timerRef = useRef(null);
@@ -24,11 +27,12 @@ export default function Editor() {
     setProj(null);
     setLoadErr("");
     setSaveState("saved");
+    setShared(false);
     lastSavedRef.current = null;
     pendingRef.current = null;
     skipFirstRef.current = true;
     api.getProject(id)
-      .then((p) => { if (alive) setProj(p); })
+      .then((p) => { if (alive) { setProj(p); setShared(!!p.shareToken); } })
       .catch((err) => { if (alive) setLoadErr(err.status === 404 ? "Project not found." : err.message || "Couldn't load that project."); });
     return () => { alive = false; };
   }, [id]);
@@ -90,6 +94,13 @@ export default function Editor() {
     navigate("/login");
   };
 
+  /* after any dialog action, re-read the project so the Shared pill matches
+     the persisted state (the dialog itself stays authoritative while open) */
+  const closeShare = useCallback(() => {
+    setShareOpen(false);
+    if (id) api.getProject(id).then((p) => setShared(!!p.shareToken)).catch(() => {});
+  }, [id]);
+
   const status =
     saveState === "saving" ? { text: "Saving…", color: "#939BAD" }
     : saveState === "dirty" ? { text: "Unsaved changes", color: "#F5A524" }
@@ -105,6 +116,8 @@ export default function Editor() {
         .gd-back:hover { color: #E9ECF3; }
         .gd-save { transition: background 120ms ease-out; }
         .gd-save:hover:not(:disabled) { background: #B87A18; }
+        .gd-sharedpill { transition: background 120ms ease-out, border-color 120ms ease-out; }
+        .gd-sharedpill:hover { background: rgba(245,165,36,0.2); border-color: #F5A524; }
       `}</style>
       <div style={barStyle}>
         {/* left — back + brand mark */}
@@ -116,7 +129,7 @@ export default function Editor() {
           </span>
           <span style={{ color: "#E9ECF3", fontWeight: 700, fontSize: 13, letterSpacing: "-0.01em", whiteSpace: "nowrap" }}>GD Motion</span>
         </div>
-        {/* center — project name + save status */}
+        {/* center — project name + save status + shared pill */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, minWidth: 0, fontSize: 12.5 }}>
           {id && proj && <span style={{ color: "#E9ECF3", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 320 }}>{proj.name}</span>}
           {id && (
@@ -125,9 +138,22 @@ export default function Editor() {
               {status.text}
             </span>
           )}
+          {id && shared && (
+            <button onClick={() => setShareOpen(true)} title="A public link is live — click to manage" className="gd-sharedpill" style={sharedPill}>
+              <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 7 7 5M4.2 6.6 2.9 7.9a1.9 1.9 0 0 1-2.7-2.7l2.6-2.6a1.9 1.9 0 0 1 2.7 0M7.8 5.4l1.3-1.3a1.9 1.9 0 0 1 2.7 2.7L9.2 9.4a1.9 1.9 0 0 1-2.7 0" />
+              </svg>
+              Shared
+            </button>
+          )}
         </div>
-        {/* right — save + user + sign out */}
+        {/* right — share + save + user + sign out */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 12 }}>
+          {id && (
+            <button onClick={() => setShareOpen(true)} className="gd-signout" style={signoutBtn}>
+              Share
+            </button>
+          )}
           {id && (
             <button onClick={saveNow} disabled={saveState === "saving"} className="gd-save" style={saveBtn}>
               {saveState === "saving" ? "Saving…" : "Save"}
@@ -140,6 +166,7 @@ export default function Editor() {
           <button onClick={doLogout} className="gd-signout" style={signoutBtn}>Sign out</button>
         </div>
       </div>
+      {id && proj && <ShareDialog open={shareOpen} onClose={closeShare} projectId={id} projectName={proj.name} />}
       <div style={{ flex: 1, minHeight: 0 }}>
         {!id ? (
           <GraphicDestinationMotion />
@@ -172,4 +199,10 @@ const signoutBtn = {
 const saveBtn = {
   background: "#F5A524", color: "#1A1405", border: "none", borderRadius: 6,
   padding: "5px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+};
+const sharedPill = {
+  display: "flex", alignItems: "center", gap: 5, background: "rgba(245,165,36,0.12)",
+  border: "1px solid rgba(245,165,36,0.45)", color: "#F5A524", borderRadius: 999,
+  padding: "3px 10px", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.04em",
+  cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0,
 };

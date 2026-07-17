@@ -4,10 +4,11 @@ import cookieParser from "cookie-parser";
 import cors from "cors";
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 import { fileURLToPath } from "url";
 import { db, initSchema, usingTurso } from "./db.js";
 import { hashPassword, verifyPassword, signSession, requireAuth, COOKIE_NAME, COOKIE_OPTS } from "./auth.js";
-import { authLimiter } from "./ratelimit.js";
+import { authLimiter, shareLimiter } from "./ratelimit.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CRED_FILE = path.join(__dirname, "data", "admin-credentials.json");
@@ -145,10 +146,10 @@ if (process.env.ENABLE_ADMIN_HINT === "1") {
 
 app.get("/api/projects", requireAuth, async (req, res) => {
   const result = await db.execute({
-    sql: "SELECT id, name, updated_at, created_at FROM projects WHERE owner_id = ? ORDER BY updated_at DESC",
+    sql: "SELECT id, name, updated_at, created_at, (share_token IS NOT NULL) AS shared FROM projects WHERE owner_id = ? ORDER BY updated_at DESC",
     args: [req.user.sub],
   });
-  res.json(result.rows);
+  res.json(result.rows.map((row) => ({ id: row.id, name: row.name, updated_at: row.updated_at, created_at: row.created_at, shared: !!Number(row.shared) })));
 });
 
 app.get("/api/projects/:id", requireAuth, async (req, res) => {
@@ -158,7 +159,7 @@ app.get("/api/projects/:id", requireAuth, async (req, res) => {
   });
   if (!result.rows[0]) return res.status(404).json({ error: "Not found" });
   const row = result.rows[0];
-  res.json({ id: row.id, name: row.name, data: JSON.parse(row.data), updatedAt: row.updated_at });
+  res.json({ id: row.id, name: row.name, data: JSON.parse(row.data), updatedAt: row.updated_at, shareToken: row.share_token || null });
 });
 
 app.post("/api/projects", requireAuth, async (req, res) => {
@@ -185,6 +186,56 @@ app.delete("/api/projects/:id", requireAuth, async (req, res) => {
   const result = await db.execute({ sql: "DELETE FROM projects WHERE id = ? AND owner_id = ?", args: [req.params.id, req.user.sub] });
   if (result.rowsAffected === 0) return res.status(404).json({ error: "Not found" });
   res.json({ ok: true });
+});
+
+/* ---------------- public share links ----------------
+ * The owner enables a link with POST /api/projects/:id/share; anyone holding
+ * the 16-char URL-safe token can then read the composition via
+ * GET /api/share/:token — PUBLIC (no session), but behind its own lenient
+ * rate bucket. The public payload is { name, data } only: never the owner id,
+ * project id, timestamps, or the token itself.
+ */
+
+const newShareToken = () => crypto.randomBytes(12).toString("base64url"); // 96 bits -> 16 URL-safe chars
+
+app.post("/api/projects/:id/share", requireAuth, async (req, res) => {
+  const result = await db.execute({
+    sql: "SELECT id, share_token FROM projects WHERE id = ? AND owner_id = ?",
+    args: [req.params.id, req.user.sub],
+  });
+  const row = result.rows[0];
+  if (!row) return res.status(404).json({ error: "Not found" });
+  // Idempotent: re-enabling returns the existing token instead of rotating it.
+  if (row.share_token) return res.json({ shareToken: row.share_token, url: `/p/${row.share_token}` });
+  // 2^96 tokens make a collision practically impossible; the retry loop is
+  // belt-and-braces so a clash can never 500 the request.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const token = newShareToken();
+    const clash = await db.execute({ sql: "SELECT id FROM projects WHERE share_token = ?", args: [token] });
+    if (clash.rows.length) continue;
+    await db.execute({ sql: "UPDATE projects SET share_token = ? WHERE id = ?", args: [token, row.id] });
+    return res.json({ shareToken: token, url: `/p/${token}` });
+  }
+  res.status(500).json({ error: "Could not allocate a share token" });
+});
+
+app.delete("/api/projects/:id/share", requireAuth, async (req, res) => {
+  const result = await db.execute({
+    sql: "UPDATE projects SET share_token = NULL WHERE id = ? AND owner_id = ?",
+    args: [req.params.id, req.user.sub],
+  });
+  if (result.rowsAffected === 0) return res.status(404).json({ error: "Not found" });
+  res.json({ ok: true });
+});
+
+app.get("/api/share/:token", shareLimiter, async (req, res) => {
+  const result = await db.execute({
+    sql: "SELECT name, data FROM projects WHERE share_token = ?",
+    args: [req.params.token],
+  });
+  const row = result.rows[0];
+  if (!row) return res.status(404).json({ error: "Not found" });
+  res.json({ name: row.name, data: JSON.parse(row.data) });
 });
 
 /* ---------------- asset library ----------------

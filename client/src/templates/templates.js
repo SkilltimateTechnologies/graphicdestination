@@ -37,20 +37,22 @@ function layer(type, name, props = {}, tracks = {}, children = null) {
   return base;
 }
 
-function project(objects, bg = STAGE_BG) {
+function project(objects, bg = STAGE_BG, dims = null) {
   return {
     app: "graphic-destination-motion",
     v: 5,
-    stage: { w: STAGE_W, h: STAGE_H, dur: DUR, bg },
+    stage: { w: dims?.w || STAGE_W, h: dims?.h || STAGE_H, dur: DUR, bg },
     brands: [{ ...BRAND, colors: [...BRAND.colors] }],
     brandId: "b1",
     objects,
   };
 }
 
-/* Empty composition used by "New project" on the dashboard */
-export function blankProject() {
-  return project([]);
+/* Empty composition used by "New project" on the dashboard.
+   Optional dims ({ w, h }) override the default 1280×720 stage — callers that
+   create a project for a non-16:9 target can start on the right canvas. */
+export function blankProject(dims) {
+  return project([], STAGE_BG, dims);
 }
 
 /* ============================================================
