@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 /* ============================================================
@@ -193,26 +192,17 @@ function EditorMock() {
 }
 
 export default function Landing() {
-  const [scrolled, setScrolled] = useState(false);
-
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 8);
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
-
   return (
     <div style={{ minHeight: "100vh", background: T.canvas, color: T.text, fontFamily: "'Inter', system-ui, sans-serif" }}>
       <style>{CSS}</style>
 
-      {/* ============ NAV ============ */}
+      {/* ============ NAV — permanently fixed, always in its scrolled treatment
+          (opaque blur bg + border) so it never hides/changes on scroll ============ */}
       <header style={{
         position: "fixed", top: 0, left: 0, right: 0, zIndex: 100,
-        background: scrolled ? "rgba(10,12,16,0.9)" : "transparent",
-        backdropFilter: scrolled ? "blur(12px)" : "none", WebkitBackdropFilter: scrolled ? "blur(12px)" : "none",
-        borderBottom: scrolled ? `1px solid ${T.border}` : "1px solid transparent",
-        transition: "background 160ms ease-out, border-color 160ms ease-out",
+        background: "rgba(10,12,16,0.9)",
+        backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
+        borderBottom: `1px solid ${T.border}`,
       }}>
         <div style={{ maxWidth: 1120, margin: "0 auto", padding: "0 24px", height: 60, display: "flex", alignItems: "center", gap: 28 }}>
           <Logo />
@@ -227,8 +217,8 @@ export default function Landing() {
         </div>
       </header>
 
-      {/* ============ HERO ============ */}
-      <section style={{ maxWidth: 1120, margin: "0 auto", padding: "158px 24px 0", textAlign: "center" }}>
+      {/* ============ HERO (top padding clears the permanently-fixed 60px nav) ============ */}
+      <section style={{ maxWidth: 1120, margin: "0 auto", padding: "140px 24px 0", textAlign: "center" }}>
         <div style={{ display: "inline-flex", alignItems: "center", gap: 8, color: T.accent, fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", border: "1px solid rgba(245,165,36,0.28)", background: T.accentSoft, borderRadius: 999, padding: "6px 15px", marginBottom: 30 }}>
           <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.accent, boxShadow: "0 0 8px rgba(245,165,36,0.8)" }} />
           Browser-native motion studio

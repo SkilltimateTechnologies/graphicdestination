@@ -4,7 +4,7 @@
    ============================================================ */
 import { C, STAGE_PRESETS } from "./model";
 
-export default function TopBar({ name, setName, exitToDepth, inClip, ctx, stage, applyStagePreset, stageIsPreset, brand, setBrandOpen, setIoOpen, setImportErr, setExportOpen }) {
+export default function TopBar({ name, setName, exitToDepth, inClip, ctx, stage, applyStagePreset, stageIsPreset, brand, autokey, setAutokey, setBrandOpen, setIoOpen, setImportErr, setExportOpen }) {
   return (
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 14px", height: 44, background: C.bg1, borderBottom: `1px solid ${C.line}`, flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, whiteSpace: "nowrap" }}>
@@ -15,6 +15,12 @@ export default function TopBar({ name, setName, exitToDepth, inClip, ctx, stage,
           <span style={{ color: C.faint, fontWeight: 500, fontSize: 12 }}>v0.5</span>
         </div>
         <input className="gd-name-input" value={name} onChange={(e) => setName(e.target.value)} title="Project name" aria-label="Project name" style={{ width: 150 }} />
+        {/* auto-keyframe mode — ◆ amber when ON: canvas edits (move/rotate/clip-scale)
+            write keyframes at the playhead on props that already have a track */}
+        <button className="gd-btn" onClick={() => setAutokey(!autokey)} title="Auto-keyframe: canvas edits write keyframes" aria-label="Auto-keyframe: canvas edits write keyframes" aria-pressed={autokey}
+          style={{ display: "flex", alignItems: "center", gap: 6, background: autokey ? C.amberSoft : C.bg2, border: `1px solid ${autokey ? C.amber : C.line}`, color: autokey ? C.amber : C.dim, borderRadius: 6, padding: "5px 10px", cursor: "pointer", fontWeight: 600, fontSize: 12, flexShrink: 0 }}>
+          <span style={{ width: 8, height: 8, transform: "rotate(45deg)", borderRadius: 1.5, background: autokey ? C.amber : "transparent", border: `1.5px solid ${autokey ? C.amber : C.faint}`, boxShadow: autokey ? `0 0 6px ${C.amber}` : "none" }} />Autokey
+        </button>
         <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 8, overflow: "hidden" }}>
           <button className="gd-btn" onClick={() => exitToDepth(0)} style={{ background: !inClip ? C.bg3 : "transparent", border: "none", color: !inClip ? C.txt : C.dim, borderRadius: 6, padding: "4px 9px", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>Main</button>
           {ctx.names.map((nm, i) => (

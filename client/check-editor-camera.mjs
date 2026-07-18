@@ -89,7 +89,7 @@ async function main() {
     const lane = page.locator('div[title^="Scene camera — click to select"]');
     check("camera lane pinned in the timeline label column", await lane.count() === 1);
     const laneTrack = page.locator('div[title="Scene camera · drag empty stage space to pan · Alt+wheel (or select this lane) to zoom"]');
-    check("camera lane track with empty-state hint", await laneTrack.count() === 1 && (await laneTrack.textContent()).includes("No camera keyframes"));
+    check("camera lane track with empty-state hint", await laneTrack.count() === 1 && (await laneTrack.textContent()).includes("◆ add a keyframe or pick a preset in the inspector"));
 
     /* ---- click selects the camera → Inspector card ---- */
     await lane.click();

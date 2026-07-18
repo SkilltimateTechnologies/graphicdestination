@@ -53,6 +53,10 @@ const TL_H_DEFAULT = 240;
 const TL_H_MIN = 160;
 const clampTlH = (h) => Math.max(TL_H_MIN, Math.min(window.innerHeight * 0.45, h));
 const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5];
+/* auto-keyframe mode (top-bar ◆ toggle, persisted): canvas edits to props that
+   already have a track write/replace a ◆ at the playhead instead of patching base */
+const AUTOKEY_KEY = "gd:autokey";
+const readAutokey = () => { try { const v = localStorage.getItem(AUTOKEY_KEY); return v === null ? true : v === "1"; } catch { return true; } };
 
 /* ============================================================
    KEYFRAMES + INTERPOLATION
@@ -251,7 +255,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [loop, setLoop] = useState(true);
-  const [autokey, setAutokey] = useState(true);
+  const [autokey, setAutokey] = useState(readAutokey);
   const [stageBg, setStageBg] = useState("#101218");
   const [stageScale, setStageScale] = useState(0.6);
   const [zoomMode, setZoomMode] = useState("fit"); /* "fit" (auto) or a manual factor from ZOOM_STEPS */
@@ -357,6 +361,15 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   }), [patchCamera]);
   const resetCamera = useCallback(() => { setCamera(null); setSelCamKf(null); }, []);
   const setCameraSegmentEase = useCallback((prop, aT, ease) => patchCamera((c) => ({ ...c, tracks: { ...c.tracks, [prop]: (c.tracks[prop] || []).map((k) => (Math.abs(k.t - aT) <= 5 ? { ...k, ease } : k)) } })), [patchCamera]);
+  /* one-click camera presets (Inspector camera card): reset the prop's track
+     to exactly two keyframes spanning the whole composition — written through
+     the same setCameraKeyframe/withKeyframe path with the default ease. */
+  const applyCameraPreset = useCallback((prop, v0, v1) => {
+    patchCamera((c) => ({ ...c, tracks: { ...c.tracks, [prop]: [] } }));
+    setCameraKeyframe(prop, 0, v0, "easeInOutCubic");
+    setCameraKeyframe(prop, compDur, v1, "easeInOutCubic");
+    setSelCamKf(null);
+  }, [patchCamera, setCameraKeyframe, compDur]);
   const cameraKfNav = (prop, dir) => {
     const tr = camera?.tracks?.[prop] || [];
     const t = timeRef.current;
@@ -391,6 +404,25 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     }
     patchProps(id, { [prop]: v });
   }, [ctxLayers, autokey, setKeyframe, patchProps, patchObject]);
+
+  /* auto-keyframe toggle (top bar ◆ + timeline Animate share it), persisted */
+  const setAutokeyPersist = useCallback((v) => {
+    setAutokey(v);
+    try { localStorage.setItem(AUTOKEY_KEY, v ? "1" : "0"); } catch { /* storage unavailable — the toggle just won't persist */ }
+  }, []);
+
+  /* AUTO-KEYFRAME mode — CANVAS gestures only (move / rotate / clip-scale):
+     autokey ON + the prop ALREADY has a track → write/replace a ◆ at the
+     playhead through the exact setKeyframe path (default easing); the prop's
+     track is empty → patch the base value. autokey OFF → editProp, the
+     classic behavior (existing animation shifts as a whole / base patches). */
+  const canvasEditProp = useCallback((id, prop, v) => {
+    if (!autokey) { editProp(id, prop, v); return; }
+    const obj = ctxLayers.find((o) => o.id === id);
+    if (!obj || obj.locked) return;
+    if ((obj.tracks[prop] || []).length) setKeyframe(id, prop, timeRef.current, v);
+    else patchProps(id, { [prop]: v });
+  }, [autokey, editProp, ctxLayers, setKeyframe, patchProps]);
 
   const setShapeAt = (id, shapeId) => {
     const obj = ctxLayers.find((o) => o.id === id);
@@ -962,7 +994,9 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       if (!d || !d.moved) return;
-      d.members.forEach((m) => { const lv = d.live[m.id]; if (lv && !m.hasPath) { editProp(m.id, "x", lv.x); editProp(m.id, "y", lv.y); } });
+      /* drop lands through the auto-keyframe path: ON → ◆ at the playhead for
+         props that already have a track, base patch otherwise; OFF → classic */
+      d.members.forEach((m) => { const lv = d.live[m.id]; if (lv && !m.hasPath) { canvasEditProp(m.id, "x", lv.x); canvasEditProp(m.id, "y", lv.y); } });
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -1081,7 +1115,9 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     window.addEventListener("pointerup", up);
   };
   /* rotation grip — drag around the object's center; 1° steps, shift snaps to 15°.
-     Writes the base `rotation` prop only (tracks untouched); rotLive feeds the readout. */
+     Base `rotation` prop only — EXCEPT auto-keyframe ON + an existing rotation
+     track: then the drag writes/updates a ◆ at the playhead (live, so the layer
+     visibly spins mid-drag). rotLive feeds the on-canvas readout either way. */
   const onRotateDown = (e, obj) => {
     e.stopPropagation();
     if (obj.locked) return;
@@ -1096,7 +1132,8 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
       let nr = Math.round(r0 + ((a - a0) * 180) / Math.PI);
       if (ev.shiftKey) nr = Math.round(nr / 15) * 15;
       nr = Math.max(-360, Math.min(360, nr));
-      patchProps(obj.id, { rotation: nr });
+      if (autokey && (obj.tracks.rotation || []).length) setKeyframe(obj.id, "rotation", timeRef.current, nr);
+      else patchProps(obj.id, { rotation: nr });
       setRotLive({ id: obj.id, deg: nr });
     };
     const up = () => {
@@ -1104,6 +1141,45 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
       window.removeEventListener("pointerup", up);
       document.body.style.cursor = prevCursor;
       setRotLive(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  /* clip corner grips — drag scales the WHOLE clip wrapper uniformly through the
+     `scale` prop (children live inside the wrapper, so contents scale with it).
+     The ratio is measured from the clip's x/y — the wrapper's transform origin —
+     so it's exact under rotation and needs no Shift. Corner grips only. Base
+     prop patched live; auto-keyframe ON + an existing scale track writes a ◆
+     at the playhead instead (same setKeyframe path). */
+  const onClipScaleDown = (e, obj, hid, cursor) => {
+    e.stopPropagation();
+    if (obj.locked) return;
+    const t = timeRef.current;
+    const s0 = Math.max(0.05, valueAt(obj, "scale", t) || 1);
+    const rot = ((valueAt(obj, "rotation", t) || 0) * Math.PI) / 180;
+    const cos = Math.cos(rot), sin = Math.sin(rot);
+    /* the wrapper is stage-sized with its transform origin at its center (=
+       the clip's x/y), so the grip corner in stage coords at drag start is
+       origin + rotate(local − center) × s0 — distances from the origin are
+       rotation-invariant, which keeps the ratio exact at any angle */
+    const lx = hid.includes("e") ? stage.w : 0, ly = hid.includes("s") ? stage.h : 0;
+    const vx = (lx - stage.w / 2) * s0, vy = (ly - stage.h / 2) * s0;
+    const ax = vx * cos - vy * sin, ay = vx * sin + vy * cos;
+    const r0 = Math.max(1, Math.hypot(ax, ay));
+    const cs = camVisScale(obj); /* camera screen-scale (1 when the camera is off) */
+    const sx = e.clientX, sy = e.clientY;
+    const prevCursor = document.body.style.cursor;
+    if (cursor) document.body.style.cursor = cursor;
+    const move = (ev) => {
+      const dx = (ev.clientX - sx) / (stageScale * cs), dy = (ev.clientY - sy) / (stageScale * cs);
+      const ns = Math.max(0.05, Math.min(10, Math.round(s0 * (Math.hypot(ax + dx, ay + dy) / r0) * 100) / 100));
+      if (autokey && (obj.tracks.scale || []).length) setKeyframe(obj.id, "scale", timeRef.current, ns);
+      else patchProps(obj.id, { scale: ns });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.style.cursor = prevCursor;
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -1417,6 +1493,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
       {/* ============ TOP BAR ============ */}
       <TopBar name={name} setName={setName} exitToDepth={exitToDepth} inClip={inClip} ctx={ctx}
         stage={stage} applyStagePreset={applyStagePreset} stageIsPreset={stageIsPreset} brand={brand}
+        autokey={autokey} setAutokey={setAutokeyPersist}
         setBrandOpen={setBrandOpen} setIoOpen={setIoOpen} setImportErr={setImportErr} setExportOpen={setExportOpen} />
 
       {/* ============ MAIN ============ */}
@@ -1457,6 +1534,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
           stage={stage} stageScale={stageScale} stageBg={stageBg} inClip={inClip} ctx={ctx} ctxLayers={ctxLayers} time={time}
           selIds={selIds} sel={sel} overflowShow={overflowShow} zoomMode={zoomMode} playing={playing} rotLive={rotLive}
           onObjectDown={onObjectDown} enterClip={enterClip} displayValue={displayValue} onResizeDown={onResizeDown} onRotateDown={onRotateDown}
+          onClipScaleDown={onClipScaleDown}
           onPathPtDown={onPathPtDown} patchPath={patchPath} setOverflowShow={setOverflowShow}
           setSelIds={setSelIds} setSelKf={setSelKf} setAudioSel={setAudioSel} setShapesOpen={setShapesOpen} setMapsOpen={setMapsOpen} setImagesOpen={setImagesOpen} setAudioOpen={setAudioOpen}
           camera={camera} cameraLaneSel={cameraLaneSel} onStageEmptyDown={onStageEmptyDown}
@@ -1465,7 +1543,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
         {/* ---- inspector ---- */}
         <Inspector audioLaneSel={audioLaneSel} audioTrack={audioTrack} patchAudio={patchAudio} detachAudio={detachAudio} fmt={fmt}
           cameraLaneSel={cameraLaneSel} camera={camera} editCameraProp={editCameraProp} setCameraKeyframe={setCameraKeyframe} removeCameraKeyframe={removeCameraKeyframe}
-          cameraKfNav={cameraKfNav} resetCamera={resetCamera} selCamKfData={selCamKfData} setCameraSegmentEase={setCameraSegmentEase}
+          cameraKfNav={cameraKfNav} resetCamera={resetCamera} selCamKfData={selCamKfData} setCameraSegmentEase={setCameraSegmentEase} applyCameraPreset={applyCameraPreset}
           selMany={selMany} groupSelection={groupSelection} align={align} duplicateSelected={duplicateSelected} removeSelected={removeSelected}
           inClip={inClip} ctx={ctx} sel={sel} patchObject={patchObject} toggleHide={toggleHide} toggleLock={toggleLock}
           stage={stage} stageBg={stageBg} setStageBg={setStageBg} applyStagePreset={applyStagePreset} stageIsPreset={stageIsPreset}
@@ -1479,7 +1557,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
       {/* ============ TIMELINE ============ */}
       <Timeline tlH={tlH} tlDragging={tlDragging} onTlHandleDown={onTlHandleDown} resetTlH={resetTlH}
         setPlaying={setPlaying} setTime={setTime} playing={playing} time={time} fmt={fmt} ctxDur={ctxDur} setCtxDurMs={setCtxDurMs}
-        stretchClips={stretchClips} setStretchClips={setStretchClips} loop={loop} setLoop={setLoop} autokey={autokey} setAutokey={setAutokey}
+        stretchClips={stretchClips} setStretchClips={setStretchClips} loop={loop} setLoop={setLoop} autokey={autokey} setAutokey={setAutokeyPersist}
         selMany={selMany} groupSelection={groupSelection} ctxLayers={ctxLayers} selIds={selIds} setSelIds={setSelIds} setSelKf={setSelKf}
         enterClip={enterClip} exitToDepth={exitToDepth} crumbs={ctx.names} onLayerContext={onLayerContext} onLaneContext={onLaneContext} toggleHide={toggleHide} toggleLock={toggleLock}
         reorder={reorder} duplicateSelected={duplicateSelected} removeSelected={removeSelected}

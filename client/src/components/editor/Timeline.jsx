@@ -7,7 +7,7 @@
    ============================================================ */
 import { Fragment } from "react";
 import { C, PROP_LABEL, KF_PROPS, TYPE_BAR, layerSpan, packRows, transportBtn, chipStyle, inputStyle } from "./model";
-import { NoteIcon, MiniBtn, CamIcon } from "./ui";
+import { NoteIcon, MiniBtn, CamIcon, LockIcon } from "./ui";
 import { EASE_LABEL } from "../../engine/easing.js";
 import { colorAt } from "../../engine/keyframes.js";
 import { normHi, worldZoomWindow, WORLD } from "../../engine/maps.js";
@@ -124,7 +124,9 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
                       <button title={o.hidden ? "Show" : "Hide"} onClick={(e) => { e.stopPropagation(); toggleHide(o.id); }}
                         style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, padding: 0, width: 15, flexShrink: 0, color: o.hidden ? C.amber : C.faint }}>{o.hidden ? "⊘" : "◉"}</button>
                       <button title={o.locked ? "Unlock" : "Lock"} onClick={(e) => { e.stopPropagation(); toggleLock(o.id); }}
-                        style={{ background: "none", border: "none", cursor: "pointer", fontSize: 10, padding: 0, width: 15, flexShrink: 0, color: o.locked ? C.amber : C.faint }}>{o.locked ? "🔒" : "🔓"}</button>
+                        style={{ background: "none", border: "none", cursor: "pointer", padding: 0, width: 15, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <LockIcon locked={o.locked} size={11} color={o.locked ? C.amber : C.faint} />
+                      </button>
                       {o.type === "clip"
                         ? <span style={{ width: 11, height: 10, flexShrink: 0, position: "relative" }}><span style={{ position: "absolute", inset: "0 2px 2px 0", border: `1.5px solid ${C.amber}`, borderRadius: 2 }} /><span style={{ position: "absolute", inset: "2px 0 0 2px", border: `1.5px solid ${C.amber}`, borderRadius: 2, background: C.bg1 }} /></span>
                         : <span style={{ width: 9, height: 9, borderRadius: 3, background: o.type === "confetti" ? "linear-gradient(135deg,#F5A524,#E5636A)" : o.type === "map" || o.type === "world" ? o.props.stroke : o.type === "image" ? "#939BAD" : colorAt(o, "fill", time), flexShrink: 0, border: `1px solid ${C.line}` }} />}
@@ -184,7 +186,7 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
                   }))}
                   {!cameraKeyCount(camera) && (
                     <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", padding: "0 10px", gap: 6, color: C.faint, fontSize: 10.5, pointerEvents: "none" }}>
-                      <CamIcon size={12} color={C.faint} /> No camera keyframes — drag empty stage space to pan · Alt+wheel to zoom
+                      <CamIcon size={12} color={C.faint} /> ◆ add a keyframe or pick a preset in the inspector
                     </div>
                   )}
                 </div>

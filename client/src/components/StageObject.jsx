@@ -4,6 +4,7 @@
    GraphicDestinationMotion.jsx re-exports StageObject from here.
    ============================================================ */
 import { C } from "./editor/model";
+import { LockIcon } from "./editor/ui";
 import { EASE, clamp01 } from "../engine/easing.js";
 import { ptsToStr, pathSamples, pointOnPath, morphPtsAt } from "../engine/shapes.js";
 import { valueAt, colorAt, lerpColor, clipLocalTime, clipTransition } from "../engine/keyframes.js";
@@ -21,6 +22,9 @@ const resizeCursor = (axis, rot) => RESIZE_CURSORS[Math.round(((((axis + rot) % 
 const HANDLE_DEFS = [ /* [id, left, top, drag-axis°] — corners + edge midpoints */
   ["nw", "0%", "0%", 45], ["n", "50%", "0%", 90], ["ne", "100%", "0%", 135], ["e", "100%", "50%", 0],
   ["se", "100%", "100%", 45], ["s", "50%", "100%", 90], ["sw", "0%", "100%", 135], ["w", "0%", "50%", 0],
+];
+const CLIP_CORNER_DEFS = [ /* clip scale grips — corner grips only (uniform scale, no Shift) */
+  ["nw", "0%", "0%", 45], ["ne", "100%", "0%", 135], ["se", "100%", "100%", 45], ["sw", "0%", "100%", 135],
 ];
 const ROTATE_OFFSET = 22; /* screen px the rotation grip floats above top-center */
 
@@ -191,7 +195,7 @@ export function StageObject(props) {
   );
 }
 
-function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, displayValue, onResize, onRotate, interactive, stageScale = 1, playing = false, selCount = 1, rotLive = null }) {
+function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, displayValue, onResize, onRotate, onClipScale, interactive, stageScale = 1, playing = false, selCount = 1, rotLive = null }) {
   const P = obj.props;
   if (obj.hidden && !(interactive && selected)) return null;
   if (obj.type !== "clip") {
@@ -208,21 +212,33 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
     const local = clipLocalTime(P, time);
     const tr = clipTransition(P, time);
     if (local === null && !interactive) return null;
+    /* clips are direct-manipulation citizens: body-drag moves (the full-canvas
+       click target → onObjectDown, 40px clamp included); four CORNER grips on
+       the selected frame scale the whole wrapper uniformly via the `scale`
+       prop (contents scale with it — no Shift needed). Hidden while playing,
+       multi-selected, locked, or non-interactive (export). */
+    const canManipClip = selected && interactive && !obj.locked && !playing && selCount <= 1;
+    const uClip = 1 / Math.max(0.05, (stageScale || 1) * Math.max(0.05, scale)); /* keep grips ~9px on screen at any stage zoom × clip scale */
     return (
       <div style={{ position: "absolute", left: 0, top: 0, width: stage.w, height: stage.h, transform: `translate(${x - stage.w / 2 + tr.tx}px, ${y - stage.h / 2 + tr.ty}px) rotate(${rot}deg) scale(${scale * tr.s})`, transformOrigin: `${stage.w / 2}px ${stage.h / 2}px`, opacity: local === null ? (interactive ? 0.15 : 0) : op * tr.o, pointerEvents: "none" }}>
         {local !== null && P.bg && <div style={{ position: "absolute", left: 0, top: 0, width: stage.w, height: stage.h, background: P.bg }} />}
         {/* full-canvas click target — a clip IS the canvas, so selecting/entering it works anywhere on the frame, not just around its content */}
         {interactive && (
           <div onPointerDown={(e) => onDown(e, obj)} onDoubleClick={() => onEnterClip(obj.id)}
-            title={`${obj.name} — click empty space to select, double-click to open`}
+            title={`${obj.name} — drag to move · corner grips scale · double-click to open`}
             style={{ position: "absolute", left: 0, top: 0, width: stage.w, height: stage.h, pointerEvents: "auto", cursor: obj.locked ? "default" : "grab" }} />
         )}
         {local !== null && obj.children.map((ch) => <StageObject key={ch.id} obj={ch} time={local} stage={stage} selected={false} interactive={false} />)}
         {interactive && selected && (
           <div style={{ position: "absolute", left: 0, top: 0, width: stage.w, height: stage.h, pointerEvents: "none", border: `1.5px solid ${C.amber}` }}>
-            <span style={{ position: "absolute", top: -20, left: 0, fontSize: 10, fontWeight: 700, color: "#1a1405", background: C.amber, borderRadius: 5, padding: "2px 7px", whiteSpace: "nowrap" }}>{obj.name} · clip{obj.locked ? " 🔒" : ""}{local === null ? " · out of range" : ""}</span>
+            <span style={{ position: "absolute", top: -20, left: 0, fontSize: 10, fontWeight: 700, color: "#1a1405", background: C.amber, borderRadius: 5, padding: "2px 7px", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4 }}>{obj.name} · clip{obj.locked && <LockIcon locked size={10} color="#1a1405" />}{local === null ? " · out of range" : ""}</span>
           </div>
         )}
+        {canManipClip && onClipScale && CLIP_CORNER_DEFS.map(([hid, left, top, axis]) => (
+          <div key={hid} className="gd-rzh" onPointerDown={(e) => { e.stopPropagation(); onClipScale(e, obj, hid, resizeCursor(axis, rot)); }}
+            title="Drag to scale the whole clip uniformly"
+            style={{ position: "absolute", left, top, width: 9 * uClip, height: 9 * uClip, transform: "translate(-50%,-50%)", background: "#fff", border: `${uClip}px solid ${C.amber}`, borderRadius: 0, cursor: resizeCursor(axis, rot), zIndex: 6, pointerEvents: "auto", touchAction: "none", boxSizing: "border-box" }} />
+        ))}
       </div>
     );
   }

@@ -2,13 +2,26 @@
    INSPECTOR — right-hand property panel (per-type cards).
    Extracted VERBATIM from GraphicDestinationMotion.jsx (Refactor Pass 2).
    ============================================================ */
-import { C, PROP_LABEL, TEXTFX_LIST, NUM_STYLES, NUM_MODES, NUM_STYLE_PRESETS, NUM_STYLE_RESET, PRESETS, TRANSITIONS, STAGE_PRESETS, kfAt, inputStyle, chipStyle, sectionLabel } from "./model";
-import { Card, ChipRow, ColorKfRow, PropRow, FontControls, WorldPicker, Row, SliderRow, EaseCurve, NoteIcon, CamIcon } from "./ui";
+import { C, PROP_LABEL, TEXTFX_LIST, NUM_STYLES, NUM_STYLE_PRESETS, NUM_STYLE_RESET, PRESETS, TRANSITIONS, STAGE_PRESETS, kfAt, inputStyle, chipStyle, sectionLabel } from "./model";
+import { Card, ChipRow, ColorKfRow, PropRow, FontControls, WorldPicker, Row, SliderRow, EaseCurve, NoteIcon, CamIcon, LockIcon } from "./ui";
 import { EASE, EASE_LABEL } from "../../engine/easing.js";
 import { SHAPE_IDS, SHAPE_DEFS, ptsToStr } from "../../engine/shapes.js";
 import { MAPS, CONTINENT_NAMES, CONTINENTS, normHi } from "../../engine/maps.js";
-import { CONFETTI_STYLES, confettiStyleOf, NUM_FORMATS, numMode } from "../../engine/fx.js";
+import { CONFETTI_STYLES, confettiStyleOf, NUM_FORMATS } from "../../engine/fx.js";
 import { CAM_PROPS, CAM_ZOOM_MIN, CAM_ZOOM_MAX, CAM_DEPTH_MIN, CAM_DEPTH_MAX, cameraAt, camTrackHost, clampDepth } from "../../engine/camera.js";
+
+/* one-click camera presets — each writes TWO keyframes spanning the whole
+   composition (0 → compDur) on its prop, easeInOutCubic like every default ◆ */
+const CAM_PRESETS = [
+  { id: "push", name: "Push In", prop: "zoom", v0: 1, v1: 1.15 },
+  { id: "pull", name: "Pull Out", prop: "zoom", v0: 1.15, v1: 1 },
+  { id: "panL", name: "Pan Left", prop: "x", v0: 0, v1: -120 },
+  { id: "panR", name: "Pan Right", prop: "x", v0: 0, v1: 120 },
+  { id: "drift", name: "Drift Up", prop: "y", v0: 0, v1: -80 },
+];
+/* ◆-only Inspector rows: these transform props are edited spatially on the
+   canvas — their PropRow shows the value read-only + ◆ / ‹ › (no input) */
+const TRANSFORM_RO_PROPS = ["x", "y", "rotation", "scale", "opacity"];
 
 /* tiny 56×34 inline-SVG swatch for the number style presets — renders "123"
    in the preset's own style (bold / mono / outline / pill / neon / minimal) */
@@ -41,7 +54,7 @@ function DepthRow({ value, onChange }) {
   );
 }
 
-export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detachAudio, fmt, cameraLaneSel, camera, editCameraProp, setCameraKeyframe, removeCameraKeyframe, cameraKfNav, resetCamera, selCamKfData, setCameraSegmentEase, selMany, groupSelection, align, duplicateSelected, removeSelected, inClip, ctx, sel, patchObject, toggleHide, toggleLock, stage, stageBg, setStageBg, applyStagePreset, stageIsPreset, enterClip, patchProps, ctxDur, stretchClipDur, stretchClips, setStretchClips, ungroupClip, morphQ, setMorphQ, time, timeRef, setShapeAt, editProp, removeKeyframe, setKeyframe, setSelKf, flowText, brand, SW, addPathTo, patchPath, animateAlongPath, kfNav, selectedKfData, setSegmentEase, applyPreset, fileRef }) {
+export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detachAudio, fmt, cameraLaneSel, camera, editCameraProp, setCameraKeyframe, removeCameraKeyframe, cameraKfNav, resetCamera, selCamKfData, setCameraSegmentEase, applyCameraPreset, selMany, groupSelection, align, duplicateSelected, removeSelected, inClip, ctx, sel, patchObject, toggleHide, toggleLock, stage, stageBg, setStageBg, applyStagePreset, stageIsPreset, enterClip, patchProps, ctxDur, stretchClipDur, stretchClips, setStretchClips, ungroupClip, morphQ, setMorphQ, time, timeRef, setShapeAt, editProp, removeKeyframe, setKeyframe, setSelKf, flowText, brand, SW, addPathTo, patchPath, animateAlongPath, kfNav, selectedKfData, setSegmentEase, applyPreset, fileRef }) {
   /* camera as a valueAt-compatible pseudo-object for the shared PropRow UI */
   const camObj = camTrackHost(camera);
   const camVals = cameraAt(camera, time);
@@ -116,6 +129,14 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                 <button className="gd-btn" onClick={() => CAM_PROPS.forEach((p) => setCameraKeyframe(p, time, camVals[p]))}
                   title="Keyframe all three camera props at the playhead with their current values"
                   style={{ width: "100%", background: C.bg2, border: `1px solid ${C.amber}`, color: C.amber, borderRadius: 6, padding: "7px 0", cursor: "pointer", fontWeight: 700, marginBottom: 8 }}>◆ Add keyframe at playhead</button>
+                <div style={{ ...sectionLabel, margin: "2px 0 6px" }}>Presets · two ◆ spanning the comp</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 8 }}>
+                  {CAM_PRESETS.map((pr) => (
+                    <button key={pr.id} className="gd-btn" onClick={() => applyCameraPreset(pr.prop, pr.v0, pr.v1)}
+                      title={`${pr.name}: ${pr.prop} ${pr.v0} → ${pr.v1} · keyframes at 0:00 and the end, ease in-out`}
+                      style={{ ...chipStyle, cursor: "pointer", padding: "6px 5px", fontSize: 11, textAlign: "center" }}>{pr.name}</button>
+                  ))}
+                </div>
                 <button className="gd-btn" onClick={resetCamera}
                   title="Remove every camera keyframe — the camera field leaves the project JSON and the scene renders exactly as before"
                   style={{ ...chipStyle, cursor: "pointer", color: C.danger, width: "100%", padding: "7px 0" }}>⟲ Reset camera</button>
@@ -174,7 +195,9 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                 <button className="gd-btn" title={sel.hidden ? "Show" : "Hide"} onClick={() => toggleHide(sel.id)}
                   style={{ ...chipStyle, cursor: "pointer", padding: "5px 9px", borderColor: sel.hidden ? C.amber : C.line, color: sel.hidden ? C.amber : C.dim }}>{sel.hidden ? "⊘" : "◉"}</button>
                 <button className="gd-btn" title={sel.locked ? "Unlock" : "Lock"} onClick={() => toggleLock(sel.id)}
-                  style={{ ...chipStyle, cursor: "pointer", padding: "5px 9px", borderColor: sel.locked ? C.amber : C.line, color: sel.locked ? C.amber : C.dim }}>{sel.locked ? "🔒" : "🔓"}</button>
+                  style={{ ...chipStyle, cursor: "pointer", padding: "5px 9px", borderColor: sel.locked ? C.amber : C.line, color: sel.locked ? C.amber : C.dim, display: "flex", alignItems: "center" }}>
+                  <LockIcon locked={sel.locked} size={13} color={sel.locked ? C.amber : C.dim} />
+                </button>
               </div>
               <div style={{ color: C.faint, fontSize: 11, marginBottom: 10 }}>{sel.type}{sel.type === "clip" ? ` · ${sel.children.length} layers` : ""}{sel.locked ? " · locked" : ""}{sel.hidden ? " · hidden" : ""}</div>
 
@@ -262,7 +285,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
               {sel.type === "number" && (
                 <Card title="Number">
                   <DepthRow value={sel.props.depth} onChange={setDepth} />
-                  <ChipRow label="Mode" options={NUM_MODES.map((m) => [m.id, m.name])} value={numMode(sel.props)} onChange={(v) => patchProps(sel.id, { mode: v })} wrap />
+                  {/* mode selection lives in the Number rail panel (count up / countdown / odometer insert buttons) — no duplicate chips here */}
                   <ChipRow label="Format" options={NUM_FORMATS.map((f) => [f.id, f.name])} value={sel.props.format || "plain"} onChange={(v) => patchProps(sel.id, { format: v })} wrap />
                   {(sel.props.format || "plain") === "time" && <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.5, margin: "-4px 0 8px" }}>Seconds in, mm:ss out — pairs with Countdown mode.</div>}
                   <div style={{ color: C.dim, fontSize: 11, fontWeight: 600, marginBottom: 5 }}>Style presets</div>
@@ -493,9 +516,10 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
               )}
 
               {tProps.length > 0 && (
-                <Card title="Transform" hint="◆ keyframe · ‹ › jump">
+                <Card title="Transform" hint="◆ keyframe · ‹ › jump · drag on canvas to edit">
                   {tProps.map((p) => (
                     <PropRow key={p} obj={sel} prop={p} time={time} ctxDur={ctxDur} stage={stage}
+                      readOnly={TRANSFORM_RO_PROPS.includes(p)}
                       onEdit={(v) => editProp(sel.id, p, v)}
                       onKfToggle={(has, v) => { if (has) removeKeyframe(sel.id, p, Math.round(time / 10) * 10); else { const T = setKeyframe(sel.id, p, time, v); setSelKf({ objId: sel.id, prop: p, t: T }); } }}
                       onNav={(dir) => kfNav(sel, p, dir)} />

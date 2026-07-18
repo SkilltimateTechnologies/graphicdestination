@@ -49,28 +49,45 @@ export function ColorKfRow({ label, obj, time, sw, onEdit, onKf }) {
     </div>
   );
 }
-export function PropRow({ obj, prop, time, ctxDur, stage, onEdit, onKfToggle, onNav, cfgMap, label }) {
+export function PropRow({ obj, prop, time, ctxDur, stage, onEdit, onKfToggle, onNav, cfgMap, label, readOnly }) {
   const v = valueAt(obj, prop, time);
   const track = obj.tracks[prop] || [];
   const has = !!kfAt(track, Math.round(time / 10) * 10);
   /* cfgMap lets non-object pseudo-tracks (the scene camera) supply their own
      slider ranges/labels — object props keep the classic ranges. */
   const cfg = (cfgMap || { x: [0, stage.w, 1], y: [0, stage.h, 1], prog: [0, 1, 0.005], focus: [0, 1, 0.005], scale: [0, 3, 0.01], rotation: [-360, 360, 1], opacity: [0, 1, 0.01] })[prop];
+  const valStr = prop === "opacity" || prop === "scale" || prop === "prog" || prop === "zoom" ? v.toFixed(2) : Math.round(v);
+  const kfBtn = (
+    <button onClick={() => onKfToggle(has, v)} title={has ? "Remove keyframe" : "Add keyframe at playhead"}
+      style={{ width: 17, height: 17, background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+      <span style={{ width: 9, height: 9, transform: "rotate(45deg)", background: has ? C.amber : "transparent", border: `1.5px solid ${track.length ? C.amber : C.faint}`, display: "block", borderRadius: 1.5 }} />
+    </button>
+  );
+  const nav = track.length > 0 ? (
+    <span style={{ display: "flex", gap: 0 }}>
+      <button onClick={() => onNav(-1)} title="Previous keyframe" style={navBtn}>‹</button>
+      <button onClick={() => onNav(1)} title="Next keyframe" style={navBtn}>›</button>
+    </span>
+  ) : <span style={{ width: 26 }} />;
+  /* ◆-only transform rows: canvas grips are the spatial editor — the row shows
+     the live value read-only, keyframes are set/jumped with ◆ and ‹ › only. */
+  if (readOnly) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+        <span style={{ width: 56, color: C.dim, fontSize: 10.5, fontWeight: 600, flexShrink: 0 }}>{label || PROP_LABEL[prop]}</span>
+        <span style={{ flex: 1, fontFamily: "'JetBrains Mono'", fontSize: 10.5, fontVariantNumeric: "tabular-nums", color: C.dim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{valStr}</span>
+        {nav}
+        {kfBtn}
+      </div>
+    );
+  }
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-      <button onClick={() => onKfToggle(has, v)} title={has ? "Remove keyframe" : "Add keyframe at playhead"}
-        style={{ width: 17, height: 17, background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <span style={{ width: 9, height: 9, transform: "rotate(45deg)", background: has ? C.amber : "transparent", border: `1.5px solid ${track.length ? C.amber : C.faint}`, display: "block", borderRadius: 1.5 }} />
-      </button>
-      {track.length > 0 ? (
-        <span style={{ display: "flex", gap: 0 }}>
-          <button onClick={() => onNav(-1)} title="Previous keyframe" style={navBtn}>‹</button>
-          <button onClick={() => onNav(1)} title="Next keyframe" style={navBtn}>›</button>
-        </span>
-      ) : <span style={{ width: 26 }} />}
+      {kfBtn}
+      {nav}
       <span style={{ width: 56, color: C.dim, fontSize: 10.5, fontWeight: 600 }}>{label || PROP_LABEL[prop]}</span>
       <input type="range" min={cfg[0]} max={cfg[1]} step={cfg[2]} value={v} onChange={(e) => onEdit(parseFloat(e.target.value))} style={{ flex: 1 }} />
-      <span style={{ width: 38, textAlign: "right", fontFamily: "'JetBrains Mono'", fontSize: 10.5, fontVariantNumeric: "tabular-nums" }}>{prop === "opacity" || prop === "scale" || prop === "prog" || prop === "zoom" ? v.toFixed(2) : Math.round(v)}</span>
+      <span style={{ width: 38, textAlign: "right", fontFamily: "'JetBrains Mono'", fontSize: 10.5, fontVariantNumeric: "tabular-nums" }}>{valStr}</span>
     </div>
   );
 }
@@ -173,6 +190,21 @@ export function CamIcon({ size = 18, color = C.dim }) {
       <path d="M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15" />
       <path d="M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15" />
       <circle cx="12" cy="12" r="2.6" />
+    </svg>
+  );
+}
+/* lock toggle — clearly different glyphs for the two states:
+   OPEN padlock (unlocked, dim: shackle swung open on the right) vs
+   CLOSED padlock (locked, amber: shackle fully closed + keyhole dot). */
+export function LockIcon({ locked, size = 13, color }) {
+  const col = color || (locked ? C.amber : C.faint);
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={col} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: "block" }}>
+      <rect x="5" y="10.5" width="14" height="9.5" rx="2" fill={locked ? col : "none"} fillOpacity={locked ? 0.22 : 0} />
+      {locked
+        ? <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+        : <path d="M8 10.5V7.5a4 4 0 0 1 7.9-1" />}
+      {locked && <circle cx="12" cy="15.2" r="1.3" fill={col} stroke="none" />}
     </svg>
   );
 }
