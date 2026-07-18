@@ -22,6 +22,13 @@
  *      icon composes ≥3 solid-fill shapes (fillMode "fill"/"both") with
  *      ≥2 distinct fill colors, and no icon is a stroke-only composition.
  *
+ *   4b. BEZIER ART — v3 icons are hand-authored vector art: registered
+ *      ka-* glyphs carry bezier curve commands (C/Q) sampled into the
+ *      engine's polygon pipeline. Every icon uses ≥2 art layers, except
+ *      the three template-embedded icons (heart, arrow-up-right, volume)
+ *      which must stay on the 11 classic shape ids (frozen template
+ *      schema in check-templates.mjs).
+ *
  *   5. RENDER — every kit (both icon variants) SSR-renders a non-empty,
  *      NaN-free frame at hold time through the real StageObject (bundled
  *      with the project's own Vite, one shared react instance); is pure
@@ -43,7 +50,7 @@ import react from "@vitejs/plugin-react";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { ICONS, UI_ELEMENTS, ICON_CATS, UI_CATS, KIT_COLORS, frameOf } from "./src/engine/kits.js";
+import { ICONS, UI_ELEMENTS, ICON_CATS, UI_CATS, KIT_COLORS, KIT_ART, frameOf } from "./src/engine/kits.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tmpDir = path.join(here, ".kits-check-tmp");
@@ -92,7 +99,7 @@ function layerProblems(l, seen, out) {
       if (typeof k.v === "number" && !Number.isFinite(k.v)) out.push(`${where}: non-finite value in "${prop}"`);
     }
   }
-  if (l.type === "shape" && !SHAPE_IDS.includes(l.props.shape)) out.push(`${where}: unknown shape "${l.props.shape}"`);
+  if (l.type === "shape" && !SHAPE_IDS.includes(l.props.shape) && !(l.props.shape in KIT_ART)) out.push(`${where}: unknown shape "${l.props.shape}"`);
   if (l.type === "text" && !FONT_IDS.includes(l.props.fontFamily)) out.push(`${where}: unknown font "${l.props.fontFamily}"`);
   if (l.type === "number") {
     if (!NUM_STYLE_IDS.includes(l.props.style)) out.push(`${where}: unknown number style "${l.props.style}"`);
@@ -142,6 +149,7 @@ check("UI element ids unique", new Set(UI_ELEMENTS.map((k) => k.id)).size === UI
 check("every UI category is declared in UI_CATS", UI_ELEMENTS.every((k) => UI_CATS.includes(k.category)));
 check("every UI element has name/tags/recipe/build", UI_ELEMENTS.every((k) => k.name && Array.isArray(k.tags) && k.tags.length >= 2 && typeof k.recipe === "string" && typeof k.build === "function"));
 check("KIT_COLORS ≥ 5 engine swatches", Array.isArray(KIT_COLORS) && KIT_COLORS.length >= 5);
+check("≥30 registered bezier art glyphs (ka-*), ≥28 curved", Object.keys(KIT_ART).length >= 30 && Object.values(KIT_ART).filter((a) => a.curves).length >= 28, `${Object.keys(KIT_ART).length} glyphs`);
 
 /* ---------- 2 · build + schema + variant contract (pure, pre-SSR) ---------- */
 const built = new Map(); /* `${kind}:${id}` → { k, kind, clip, variant } — reused by the SSR pass */
@@ -190,6 +198,17 @@ function checkIcon(k) {
     else { filled++; if (typeof o.props.fill === "string") fills.add(o.props.fill.toUpperCase()); }
   });
   check(`icon:${k.id} flat-fill style (≥3 solid fills, ≥2 colors, not stroke-only)`, filled >= 3 && fills.size >= 2 && filled > stroked, `filled=${filled} stroked=${stroked} colors=${fills.size}`);
+  /* bezier art contract (4b) */
+  const artLayers = [];
+  walkAll(art, (o) => { if (o.type === "shape" && o.props.shape in KIT_ART) artLayers.push(o.props.shape); });
+  if (["heart", "arrow-up-right", "volume"].includes(k.id)) {
+    const classic = [];
+    walkAll(art, (o) => { if (o.type === "shape") classic.push(o.props.shape); });
+    check(`icon:${k.id} template-embedded ⇒ classic shape ids only`, classic.every((s) => SHAPE_IDS.includes(s)), classic.filter((s) => !SHAPE_IDS.includes(s)).join(","));
+  } else {
+    check(`icon:${k.id} bezier path art (≥2 ka-* layers)`, artLayers.length >= 2, `${artLayers.length}`);
+    check(`icon:${k.id} art layers carry curve commands (C/Q)`, artLayers.filter((s) => KIT_ART[s].curves).length >= 2);
+  }
 }
 console.log("\nicons — build + schema + variant contract (animated × static)");
 for (const k of ICONS) checkIcon(k);

@@ -35,6 +35,7 @@
 
 import { mulberry32 } from "./random.js";
 import { lerpColor } from "./keyframes.js";
+import { SHAPE_DEFS, alignPts } from "./shapes.js";
 
 const STAGE_W = 1280;
 const STAGE_H = 720;
@@ -279,37 +280,64 @@ function groupClip(name, children, D, o = {}) {
 }
 
 /* ============================================================
-   ICONS — flat, colored, filled icons in the Flaticon genre:
-   soft rounded geometry, solid fills, 2–4 colors per icon, one
-   shared visual language (bottom-rim shade twin + top-left light
-   blob for depth, dark navy-brown feature ink, 1–2 accents).
+   ICONS (v3) — hand-authored flat vector art, Jitter/Flaticon grade.
 
-   Every icon builds TWO variants from ONE art spec:
-     · animated (default) — the Jitter grammar: easeOutBack pop
-       entrances with 50–150 ms staggers, an icon-specific hold
-       motion (blink / heartbeat / flicker / fall / rock / drift…),
-       whip exit; structurally seamless (frame(0) ≡ frame(dur)).
-     · static — identical art, ZERO animation tracks, always
-       visible (inT 0 / outT null), for users who want still icons.
-   build(opts): { color, size, dur, variant: "animated"|"static" }
-     · color recolors the icon's PRIMARY fill (shades/highlights
-       re-derive from it via tone()); every icon has its own
-       natural default when no color is passed.
+   DESIGN SYSTEM — one visual language for the whole family:
+
+   · GRID — every icon is drawn in the shared 100×100 design box.
+     Optical keylines: round icons (emoji heads, badges) fill Ø76;
+     square-ish objects (gift, calendar, lock, camera) fill ~64×64,
+     tall objects (rocket, mic, pin) reach ~72 high. The primary mass
+     is optically centered at (0,0) — never mathematically centered
+     when the silhouette is top- or bottom-heavy (bells/pins sit 1–2
+     units high, arrows ride the diagonal).
+
+   · PALETTE — 12 curated swatches (below). Each icon has ONE natural
+     primary; shade/highlight/sheen tones are always DERIVED from it
+     via tone() so build({color}) re-harmonizes the whole icon.
+     Feature ink (INK) is a warm violet-black, never pure black.
+
+   · DEPTH — ONE recipe, applied everywhere: a SHADE TWIN of the
+     primary silhouette (tone −0.22, offset +3.2 box units down)
+     + a small top-left SHEEN sliver (tone +0.45, op ~0.5, or PURE
+     at low opacity on colored masses). No gradients, no strokes on
+     the primary art, no per-icon improvisations.
+
+   · FACE — all 20 emoji share one construction: Ø76 head at
+     (0,−1.5) over its shade twin at (0,+1.7); eyes on the y=−11
+     line at dx ±14.5; mouth baseline y=+13; cheeks at (±22.5,+6);
+     brows at y=−21. Eyes/mouths/brows are the shared authored
+     glyphs below (ka-eye, ka-smile, …) — every face reads as the
+     same character with a different expression.
+
+   · ART PIPELINE — glyphs are true bezier art: authored below as
+     path commands (M/L/C/Q/Z), sampled to dense closed outlines
+     (~1-unit steps) and registered as engine shapes (ka-* ids) at
+     module init — the same 64+-point polygon pipeline the engine's
+     own heart shape uses, so preview, SSR checks and the export
+     rasterizer all render identical curves. The three icons embedded
+     in templates.js (heart, arrow-up-right, volume) intentionally
+     stay on the 11 classic shape ids (frozen template schema).
+
+   · MOTION GRAMMAR — unchanged (see header): easeOutBack pop
+     entrances, 50–150 ms staggers, one icon-specific hold recipe,
+     whip exits, structurally seamless ~3.2 s loop; "static" variant
+     = identical art, zero tracks.
    ============================================================ */
 
-/* flat-icon accent palette (shared across the family) */
+/* flat-icon palette (12 swatches + derivations via tone()) */
 const FACE_Y = "#FFD54A";  /* emoji face warm yellow */
-const FEAT = "#3D3548";    /* feature ink — dark navy-brown */
-const CHEEK = "#FF8FA3";
+const FEAT = "#463A56";     /* feature ink — warm violet-black */
+const CHEEK = "#FF9EB2";
 const TONGUE_C = "#FF6E8A";
-const TEAR_C = "#5BC8F5";
+const TEAR_C = "#59C9F5";
 const GOLD = "#FFC53D";
 const RED = "#FF5D5D";
 const PINK = "#FF7BA9";
 const ORANGE = "#FF9F43";
 const GREEN = "#3ED598";
 const VIOLET = "#C084FC";
-const NAVY = "#2E2A33";
+const NAVY = "#332E3D";
 const PURE = "#FFFFFF";
 
 /* tone(): lighten (u>0, toward white) / darken (u<0, toward black) */
@@ -325,6 +353,217 @@ const tone = (hex, u) => (u < 0 ? lerpColor(hex, "#000000", -u) : lerpColor(hex,
 const L = (shape, dx, dy, w, h, x = {}, a = {}) => ({ k: "s", shape, dx, dy, w, h, x, a });
 const LT = (text, dx, dy, fs, x = {}, a = {}) => ({ k: "t", text, dx, dy, fs, x, a });
 const LG = (n, kids, a = {}) => ({ k: "g", n, kids, a });
+
+/* ============================================================
+   VECTOR ART TOOLKIT — bezier path commands → dense closed
+   outline points → registered engine shapes (ka-* ids).
+
+   regArt(id, cmds)      one glyph, normalized: bbox fit → 0..100
+                         (uniform scale, centered; aspect preserved)
+   regSet(frame, parts)  glyphs sharing ONE frame (mouth+tongue+
+                         teeth, nested flames…): the union bbox is
+                         normalized once, so parts placed at the same
+                         (dx,dy,size) align exactly.
+   KIT_ART records which ids carry real curve commands (the checks
+   assert the family is bezier path art, not stretched primitives).
+   ============================================================ */
+const _V = (x) => Math.round(x * 100) / 100;
+const _cb = (p0, p1, p2, p3, t) => { const u = 1 - t; return [u * u * u * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t * t * t * p3[0], u * u * u * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t * t * t * p3[1]]; };
+const _qb = (p0, p1, p2, t) => { const u = 1 - t; return [u * u * p0[0] + 2 * u * t * p1[0] + t * t * p2[0], u * u * p0[1] + 2 * u * t * p1[1] + t * t * p2[1]]; };
+
+/* sample ["M",x,y]["L",x,y]["C",x1,y1,x2,y2,x,y]["Q",x1,y1,x,y]["Z"] → dense pts */
+function artPath(cmds, step = 0.85) {
+  const pts = [];
+  let cur = null, start = null;
+  const seg = (a, b) => {
+    const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / step));
+    for (let i = 1; i <= n; i++) pts.push([a[0] + (b[0] - a[0]) * (i / n), a[1] + (b[1] - a[1]) * (i / n)]);
+  };
+  for (const c of cmds) {
+    const k = c[0];
+    if (k === "M") { cur = [c[1], c[2]]; start = cur; if (!pts.length) pts.push(cur); }
+    else if (k === "L") { const b = [c[1], c[2]]; seg(cur, b); cur = b; }
+    else if (k === "C") {
+      const p0 = cur, p1 = [c[1], c[2]], p2 = [c[3], c[4]], p3 = [c[5], c[6]];
+      const est = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) + Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) + Math.hypot(p3[0] - p2[0], p3[1] - p2[1]);
+      const n = Math.max(3, Math.ceil(est / step));
+      for (let i = 1; i <= n; i++) pts.push(_cb(p0, p1, p2, p3, i / n));
+      cur = p3;
+    } else if (k === "Q") {
+      const p0 = cur, p1 = [c[1], c[2]], p2 = [c[3], c[4]];
+      const est = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) + Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+      const n = Math.max(3, Math.ceil(est / step));
+      for (let i = 1; i <= n; i++) pts.push(_qb(p0, p1, p2, i / n));
+      cur = p2;
+    } else if (k === "Z" && cur && start) { seg(cur, start); cur = start; }
+  }
+  return pts;
+}
+
+/* circle arc as C commands (a0→a1 degrees, y-down stage coords) */
+function arcSegs(cx, cy, r, a0, a1) {
+  const cmds = [];
+  const n = Math.max(1, Math.ceil(Math.abs(a1 - a0) / 40));
+  for (let i = 0; i < n; i++) {
+    const t0 = ((a0 + ((a1 - a0) * i) / n) * Math.PI) / 180, t1 = ((a0 + ((a1 - a0) * (i + 1)) / n) * Math.PI) / 180;
+    const f = (4 / 3) * Math.tan((t1 - t0) / 4);
+    const x0 = cx + r * Math.cos(t0), y0 = cy + r * Math.sin(t0), x1 = cx + r * Math.cos(t1), y1 = cy + r * Math.sin(t1);
+    cmds.push(["C", x0 - f * r * Math.sin(t0), y0 + f * r * Math.cos(t0), x1 + f * r * Math.sin(t1), y1 - f * r * Math.cos(t1), x1, y1]);
+  }
+  return cmds;
+}
+const arcPt = (cx, cy, r, a) => { const t = (a * Math.PI) / 180; return [cx + r * Math.cos(t), cy + r * Math.sin(t)]; };
+/* ellipse outline (κ-approximated, rot degrees) */
+function ellCmd(cx, cy, rx, ry, rot = 0) {
+  const k = 0.5522847498, a = (rot * Math.PI) / 180, co = Math.cos(a), si = Math.sin(a);
+  const P = (x, y) => [cx + x * co - y * si, cy + x * si + y * co];
+  return [
+    ["M", ...P(rx, 0)],
+    ["C", ...P(rx, k * ry), ...P(k * rx, ry), ...P(0, ry)],
+    ["C", ...P(-k * rx, ry), ...P(-rx, k * ry), ...P(-rx, 0)],
+    ["C", ...P(-rx, -k * ry), ...P(-k * rx, -ry), ...P(0, -ry)],
+    ["C", ...P(k * rx, -ry), ...P(rx, -k * ry), ...P(rx, 0)],
+    ["Z"],
+  ];
+}
+/* rounded rect (x0,y0 top-left, w×h, corner r) */
+function rrCmd(x0, y0, w, h, r) {
+  r = Math.max(0, Math.min(r, w / 2, h / 2));
+  const x1 = x0 + w, y1 = y0 + h, k = 0.5522847498;
+  return [
+    ["M", x0 + r, y0], ["L", x1 - r, y0], ["C", x1 - r + k * r, y0, x1, y0 + r - k * r, x1, y0 + r],
+    ["L", x1, y1 - r], ["C", x1, y1 - r + k * r, x1 - r + k * r, y1, x1 - r, y1],
+    ["L", x0 + r, y1], ["C", x0 + r - k * r, y1, x0, y1 - r + k * r, x0, y1 - r],
+    ["L", x0, y0 + r], ["C", x0, y0 + r - k * r, x0 + r - k * r, y0, x0 + r, y0], ["Z"],
+  ];
+}
+/* capsule (stadium) centered at cx,cy, w×h before rot */
+const capCmd = (cx, cy, w, h, rot = 0) => rotCmds(rrCmd(cx - w / 2, cy - h / 2, w, h, Math.min(w, h) / 2), cx, cy, rot);
+/* arc band with ROUNDED caps (donut sector, a0→a1 deg) — smiles, halos,
+   shackles, sound waves, phone handset, rainbows */
+function arcBandCmd(cx, cy, r, w, a0, a1) {
+  const ro = r + w / 2, ri = r - w / 2;
+  const cap = (a) => arcPt(cx, cy, r, a);
+  const c1 = cap(a1), c0 = cap(a0);
+  return [
+    ["M", ...arcPt(cx, cy, ro, a0)],
+    ...arcSegs(cx, cy, ro, a0, a1),
+    ...arcSegs(c1[0], c1[1], w / 2, a1, a1 + 180),
+    ...arcSegs(cx, cy, ri, a1, a0),
+    ...arcSegs(c0[0], c0[1], w / 2, a0 + 180, a0 + 360),
+    ["Z"],
+  ];
+}
+/* full ring band (donut) */
+const ringCmd = (cx, cy, r, w) => [
+  ["M", ...arcPt(cx, cy, r + w / 2, 0)], ...arcSegs(cx, cy, r + w / 2, 0, 360),
+  ["M", ...arcPt(cx, cy, r - w / 2, 0)], ...arcSegs(cx, cy, r - w / 2, 0, -360),
+];
+/* transform helpers on command lists */
+const xformCmds = (cmds, f) => cmds.map((c) => {
+  const out = [c[0]];
+  for (let i = 1; i < c.length; i += 2) { const [x, y] = f(c[i], c[i + 1]); out.push(x, y); }
+  return out;
+});
+function rotCmds(cmds, cx, cy, deg) {
+  const a = (deg * Math.PI) / 180, co = Math.cos(a), si = Math.sin(a);
+  return xformCmds(cmds, (x, y) => [cx + (x - cx) * co - (y - cy) * si, cy + (x - cx) * si + (y - cy) * co]);
+}
+const flipXCmds = (cmds, cx = 0) => xformCmds(cmds, (x, y) => [2 * cx - x, y]);
+const scaleCmds = (cmds, cx, cy, s) => xformCmds(cmds, (x, y) => [cx + (x - cx) * s, cy + (y - cy) * s]);
+/* polygon with rounded corners (soft bolts, gem, arrows…): each vertex
+   is beveled by d units along its edges and bridged with a Q */
+function polyRoundCmd(verts, d = 2) {
+  const n = verts.length, cmds = [];
+  const at = (i) => verts[((i % n) + n) % n];
+  for (let i = 0; i < n; i++) {
+    const p = at(i - 1), v = at(i), q = at(i + 1);
+    const dIn = Math.hypot(v[0] - p[0], v[1] - p[1]), dOut = Math.hypot(q[0] - v[0], q[1] - v[1]);
+    const dd = Math.min(d, dIn / 2.2, dOut / 2.2);
+    const a = [v[0] + ((p[0] - v[0]) / dIn) * dd, v[1] + ((p[1] - v[1]) / dIn) * dd];
+    const b = [v[0] + ((q[0] - v[0]) / dOut) * dd, v[1] + ((q[1] - v[1]) / dOut) * dd];
+    if (i === 0) cmds.push(["M", ...a]); else cmds.push(["L", ...a]);
+    cmds.push(["Q", ...v, ...b]);
+  }
+  cmds.push(["Z"]);
+  return cmds;
+}
+/* star with rounded tips/joins */
+function starSoftCmd(cx, cy, R, r, n = 5, round = 2.5, rot = -90) {
+  const v = [];
+  for (let i = 0; i < n * 2; i++) {
+    const a = ((rot + (i * 180) / n) * Math.PI) / 180, rad = i % 2 === 0 ? R : r;
+    v.push([cx + rad * Math.cos(a), cy + rad * Math.sin(a)]);
+  }
+  return polyRoundCmd(v, round);
+}
+
+/* ---------- glyph registry ---------- */
+export const KIT_ART = {}; /* ka-* id → { curves } — authored bezier art */
+function _normFit(parts) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const pts of parts) for (const [x, y] of pts) {
+    x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+  }
+  const s = 100 / Math.max(x1 - x0, y1 - y0, 1e-6);
+  return { s, ox: (100 - (x1 - x0) * s) / 2 - x0 * s, oy: (100 - (y1 - y0) * s) / 2 - y0 * s };
+}
+function _register(id, pts, cmds, t) {
+  KIT_ART[id] = { curves: cmds.some((c) => c[0] === "C" || c[0] === "Q") };
+  if (!SHAPE_DEFS[id]) SHAPE_DEFS[id] = { name: id, pts: alignPts(pts.map(([x, y]) => [_V(x * t.s + t.ox), _V(y * t.s + t.oy)])) };
+}
+/* single glyph (own bbox → 0..100) */
+function regArt(id, cmds, step) {
+  const pts = artPath(cmds, step);
+  _register(id, pts, cmds, _normFit([pts]));
+  return id;
+}
+/* glyph family sharing ONE frame: regSet([id, cmds, id, cmds, …]) */
+function regSet(...pairs) {
+  const all = pairs.map(([, cmds]) => artPath(cmds, 0.85));
+  const t = _normFit(all);
+  pairs.forEach(([id, cmds], i) => _register(id, all[i], cmds, t));
+}
+
+/* ============================================================
+   SHARED ART — one glyph library used across the whole family.
+   Authored once here (consistency) and placed everywhere via L().
+   ============================================================ */
+/* top-left sheen sliver (the ONE highlight recipe) */
+regArt("ka-sheen", [
+  ["M", -18, 6], ["C", -20, -6, -12, -16, 0, -18], ["C", 2, -14, 2, -12, 0, -10],
+  ["C", -8, -8, -13, -2, -12, 6], ["C", -12, 10, -16, 10, -18, 6], ["Z"],
+]);
+/* 4-point sparkle (soft concave sides) */
+regArt("ka-spark", [
+  ["M", 0, -14], ["C", 1.6, -5, 5, -1.6, 14, 0], ["C", 5, 1.6, 1.6, 5, 0, 14],
+  ["C", -1.6, 5, -5, 1.6, -14, 0], ["C", -5, -1.6, -1.6, -5, 0, -14], ["Z"],
+]);
+/* teardrop (tears / sweat), pointing up */
+regArt("ka-drop", [
+  ["M", 0, -15], ["C", 4.5, -8.5, 9, -2.5, 9, 4], ["C", 9, 10.5, 4.9, 15, 0, 15],
+  ["C", -4.9, 15, -9, 10.5, -9, 4], ["C", -9, -2.5, -4.5, -8.5, 0, -15], ["Z"],
+]);
+/* soft star (rounded tips — badges, trophy inlay, moon company) */
+regArt("ka-star", starSoftCmd(0, 0, 16, 8.4, 5, 2.6));
+/* soft bolt (rounded corners, slight forward lean) */
+regArt("ka-bolt", polyRoundCmd([[3, -18], [11.5, -18], [3.5, -2], [11, -2], [-5, 18], [-1.5, 2.5], [-10, 2.5]], 2.4));
+/* anger mark 💢 (puffy cross, tilted) */
+regArt("ka-anger", rotCmds(polyRoundCmd([[-4, -14], [4, -14], [4, -4], [14, -4], [14, 4], [4, 4], [4, 14], [-4, 14], [-4, 4], [-14, 4], [-14, -4], [-4, -4]], 4.2), 0, 0, 18));
+/* devil horn (curved, pointing up-out) + mirrored twin */
+const hornCmd = [
+  ["M", -7, 8], ["C", -10, -3, -7, -13, 3, -19], ["C", 0, -11, 2, -4, 9, -1],
+  ["C", 5, 6, -2, 11, -7, 8], ["Z"],
+];
+regArt("ka-horn", hornCmd);
+regArt("ka-horn-r", flipXCmds(hornCmd));
+/* confetti triangle */
+regArt("ka-conf", [["M", 0, -8], ["C", 2, -2, 4, 3, 6, 8], ["L", -6, 8], ["C", -4, 3, -2, -2, 0, -8], ["Z"]]);
+/* ribbon curl (party confetti) */
+regArt("ka-curl", [
+  ["M", -6, -10], ["C", 2, -8, 6, -2, 2, 2], ["C", -2, 6, -6, 8, -4, 12], ["L", -7, 11],
+  ["C", -9, 6, -4, 4, 0, 1], ["C", 4, -2, 0, -6, -7, -8], ["Z"],
+]);
 
 /* ---------- looped track factories (all pure f(D)) ---------- */
 /* blink crossfade: open eye hides / closed lid shows for ~200 ms at tb */
@@ -371,78 +610,121 @@ function hopTr(c, y, amp, tm) {
 }
 
 /* ============================================================
-   EMOJI COMPOSERS — one shared face language. All generate spec
-   arrays in the 100-box; the face is a 74-unit circle at (0,−1).
+   FACE ART — the shared emoji feature library (one construction
+   grid: eyes y −11 / dx ±14.5 · mouth y +13 · cheeks ±22.5,+6)
    ============================================================ */
-/* face: warm bottom-rim shade twin + base + top-left light blob */
+/* dot eye — soft vertical capsule with a gentle taper */
+regArt("ka-eye", capCmd(0, 0, 7.6, 10.6));
+/* happy closed eye ∩ (round-capped arc band) */
+regArt("ka-eye-arc", arcBandCmd(0, 1.5, 6.6, 4.4, 180, 360));
+/* calm shut eye ∪ */
+regArt("ka-eye-shut", arcBandCmd(0, -1.5, 6.6, 4.4, 0, 180));
+/* brow bar */
+regArt("ka-brow", capCmd(0, 0, 12.5, 4.2));
+/* smile ∪ */
+regArt("ka-smile", arcBandCmd(0, -1, 12.6, 4.8, 25, 155));
+/* frown ∩ */
+regArt("ka-frown", arcBandCmd(0, 5.5, 11.5, 4.6, 205, 335));
+/* flat mouth */
+regArt("ka-flat", capCmd(0, 0, 19, 4.4));
+/* smirk — off-center swoosh, thicker on the right */
+regArt("ka-smirk", [
+  ["M", -13, 1.5], ["C", -7, -3.5, 6, -4.5, 13, 0.5], ["C", 8, 4.5, -3, 5.5, -11, 4],
+  ["C", -13.2, 3.6, -14, 2.6, -13, 1.5], ["Z"],
+]);
+/* open mouth + teeth + tongue — ONE shared frame (regSet aligns them) */
+regSet(
+  ["ka-mouth", [
+    ["M", -17, -4], ["C", -17, 8.5, -9, 15.5, 0, 15.5], ["C", 9, 15.5, 17, 8.5, 17, -4],
+    ["C", 17, -7.5, 9, -8.5, 0, -8.5], ["C", -9, -8.5, -17, -7.5, -17, -4], ["Z"],
+  ]],
+  ["ka-teeth", [
+    ["M", -15.8, -5.2], ["C", -9, -7.2, 9, -7.2, 15.8, -5.2], ["C", 15.8, -1.5, 14, 0.5, 11.5, 0.5],
+    ["L", -11.5, 0.5], ["C", -14, 0.5, -15.8, -1.5, -15.8, -5.2], ["Z"],
+  ]],
+  ["ka-tongue-in", [
+    ["M", -9.5, 10.5], ["C", -6, 7, 6, 7, 9.5, 10.5], ["C", 9.5, 14, 5.5, 15.5, 0, 15.5],
+    ["C", -5.5, 15.5, -9.5, 14, -9.5, 10.5], ["Z"],
+  ]]
+);
+/* sticking-out tongue (w/ center groove layer) */
+regArt("ka-tongue", [
+  ["M", -7, -4], ["C", -7, -7, 7, -7, 7, -4], ["L", 7, 7], ["C", 7, 13, 4, 16.5, 0, 16.5],
+  ["C", -4, 16.5, -7, 13, -7, 7], ["Z"],
+]);
+/* sunglasses — one connected wayfarer silhouette */
+regArt("ka-shades", [
+  ["M", -18, -2], ["C", -18, -7, -15, -9, -11, -9], ["L", -4, -9], ["C", -2, -9, -0.6, -8, 0, -6.4],
+  ["C", 0.6, -8, 2, -9, 4, -9], ["L", 11, -9], ["C", 15, -9, 18, -7, 18, -2],
+  ["C", 18, 4, 15, 8, 10, 8], ["L", 6, 8], ["C", 2, 8, 0.6, 5, 0, 2.6], ["C", -0.6, 5, -2, 8, -6, 8],
+  ["L", -10, 8], ["C", -15, 8, -18, 4, -18, -2], ["Z"],
+]);
+/* halo — squashed ring band */
+regArt("ka-halo", xformCmds(ringCmd(0, 0, 13, 4.6), (x, y) => [x, y * 0.36]));
+/* party hat cone */
+regArt("ka-hat", [
+  ["M", 0, -20], ["C", 1.5, -13, 6, -3, 11, 6], ["C", 5, 10.5, -5, 10.5, -11, 6],
+  ["C", -6, -3, -1.5, -13, 0, -20], ["Z"],
+]);
+/* mind-blown burst — puffy 8-point explosion + inner blast */
+regSet(
+  ["ka-burst", starSoftCmd(0, 0, 17.5, 9.5, 8, 3.2)],
+  ["ka-burst-in", starSoftCmd(0, 1, 10, 5.4, 8, 2)]
+);
+
+/* ============================================================
+   EMOJI COMPOSERS — spec arrays in the 100-box off one head.
+   ============================================================ */
+/* head: shade twin + base + sheen (the depth recipe) */
 const faceBase = (c, j, a = {}) => [
-  L("ellipse", 0, 2.1, 74, 74, { fill: c.faceShade || lerpColor(c.color, "#E8871E", 0.45) }, { j, ...a }),
-  L("ellipse", 0, -1.1, 74, 74, { fill: c.color }, { j, ...a }),
-  L("ellipse", -15, -24, 27, 12, { fill: PURE, op: 0.2, rot: -22 }, { j: j + 1, ...a }),
+  L("ellipse", 0, 1.7, 76, 76, { fill: tone(c.color, -0.2) }, { j, ...a }),
+  L("ellipse", 0, -1.5, 76, 76, { fill: c.color }, { j, ...a }),
+  L("ka-sheen", -15, -17, 32, 32, { fill: tone(c.color, 0.55), op: 0.5 }, { j: j + 1, ...a }),
 ];
-const cheeks = (c, j, dy = 8) => [
-  L("ellipse", -21.5, dy, 10, 6.5, { fill: CHEEK, op: 0.5 }, { j }),
-  L("ellipse", 21.5, dy, 10, 6.5, { fill: CHEEK, op: 0.5 }, { j }),
+const cheeks = (c, j, dy = 6) => [
+  L("ellipse", -22.5, dy, 10, 6.5, { fill: CHEEK, op: 0.55 }, { j }),
+  L("ellipse", 22.5, dy, 10, 6.5, { fill: CHEEK, op: 0.55 }, { j }),
 ];
-/* dot eyes; o.blink adds closed lids + a mid-hold blink crossfade */
-const dotEyes = (c, j, dy = -9, o = {}) => {
-  const w = o.w || 7.5, h = o.h || 10, dx = o.dx || 13.5;
+/* dot eyes; o.blink adds shut lids + a mid-hold blink crossfade */
+const dotEyes = (c, j, dy = -11, o = {}) => {
+  const s = o.s || 11, dx = o.dx || 14.5;
   const tb = o.tb || Math.round(c.D * 0.52);
   const pair = o.blink ? blinkTr(c.D, tb) : null;
   const parts = [];
   [-dx, dx].forEach((x, i) => {
-    parts.push(L("ellipse", x, dy, w, h, { fill: FEAT }, { j: j + i, hold: o.hold, tr: pair ? { opacity: pair.open } : undefined }));
-    if (pair) parts.push(L("ellipse", x, dy + 2.5, w + 2.5, 5, { fill: FEAT }, { j: j + i, in: "none", out: false, tr: { opacity: pair.closed } }));
+    parts.push(L("ka-eye", x, dy, s, s, { fill: FEAT }, { j: j + i, hold: o.hold, tr: pair ? { opacity: pair.open } : undefined }));
+    if (pair) parts.push(L("ka-eye-shut", x, dy + 2.5, s + 1, s + 1, { fill: FEAT }, { j: j + i, in: "none", out: false, tr: { opacity: pair.closed } }));
   });
   return parts;
 };
-/* happy closed eyes ∩∩ (dark arc = ellipse + face cover below) */
-const arcEyes = (c, j, dy = -9, o = {}) => [-13.5, 13.5].flatMap((x, i) => [
-  L("ellipse", x, dy, 11, 9, { fill: FEAT }, { j: j + i, hold: o.hold }),
-  L("ellipse", x, dy + 5, 12.5, 10, { fill: c.color }, { j: j + i, hold: o.hold }),
-]);
+/* happy closed eyes ∩∩ */
+const arcEyes = (c, j, dy = -11, o = {}) => [-14.5, 14.5].map((x, i) =>
+  L("ka-eye-arc", x, dy, o.s || 12.5, o.s || 12.5, { fill: FEAT }, { j: j + i, hold: o.hold }));
 /* calm shut eyes ∪∪ */
-const shutEyes = (c, j, dy = -7, o = {}) => [-13.5, 13.5].flatMap((x, i) => [
-  L("ellipse", x, dy, 11, 8, { fill: FEAT }, { j: j + i, hold: o.hold }),
-  L("ellipse", x, dy - 4.5, 12.5, 9, { fill: c.color }, { j: j + i, hold: o.hold }),
-]);
-/* smile crescent (dark ellipse + face cover above) */
-const smileM = (c, j, dy = 13, o = {}) => [
-  L("ellipse", 0, dy - 5, 30, 23, { fill: FEAT }, { j, hold: o.hold }),
-  L("ellipse", 0, dy - 12, 34, 24, { fill: c.color }, { j, hold: o.hold }),
+const shutEyes = (c, j, dy = -10, o = {}) => [-14.5, 14.5].map((x, i) =>
+  L("ka-eye-shut", x, dy, o.s || 12.5, o.s || 12.5, { fill: FEAT }, { j: j + i, hold: o.hold }));
+const smileM = (c, j, dy = 16, o = {}) => [L("ka-smile", 0, dy, o.s || 30, o.s || 30, { fill: FEAT }, { j, hold: o.hold })];
+/* grin: open mouth + teeth band */
+const grinM = (c, j, dy = 20, o = {}) => [
+  L("ka-mouth", 0, dy, o.s || 27, o.s || 27, { fill: FEAT }, { j, hold: o.hold }),
+  L("ka-teeth", 0, dy, o.s || 27, o.s || 27, { fill: PURE }, { j, hold: o.hold }),
 ];
-/* grin: open mouth with a teeth band */
-const grinM = (c, j, dy = 14, o = {}) => [
-  L("ellipse", 0, dy - 3, 33, 25, { fill: FEAT }, { j, hold: o.hold }),
-  L("rect", 0, dy - 1, 25, 8, { fill: PURE, cr: 30 }, { j, hold: o.hold }),
-  L("ellipse", 0, dy - 12, 37, 24, { fill: c.color }, { j, hold: o.hold }),
+/* laugh: open mouth + tongue */
+const laughM = (c, j, dy = 20, o = {}) => [
+  L("ka-mouth", 0, dy, o.s || 28, o.s || 28, { fill: FEAT }, { j, hold: o.hold }),
+  L("ka-tongue-in", 0, dy, o.s || 28, o.s || 28, { fill: TONGUE_C }, { j, hold: o.hold }),
 ];
-/* laugh: open mouth with tongue */
-const laughM = (c, j, dy = 14, o = {}) => [
-  L("ellipse", 0, dy - 2, 33, 26, { fill: FEAT }, { j, hold: o.hold }),
-  L("ellipse", 0, dy + 5, 20, 12, { fill: TONGUE_C }, { j, hold: o.hold }),
-  L("ellipse", 0, dy - 12, 37, 24, { fill: c.color }, { j, hold: o.hold }),
-];
-/* frown ∩ (dark ellipse + face cover below) */
-const frownM = (c, j, dy = 12, o = {}) => [
-  L("ellipse", 0, dy + 9, 24, 15, { fill: FEAT }, { j, hold: o.hold }),
-  L("ellipse", 0, dy + 15.5, 27, 14, { fill: c.color }, { j, hold: o.hold }),
-];
-/* smirk: off-center shallow crescent */
-const smirkM = (c, j, dy = 14, o = {}) => [
-  L("ellipse", 4, dy - 4, 26, 20, { fill: FEAT }, { j, hold: o.hold }),
-  L("ellipse", 4, dy - 11, 30, 21, { fill: c.color }, { j, hold: o.hold }),
-];
-const flatM = (c, j, dy = 14) => [L("rect", 0, dy, 21, 4.5, { fill: FEAT, cr: 49 }, { j })];
-const oMouth = (c, j, dy = 15, w = 11, h = 13, o = {}) => [L("ellipse", 0, dy, w, h, { fill: FEAT }, { j, hold: o.hold })];
+const frownM = (c, j, dy = 17, o = {}) => [L("ka-frown", 0, dy, o.s || 26, o.s || 26, { fill: FEAT }, { j, hold: o.hold })];
+const smirkM = (c, j, dy = 16, o = {}) => [L("ka-smirk", o.dx || 2, dy, o.s || 24, o.s || 24, { fill: FEAT }, { j, hold: o.hold })];
+const flatM = (c, j, dy = 15) => [L("ka-flat", 0, dy, 22, 22, { fill: FEAT }, { j })];
+const oMouth = (c, j, dy = 16, w = 12, h = 14, o = {}) => [L("ellipse", 0, dy, w, h, { fill: FEAT }, { j, hold: o.hold })];
 /* brows */
-const brow = (j, dx, dy, rot, o = {}) => L("rect", dx, dy, o.w || 13, o.h || 3.6, { fill: FEAT, cr: 49, rot }, { j, hold: o.hold });
-const angryBrows = (j, dy = -19) => [brow(j, -12, dy, 24, { h: 4.4 }), brow(j + 1, 12, dy, -24, { h: 4.4 })];
-const sadBrows = (j, dy = -20) => [brow(j, -12, dy, -22), brow(j + 1, 12, dy, 22)];
-/* composed teardrop (round bulb + pointy top), pointing up */
-const dropS = (j, dx, dy, s, fill, o = {}) => [
-  L("ellipse", dx, dy + 2.4 * s, 7.4 * s, 7.4 * s, { fill, rot: o.rot }, { j, ...o }),
-  L("triangle", dx, dy - 2.4 * s, 6.2 * s, 6.8 * s, { fill, rot: o.rot }, { j, ...o }),
+const brow = (j, dx, dy, rot, o = {}) => L("ka-brow", dx, dy, o.s || 14, o.s || 14, { fill: FEAT, rot }, { j, hold: o.hold });
+const angryBrows = (j, dy = -20) => [brow(j, -13, dy, 26), brow(j + 1, 13, dy, -26)];
+const sadBrows = (j, dy = -21) => [brow(j, -13, dy, -24), brow(j + 1, 13, dy, 24)];
+/* drifting tear/sweat drop (looped) */
+const dropFly = (j, dx, dy, s, ddx, ddy, per, o = {}) => [
+  L("ka-drop", dx, dy, s, s, { fill: o.fill || TEAR_C, rot: o.rot }, { j, in: "none", out: false, tr: driftTr(o.c, dx, dy, ddx, ddy, per, o) }),
 ];
 
 /* ============================================================
@@ -454,7 +736,7 @@ const dropS = (j, dx, dy, s, fill, o = {}) => [
 const specSmile = (c) => [
   LG("Smile idle", [
     ...faceBase(c, 0),
-    ...dotEyes(c, 2, -9, { blink: true }),
+    ...dotEyes(c, 2, -11, { blink: true }),
     ...smileM(c, 4),
     ...cheeks(c, 5),
   ], { hold: { type: "bob", amp: 2, period: 1400 } }),
@@ -472,63 +754,66 @@ const specLaughTears = (c) => [
   ...arcEyes(c, 2),
   ...laughM(c, 4),
   ...cheeks(c, 5),
-  /* tears fly off both sides, looped */
-  ...dropS(6, -25, -10, 1.15, TEAR_C, { in: "none", out: false, rot: 30, tr: driftTr(c, -25, -10, -11, -7, 900) }),
-  ...dropS(7, 25, -10, 1.15, TEAR_C, { in: "none", out: false, rot: -30, tr: driftTr(c, 25, -10, 11, -7, 900, { phase: 450 }) }),
+  ...dropFly(6, -26, -12, 11, -11, -7, 900, { c, rot: 32 }),
+  ...dropFly(7, 26, -12, 11, 11, -7, 900, { c, rot: -32, phase: 450 }),
 ];
 const specLoveEyes = (c) => [
   ...faceBase(c, 0),
-  L("heart", -13.5, -9, 14, 13, { fill: PINK }, { j: 2, hold: { type: "heartbeat", period: 940 } }),
-  L("heart", 13.5, -9, 14, 13, { fill: PINK }, { j: 3, hold: { type: "heartbeat", period: 940 } }),
+  L("heart", -14.5, -11, 15, 14, { fill: PINK }, { j: 2, hold: { type: "heartbeat", period: 940 } }),
+  L("heart", 14.5, -11, 15, 14, { fill: PINK }, { j: 3, hold: { type: "heartbeat", period: 940 } }),
   ...smileM(c, 4),
   ...cheeks(c, 5),
 ];
 const specStarStruck = (c) => [
   ...faceBase(c, 0),
-  L("star", -13.5, -9, 15, 15, { fill: GOLD }, { j: 2, hold: { type: "spin", turns: 1 } }),
-  L("star", 13.5, -9, 15, 15, { fill: GOLD }, { j: 3, hold: { type: "spin", turns: 1 } }),
+  L("ka-star", -14.5, -11, 16, 16, { fill: GOLD }, { j: 2, hold: { type: "spin", turns: 1 } }),
+  L("ka-star", 14.5, -11, 16, 16, { fill: GOLD }, { j: 3, hold: { type: "spin", turns: 1 } }),
   ...laughM(c, 4),
   ...cheeks(c, 5),
 ];
-const specWink = (c) => [
-  ...faceBase(c, 0),
-  /* left dot eye blinks, right eye is a static wink arc */
-  L("ellipse", -13.5, -9, 7.5, 10, { fill: FEAT }, { j: 2, tr: { opacity: blinkTr(c.D, Math.round(c.D * 0.52)).open } }),
-  L("ellipse", -13.5, -6.5, 10, 5, { fill: FEAT }, { j: 2, in: "none", out: false, tr: { opacity: blinkTr(c.D, Math.round(c.D * 0.52)).closed } }),
-  L("ellipse", 13.5, -9, 11, 9, { fill: FEAT }, { j: 3 }),
-  L("ellipse", 13.5, -4.5, 12.5, 10, { fill: c.color }, { j: 3 }),
-  brow(4, 13, -19, -14),
-  ...smirkM(c, 5),
-  ...cheeks(c, 6, 9),
-];
+const specWink = (c) => {
+  const tb = Math.round(c.D * 0.52);
+  const pair = blinkTr(c.D, tb);
+  return [
+    ...faceBase(c, 0),
+    /* left dot eye blinks, right eye is a static happy arc */
+    L("ka-eye", -14.5, -11, 11, 11, { fill: FEAT }, { j: 2, tr: { opacity: pair.open } }),
+    L("ka-eye-shut", -14.5, -8.5, 12, 12, { fill: FEAT }, { j: 2, in: "none", out: false, tr: { opacity: pair.closed } }),
+    L("ka-eye-arc", 14.5, -11, 12.5, 12.5, { fill: FEAT }, { j: 3 }),
+    brow(4, 13, -21, -12),
+    ...smirkM(c, 5),
+    ...cheeks(c, 6, 7),
+  ];
+};
 const specParty = (c) => [
   ...faceBase(c, 0),
   ...arcEyes(c, 2),
   ...laughM(c, 4),
-  /* party hat */
-  L("triangle", 6, -38, 26, 30, { fill: BLUE, rot: 12 }, { j: 6, hold: { type: "bob", amp: 2.5, period: 900 } }),
-  L("rect", 6, -34, 21, 4, { fill: PURE, cr: 49, rot: 12 }, { j: 7 }),
-  L("rect", 7, -42, 13, 4, { fill: GOLD, cr: 49, rot: 12 }, { j: 7 }),
-  L("ellipse", 9.5, -53, 9, 9, { fill: PINK }, { j: 8, hold: { type: "bob", amp: 3, period: 900 } }),
-  /* confetti bits drift up */
-  L("rect", -30, -24, 6, 6, { fill: GOLD, rot: 24 }, { j: 9, in: "none", out: false, tr: driftTr(c, -30, -24, -4, -14, 1100) }),
-  L("ellipse", 32, -16, 5.5, 5.5, { fill: MINT }, { j: 10, in: "none", out: false, tr: driftTr(c, 32, -16, 4, -16, 1250, { phase: 380 }) }),
-  L("rect", -36, 2, 5, 5, { fill: PINK, rot: -18 }, { j: 11, in: "none", out: false, tr: driftTr(c, -36, 2, -5, -15, 1000, { phase: 700 }) }),
+  /* tilted party hat: cone + stripes + pompom */
+  L("ka-hat", 8, -39, 30, 30, { fill: BLUE, rot: 14 }, { j: 6, hold: { type: "bob", amp: 2.5, period: 900 } }),
+  L("rect", 8.6, -36.5, 13, 3.4, { fill: PURE, cr: 49, rot: 14 }, { j: 7 }),
+  L("rect", 7.6, -43, 8.5, 3, { fill: GOLD, cr: 49, rot: 14 }, { j: 7 }),
+  L("ellipse", 12.5, -53.5, 8.5, 8.5, { fill: PINK }, { j: 8, hold: { type: "bob", amp: 3, period: 900 } }),
+  /* confetti drifts up around the head */
+  L("ka-conf", -30, -24, 8, 8, { fill: GOLD, rot: 24 }, { j: 9, in: "none", out: false, tr: driftTr(c, -30, -24, -4, -14, 1100) }),
+  L("ka-curl", 32, -16, 8, 8, { fill: GREEN, rot: -12 }, { j: 10, in: "none", out: false, tr: driftTr(c, 32, -16, 4, -16, 1250, { phase: 380 }) }),
+  L("ka-conf", -36, 2, 7, 7, { fill: PINK, rot: -18 }, { j: 11, in: "none", out: false, tr: driftTr(c, -36, 2, -5, -15, 1000, { phase: 700 }) }),
+  L("ka-spark", 30, 8, 6, 6, { fill: GOLD }, { j: 12, in: "none", out: false, tr: driftTr(c, 30, 8, 5, -14, 1150, { phase: 900 }) }),
 ];
 const specCry = (c) => [
   ...faceBase(c, 0),
   ...sadBrows(2),
-  ...dotEyes(c, 3, -8),
+  ...dotEyes(c, 3, -10),
   ...frownM(c, 4),
   /* big tears welling + falling from each eye */
-  ...dropS(5, -13.5, 2, 1.25, TEAR_C, { in: "none", out: false, tr: driftTr(c, -13.5, 2, 0, 24, 1150) }),
-  ...dropS(6, 13.5, 2, 1.25, TEAR_C, { in: "none", out: false, tr: driftTr(c, 13.5, 2, 0, 24, 1150, { phase: 560 }) }),
+  ...dropFly(5, -14.5, 3, 13, 0, 24, 1150, { c }),
+  ...dropFly(6, 14.5, 3, 13, 0, 24, 1150, { c, phase: 560 }),
 ];
 const specSad = (c) => [
   LG("Sad droop", [
     ...faceBase(c, 0),
     ...sadBrows(2),
-    ...dotEyes(c, 3, -8),
+    ...dotEyes(c, 3, -10),
     ...frownM(c, 4),
   ], { hold: { type: "bob", amp: 2.5, period: 1500 } }),
 ];
@@ -537,481 +822,651 @@ const specAngry = (c) => {
   return [
     ...faceBase(c, 0, { tr: { fill: [kf(tm, c.color, "easeInOutSine"), kf(tm + 320, lerpColor(c.color, "#FF4D3D", 0.28), "easeInOutSine"), kf(tm + 760, c.color, "linear")] } }),
     ...angryBrows(2),
-    ...dotEyes(c, 3, -7, { h: 8.5 }),
+    ...dotEyes(c, 3, -9, { s: 10 }),
     ...frownM(c, 4),
-    L("cross", 27, -26, 12, 12, { fill: RED, rot: 45 }, { j: 5, hold: { type: "pulse", amp: 1.18, period: 620 } }),
+    L("ka-anger", 27, -25, 13, 13, { fill: RED }, { j: 5, hold: { type: "pulse", amp: 1.18, period: 620 } }),
   ];
 };
 const specSurprised = (c) => [
   ...faceBase(c, 0),
-  brow(2, -13, -21, -6), brow(3, 13, -21, 6),
-  ...dotEyes(c, 4, -9, { w: 9.5, h: 12, hold: { type: "pulse", amp: 1.08, period: 900 } }),
-  L("ellipse", -16, -12, 3, 3, { fill: PURE, op: 0.85 }, { j: 5, hold: { type: "pulse", amp: 1.08, period: 900 } }),
-  L("ellipse", 11, -12, 3, 3, { fill: PURE, op: 0.85 }, { j: 5, hold: { type: "pulse", amp: 1.08, period: 900 } }),
-  ...oMouth(c, 6, 15, 12, 14, { hold: { type: "pulse", amp: 1.14, period: 900 } }),
+  brow(2, -14, -22, -8), brow(3, 14, -22, 8),
+  ...dotEyes(c, 4, -11, { s: 13, hold: { type: "pulse", amp: 1.08, period: 900 } }),
+  L("ellipse", -16.5, -13.5, 3, 3, { fill: PURE, op: 0.85 }, { j: 5, hold: { type: "pulse", amp: 1.08, period: 900 } }),
+  L("ellipse", 12.5, -13.5, 3, 3, { fill: PURE, op: 0.85 }, { j: 5, hold: { type: "pulse", amp: 1.08, period: 900 } }),
+  ...oMouth(c, 6, 17, 13.5, 16, { hold: { type: "pulse", amp: 1.14, period: 900 } }),
 ];
 const specNeutral = (c) => [
   LG("Neutral idle", [
     ...faceBase(c, 0),
-    ...dotEyes(c, 2, -9, { blink: true }),
+    ...dotEyes(c, 2, -11, { blink: true }),
     ...flatM(c, 4),
   ], { hold: { type: "bob", amp: 1.8, period: 1500 } }),
 ];
 const specSleepy = (c) => [
   ...faceBase(c, 0),
   ...shutEyes(c, 2),
-  ...oMouth(c, 4, 16, 7, 8),
+  ...oMouth(c, 4, 17, 7.5, 8.5),
   /* snot bubble */
-  L("ellipse", 19, 6, 13, 13, { fill: "#BFE8FF", op: 0.9 }, { j: 5, hold: { type: "pulse", amp: 1.22, period: 1150 } }),
-  L("ellipse", 13.5, 11, 5, 5, { fill: "#BFE8FF", op: 0.9 }, { j: 5, hold: { type: "pulse", amp: 1.22, period: 1150 } }),
+  L("ellipse", 20, 6, 13, 13, { fill: "#BFE8FF", op: 0.9 }, { j: 5, hold: { type: "pulse", amp: 1.22, period: 1150 } }),
+  L("ellipse", 14.5, 11.5, 5, 5, { fill: "#BFE8FF", op: 0.9 }, { j: 5, hold: { type: "pulse", amp: 1.22, period: 1150 } }),
   /* floating Z's */
-  LT("Z", 24, -18, 11, { fill: "#7FC4FF", fw: 800 }, { j: 6, in: "none", out: false, tr: driftTr(c, 24, -18, 7, -12, 1400, { ro: 0.95 }) }),
-  LT("Z", 32, -28, 14, { fill: "#7FC4FF", fw: 800 }, { j: 7, in: "none", out: false, tr: driftTr(c, 32, -28, 8, -13, 1400, { phase: 460, ro: 0.95 }) }),
-  LT("Z", 41, -39, 17, { fill: "#7FC4FF", fw: 800 }, { j: 8, in: "none", out: false, tr: driftTr(c, 41, -39, 8, -13, 1400, { phase: 920, ro: 0.95 }) }),
+  LT("Z", 29, -16, 10, { fill: "#7FC4FF", fw: 800 }, { j: 6, in: "none", out: false, tr: driftTr(c, 29, -16, 8, -12, 1400, { ro: 0.95 }) }),
+  LT("Z", 37, -26, 13, { fill: "#7FC4FF", fw: 800 }, { j: 7, in: "none", out: false, tr: driftTr(c, 37, -26, 8, -13, 1400, { phase: 460, ro: 0.95 }) }),
+  LT("Z", 46, -37, 16, { fill: "#7FC4FF", fw: 800 }, { j: 8, in: "none", out: false, tr: driftTr(c, 46, -37, 8, -13, 1400, { phase: 920, ro: 0.95 }) }),
 ];
 const specCool = (c) => [
   ...faceBase(c, 0),
-  /* sunglasses */
-  L("rect", -12.5, -9, 19, 13, { fill: NAVY, cr: 40 }, { j: 2 }),
-  L("rect", 12.5, -9, 19, 13, { fill: NAVY, cr: 40 }, { j: 3 }),
-  L("rect", 0, -10.5, 8, 3.5, { fill: NAVY, cr: 49 }, { j: 4 }),
-  L("rect", -24.5, -11, 6, 3, { fill: NAVY, cr: 49, rot: 14 }, { j: 4 }),
-  L("rect", 24.5, -11, 6, 3, { fill: NAVY, cr: 49, rot: -14 }, { j: 4 }),
+  L("ka-shades", 0, -10, 46, 46, { fill: NAVY }, { j: 2 }),
+  /* temple arms */
+  L("rect", -23.5, -12, 6, 3, { fill: NAVY, cr: 49, rot: 18 }, { j: 3 }),
+  L("rect", 23.5, -12, 6, 3, { fill: NAVY, cr: 49, rot: -18 }, { j: 3 }),
   /* glint sweeping the left lens */
-  L("rect", -15, -9, 2.6, 9, { fill: PURE, op: 0.85, rot: 22 }, { j: 5, in: "none", out: false, tr: driftTr(c, -15, -9, 7, 0, 1500, { ro: 0.9 }) }),
-  ...smirkM(c, 6),
-  ...cheeks(c, 7, 10),
+  L("rect", -12, -10, 2.8, 10, { fill: PURE, op: 0.8, rot: 22 }, { j: 4, in: "none", out: false, tr: driftTr(c, -12, -10, 8, 0, 1500, { ro: 0.85 }) }),
+  ...smirkM(c, 5),
+  ...cheeks(c, 6, 8),
 ];
 const specAngel = (c) => [
   ...faceBase(c, 0),
   ...arcEyes(c, 2),
   ...smileM(c, 4),
   ...cheeks(c, 5),
-  L("ellipse", 0, -43, 30, 9.5, { fill: "none", fm: "stroke", sC: GOLD, sW: 5 }, { j: 6, hold: { type: "bob", amp: 3, period: 1300 } }),
+  L("ka-halo", 0, -44, 34, 34, { fill: GOLD }, { j: 6, hold: { type: "bob", amp: 3, period: 1300 } }),
 ];
-const specDevil = (c) => {
-  c.faceShade = tone(c.color, -0.28);
-  return [
-    LG("Devil sway", [
-      ...faceBase(c, 0),
-      L("triangle", -20, -33, 13, 17, { fill: "#D64545", rot: -16 }, { j: 1, hold: { type: "pulse", amp: 1.08, period: 1100 } }),
-      L("triangle", 20, -33, 13, 17, { fill: "#D64545", rot: 16 }, { j: 2, hold: { type: "pulse", amp: 1.08, period: 1100 } }),
-      brow(3, -12, -18, 16), brow(4, 12, -18, -16),
-      ...dotEyes(c, 5, -8, { h: 8.5 }),
-      ...smirkM(c, 6),
-    ], { hold: { type: "rock", amp: 2.5, period: 1100 } }),
-  ];
-};
+const specDevil = (c) => [
+  LG("Devil sway", [
+    ...faceBase(c, 0),
+    L("ka-horn", -20, -33, 21, 21, { fill: "#E85454", rot: -16 }, { j: 1, hold: { type: "pulse", amp: 1.08, period: 1100 } }),
+    L("ka-horn-r", 20, -33, 21, 21, { fill: "#E85454", rot: 16 }, { j: 2, hold: { type: "pulse", amp: 1.08, period: 1100 } }),
+    brow(3, -12.5, -19, 18), brow(4, 12.5, -19, -18),
+    ...dotEyes(c, 5, -9, { s: 10 }),
+    ...smirkM(c, 6),
+  ], { hold: { type: "rock", amp: 2.5, period: 1100 } }),
+];
 const specTongueOut = (c) => [
   ...faceBase(c, 0),
-  ...dotEyes(c, 2, -10, { blink: true }),
+  ...dotEyes(c, 2, -11, { blink: true }),
   /* tongue sticks out below the smile */
-  L("rect", 3, 25, 13, 17, { fill: TONGUE_C, cr: 45 }, { j: 3, hold: { type: "rock", amp: 7, period: 700 } }),
-  L("ellipse", 0, 13, 30, 22, { fill: FEAT }, { j: 4 }),
-  L("ellipse", 0, 6, 34, 22, { fill: c.color }, { j: 4 }),
+  L("ka-tongue", 4, 22, 15, 15, { fill: TONGUE_C }, { j: 3, hold: { type: "rock", amp: 7, period: 700 } }),
+  L("rect", 4, 24, 1.8, 10, { fill: FEAT, op: 0.18, cr: 49 }, { j: 3, hold: { type: "rock", amp: 7, period: 700 } }),
+  ...smileM(c, 4, 13, { s: 26 }),
 ];
-const specSick = (c) => {
-  c.faceShade = tone(c.color, -0.22);
-  return [
-    ...faceBase(c, 0),
-    ...shutEyes(c, 2, -8),
-    /* queasy squiggle mouth: two small ∩ arcs side by side */
-    L("ellipse", -6, 18, 12, 8, { fill: FEAT }, { j: 4 }),
-    L("ellipse", -6, 22.5, 13, 8, { fill: c.color }, { j: 4 }),
-    L("ellipse", 7, 18.5, 12, 8, { fill: FEAT }, { j: 4 }),
-    L("ellipse", 7, 23, 13, 8, { fill: c.color }, { j: 4 }),
-    /* cold sweat drop sliding down the temple */
-    ...dropS(5, 27, -16, 1.05, TEAR_C, { in: "none", out: false, tr: driftTr(c, 27, -16, 0, 13, 1500, { ro: 0.9 }) }),
-  ];
-};
+const specSick = (c) => [
+  ...faceBase(c, 0),
+  ...shutEyes(c, 2, -10),
+  /* queasy mouth: two small humps side by side */
+  L("ka-frown", -6, 19, 11, 11, { fill: FEAT }, { j: 4 }),
+  L("ka-frown", 7, 19.5, 11, 11, { fill: FEAT }, { j: 4 }),
+  /* cold sweat drop sliding down the temple */
+  ...dropFly(5, 27, -17, 10, 0, 13, 1500, { c, ro: 0.9 }),
+];
 const specWorried = (c) => [
   ...faceBase(c, 0),
-  brow(2, -13, -20, 2), brow(3, 13, -21, -14),
-  ...dotEyes(c, 4, -9, { hold: { type: "sway", amp: 2, period: 850 } }),
-  ...frownM(c, 5, 13),
-  ...dropS(6, 27, -15, 1.05, TEAR_C, { in: "none", out: false, tr: driftTr(c, 27, -15, 0, 13, 1350, { ro: 0.9 }) }),
+  brow(2, -13.5, -21, 4), brow(3, 13.5, -22, -16),
+  ...dotEyes(c, 4, -11, { hold: { type: "sway", amp: 2, period: 850 } }),
+  ...frownM(c, 5, 18, { s: 23 }),
+  ...dropFly(6, 27, -16, 10, 0, 13, 1350, { c, ro: 0.9 }),
 ];
 const specMindBlown = (c) => [
   ...faceBase(c, 0),
-  ...dotEyes(c, 2, -7, { w: 6, h: 8 }),
-  ...oMouth(c, 4, 16, 9, 11),
+  ...dotEyes(c, 2, -9, { s: 9 }),
+  ...oMouth(c, 4, 17, 9, 11),
   /* the blast where the crown was */
-  L("star", 0, -42, 34, 34, { fill: ORANGE }, { j: 5, hold: { type: "pulse", amp: 1.14, period: 640 } }),
-  L("star", 0, -42, 20, 20, { fill: GOLD, rot: 18 }, { j: 6, hold: { type: "pulse", amp: 1.22, period: 820 } }),
-  L("ellipse", -18, -50, 6, 6, { fill: ORANGE }, { j: 7, in: "none", out: false, tr: driftTr(c, -18, -50, -6, -12, 1050) }),
-  L("ellipse", 17, -54, 5, 5, { fill: GOLD }, { j: 8, in: "none", out: false, tr: driftTr(c, 17, -54, 6, -12, 900, { phase: 420 }) }),
-  L("ellipse", 0, -62, 4.5, 4.5, { fill: PURE }, { j: 9, in: "none", out: false, tr: driftTr(c, 0, -62, 0, -12, 1150, { phase: 700 }) }),
+  L("ka-burst", 0, -44, 36, 36, { fill: ORANGE }, { j: 5, hold: { type: "pulse", amp: 1.14, period: 640 } }),
+  L("ka-burst-in", 0, -44, 36, 36, { fill: GOLD }, { j: 6, hold: { type: "pulse", amp: 1.22, period: 820 } }),
+  L("ka-spark", -19, -52, 7, 7, { fill: ORANGE }, { j: 7, in: "none", out: false, tr: driftTr(c, -19, -52, -6, -12, 1050) }),
+  L("ka-spark", 18, -56, 6, 6, { fill: GOLD }, { j: 8, in: "none", out: false, tr: driftTr(c, 18, -56, 6, -12, 900, { phase: 420 }) }),
+  L("ka-spark", 0, -63, 5, 5, { fill: PURE }, { j: 9, in: "none", out: false, tr: driftTr(c, 0, -63, 0, -12, 1150, { phase: 700 }) }),
 ];
 
+/* ============================================================
+   REACTIONS ART — thumbs / palms / flames / arm / popper / crack
+   ============================================================ */
+/* thumbs-up: fist + long raised thumb, one silhouette (cuff separate) */
+regArt("ka-hand", [
+  ["M", -16, -8], ["C", -12, -8, -9, -10, -7, -15], ["C", -5, -20, -3, -26, 2, -27],
+  ["C", 6, -28, 8, -25, 8, -21], ["C", 8, -17, 7, -13, 6, -10], ["L", 14, -10],
+  ["C", 18, -10, 21, -8, 21, -5], ["C", 21, -3, 20, -1, 18, 0], ["C", 20, 1, 21, 3, 21, 6],
+  ["C", 21, 9, 19, 10, 17, 11], ["C", 18, 12, 19, 13, 19, 15], ["C", 19, 17, 17, 19, 14, 19],
+  ["L", -16, 19], ["Z"],
+]);
+/* open palm with four finger bumps + thumb (clap) */
+const palmCmd = [
+  ["M", -4, 17], ["L", 9, 17], ["C", 12, 17, 13, 15, 13, 12], ["L", 13, -6],
+  ["C", 13, -8, 12, -9, 10.5, -9], ["C", 9, -9, 8, -8, 8, -6], ["L", 8, -12],
+  ["C", 8, -14, 7, -15.5, 5.5, -15.5], ["C", 4, -15.5, 3, -14, 3, -12], ["L", 3, -14],
+  ["C", 3, -16, 1.5, -17.5, 0, -17.5], ["C", -1.5, -17.5, -3, -16, -3, -14], ["L", -3, -11],
+  ["C", -3, -13, -4.5, -14.5, -6, -14.5], ["C", -7.5, -14.5, -9, -13, -9, -11], ["L", -9, -2],
+  ["L", -11, -6], ["C", -12, -8, -14, -8.5, -15, -7.5], ["C", -16, -6.5, -15.5, -4.5, -14, -3],
+  ["L", -9, 6], ["C", -7, 10, -5, 13, -4, 17], ["Z"],
+];
+regArt("ka-palm", palmCmd);
+regArt("ka-palm-r", flipXCmds(palmCmd));
+/* flames — one frame, nested (outer/mid/inner share the base point) */
+const flameOuter = [
+  ["M", 0, -22], ["C", 2, -16, 6, -12, 8, -7], ["C", 10, -3, 11, 0, 11, 4],
+  ["C", 11, 12, 6, 17, 0, 17], ["C", -6, 17, -11, 12, -11, 4], ["C", -11, -1, -8, -5, -5, -9],
+  ["C", -4, -5, -2, -3, 0, -2], ["C", -2, -8, -2, -15, 0, -22], ["Z"],
+];
+regSet(
+  ["ka-flame", flameOuter],
+  ["ka-flame-mid", scaleCmds(flameOuter, 0, 17, 0.64)],
+  ["ka-flame-in", scaleCmds(flameOuter, 0, 17, 0.38)]
+);
+/* flexed arm 💪 — upper arm from the left, biceps dome, forearm
+   rising to a fist on the right, one silhouette */
+regArt("ka-arm", [
+  ["M", -22, 7], ["C", -22, 1, -18, -3, -12, -4], ["L", -1, -5], ["C", -3, -9, -1, -14, 3, -16],
+  ["C", 7, -18, 11, -15, 11, -11], ["C", 11.5, -14, 12, -16, 12, -19], ["C", 12, -23, 14, -26, 17, -26],
+  ["C", 18, -28, 21, -28, 22, -26], ["C", 24, -27, 26, -25, 26, -22], ["L", 26, -8],
+  ["C", 26, -2, 24, 3, 20, 6], ["C", 18, 9, 14, 10, 10, 11], ["L", -6, 14],
+  ["C", -15, 16, -22, 13, -22, 7], ["Z"],
+]);
+/* party popper cone */
+regArt("ka-popper", [
+  ["M", -13, 12], ["L", 9, -15], ["C", 11, -17, 14, -16, 13, -14], ["L", -2, 18],
+  ["C", -4, 20, -6, 20, -7, 18], ["Z"],
+]);
+/* heart crack zigzag band */
+regArt("ka-crack", polyRoundCmd([[-0.5, -16], [6, -6], [1.5, -2], [7, 6], [2.5, 16], [-3.5, 16], [1, 6], [-5, -2], [0.5, -6], [-6.5, -16]], 1));
+
 /* ---------- REACTIONS (9) ---------- */
-const specHeart = (c) => [
-  L("heart", 0, 2.5, 64, 60, { fill: tone(c.color, -0.28) }, { j: 0, hold: { type: "heartbeat", period: 940 } }),
-  L("heart", 0, -1, 64, 60, { fill: c.color }, { j: 0, hold: { type: "heartbeat", period: 940 } }),
-  L("ellipse", -14, -15, 20, 10, { fill: PURE, op: 0.28, rot: -25 }, { j: 1, hold: { type: "heartbeat", period: 940 } }),
-  L("cross", 20, -18, 8, 8, { fill: PURE }, { j: 2, hold: { type: "blink", period: 1450 } }),
+const specHeart = (c) => [ /* classic shapes only — embedded in templates.js */
+  L("heart", 0, 3.6, 66, 62, { fill: tone(c.color, -0.26) }, { j: 0, hold: { type: "heartbeat", period: 940 } }),
+  L("heart", 0, -0.6, 66, 62, { fill: c.color }, { j: 0, hold: { type: "heartbeat", period: 940 } }),
+  L("ellipse", -14, -14, 13, 20, { fill: tone(c.color, 0.5), op: 0.5, rot: -28 }, { j: 1, hold: { type: "heartbeat", period: 940 } }),
+  L("star", 21, -19, 9, 9, { fill: PURE }, { j: 2, hold: { type: "blink", period: 1450 } }),
 ];
 const specThumbsUp = (c) => [
-  L("rect", -25, 12, 13, 30, { fill: BLUE, cr: 25 }, { j: 0 }),
-  L("rect", -24, 14, 13, 30, { fill: tone(BLUE, -0.22), cr: 25, op: 0.55 }, { j: 0 }),
-  L("rect", 4, 10, 34, 30, { fill: tone(c.color, -0.16), cr: 30 }, { j: 1 }),
-  L("rect", 4, 8, 34, 30, { fill: c.color, cr: 30 }, { j: 1 }),
-  L("rect", -12, -12, 13, 25, { fill: c.color, cr: 49, rot: -38 }, { j: 2, hold: { type: "bob", amp: 2.5, period: 800 } }),
-  L("rect", 13, 2, 14, 3.4, { fill: tone(c.color, -0.3), cr: 49 }, { j: 3 }),
-  L("rect", 13, 10, 14, 3.4, { fill: tone(c.color, -0.3), cr: 49 }, { j: 3 }),
-  L("rect", 13, 18, 14, 3.4, { fill: tone(c.color, -0.3), cr: 49 }, { j: 3 }),
-  L("rect", -8, -30, 3.5, 9, { fill: GOLD, cr: 49, rot: -20 }, { j: 4, hold: { type: "blink", period: 900 } }),
-  L("rect", 2, -34, 3.5, 10, { fill: GOLD, cr: 49 }, { j: 5, hold: { type: "blink", period: 1100 } }),
-  L("rect", 12, -30, 3.5, 9, { fill: GOLD, cr: 49, rot: 20 }, { j: 6, hold: { type: "blink", period: 1300 } }),
+  L("rect", -24.5, 3, 13, 32, { fill: BLUE, cr: 28 }, { j: 0 }),
+  L("rect", -23.5, 5, 13, 32, { fill: tone(BLUE, -0.2), cr: 28, op: 0.55 }, { j: 0 }),
+  L("ellipse", -24.5, -4, 3.5, 3.5, { fill: tone(BLUE, 0.45) }, { j: 1 }),
+  L("ka-hand", 5, 2, 62, 62, { fill: tone(c.color, -0.24) }, { j: 1, hold: { type: "bob", amp: 2.5, period: 800 } }),
+  L("ka-hand", 4, 0, 62, 62, { fill: c.color }, { j: 1, hold: { type: "bob", amp: 2.5, period: 800 } }),
+  /* finger grooves */
+  L("rect", 14, 0.5, 11, 3.4, { fill: tone(c.color, -0.3), cr: 49 }, { j: 2, hold: { type: "bob", amp: 2.5, period: 800 } }),
+  L("rect", 14, 9, 11, 3.4, { fill: tone(c.color, -0.3), cr: 49 }, { j: 2, hold: { type: "bob", amp: 2.5, period: 800 } }),
+  /* approval ticks */
+  L("rect", -10, -30, 3.5, 9, { fill: GOLD, cr: 49, rot: -20 }, { j: 3, hold: { type: "blink", period: 900 } }),
+  L("rect", 1, -36, 3.5, 10, { fill: GOLD, cr: 49 }, { j: 4, hold: { type: "blink", period: 1100 } }),
+  L("rect", 12, -30, 3.5, 9, { fill: GOLD, cr: 49, rot: 20 }, { j: 5, hold: { type: "blink", period: 1300 } }),
 ];
 const specClap = (c) => {
   const t0 = 720, t1 = c.D - EXIT0, per = 720;
   const clap = (side) => {
     const rot = [], xs = [];
     for (let t = t0; t + per <= t1 + 1; t += per) {
-      rot.push(kf(t, 18 * side, "easeOutQuad"), kf(t + per * 0.35, 7 * side, "easeInOutSine"), kf(t + per * 0.7, 18 * side, "linear"));
-      xs.push(kf(t, bx(17 * side, c.u), "easeOutQuad"), kf(t + per * 0.35, bx(8 * side, c.u), "easeInOutSine"), kf(t + per * 0.7, bx(17 * side, c.u), "linear"));
+      rot.push(kf(t, 16 * side, "easeOutQuad"), kf(t + per * 0.35, 6 * side, "easeInOutSine"), kf(t + per * 0.7, 16 * side, "linear"));
+      xs.push(kf(t, bx(17 * side, c.u), "easeOutQuad"), kf(t + per * 0.35, bx(9 * side, c.u), "easeInOutSine"), kf(t + per * 0.7, bx(17 * side, c.u), "linear"));
     }
-    rot.push(kf(t1, 18 * side, "linear")); xs.push(kf(t1, bx(17 * side, c.u), "linear"));
+    rot.push(kf(t1, 16 * side, "linear")); xs.push(kf(t1, bx(17 * side, c.u), "linear"));
     return { rotation: rot, x: xs };
   };
-  const hand = (side, j) => [
-    L("rect", 17 * side, 2, 20, 28, { fill: c.color, cr: 40, rot: 18 * side }, { j, tr: clap(side) }),
-    L("ellipse", 8 * side, -8, 9, 11, { fill: c.color, rot: 18 * side }, { j, tr: clap(side) }),
-    L("rect", 18 * side, 9, 12, 3, { fill: tone(c.color, -0.25), cr: 49, rot: 18 * side }, { j: j + 1, tr: clap(side) }),
-  ];
   return [
-    ...hand(-1, 0),
-    ...hand(1, 2),
-    L("rect", -6, -26, 3.5, 9, { fill: GOLD, cr: 49, rot: -24 }, { j: 4, hold: { type: "blink", period: 720 } }),
-    L("rect", 0, -29, 3.5, 10, { fill: GOLD, cr: 49 }, { j: 5, hold: { type: "blink", period: 720 } }),
-    L("rect", 6, -26, 3.5, 9, { fill: GOLD, cr: 49, rot: 24 }, { j: 6, hold: { type: "blink", period: 720 } }),
+    L("ka-palm", -18, 2, 52, 52, { fill: tone(c.color, -0.22), rot: -18 }, { j: 0, tr: clap(-1) }),
+    L("ka-palm-r", 18, 2, 52, 52, { fill: tone(c.color, -0.22), rot: 18 }, { j: 0, tr: clap(1) }),
+    L("ka-palm", -17, 0, 52, 52, { fill: c.color, rot: -18 }, { j: 1, tr: clap(-1) }),
+    L("ka-palm-r", 17, 0, 52, 52, { fill: c.color, rot: 18 }, { j: 2, tr: clap(1) }),
+    L("rect", -7, -29, 3.5, 9, { fill: GOLD, cr: 49, rot: -24 }, { j: 3, hold: { type: "blink", period: 720 } }),
+    L("rect", 0, -32, 3.5, 10, { fill: GOLD, cr: 49 }, { j: 4, hold: { type: "blink", period: 720 } }),
+    L("rect", 7, -29, 3.5, 9, { fill: GOLD, cr: 49, rot: 24 }, { j: 5, hold: { type: "blink", period: 720 } }),
   ];
 };
-const specFire = () => {
-  const sway = { type: "sway", amp: 2, period: 900 };
-  return [
-    L("ellipse", 0, 6, 44, 44, { fill: ORANGE }, { j: 0, hold: sway }),
-    L("triangle", 0, -16, 30, 38, { fill: ORANGE }, { j: 0, hold: sway }),
-    L("ellipse", 0, 9, 29, 29, { fill: "#FFB64A" }, { j: 0, hold: { type: "flicker", seed: 5 } }),
-    L("triangle", 0, -6, 19, 26, { fill: "#FFB64A" }, { j: 0, hold: { type: "flicker", seed: 5 } }),
-    L("ellipse", 0, 12, 15, 15, { fill: GOLD }, { j: 0, hold: { type: "flicker", seed: 9 } }),
-    L("triangle", 0, 4, 9, 15, { fill: GOLD }, { j: 0, hold: { type: "flicker", seed: 9 } }),
-  ];
-};
+const specFire = () => [
+  L("ka-flame", 0, 0, 62, 62, { fill: ORANGE }, { j: 0, hold: { type: "sway", amp: 2, period: 900 } }),
+  L("ka-flame-mid", 0, 0, 62, 62, { fill: "#FFB64A" }, { j: 0, hold: { type: "flicker", seed: 5 } }),
+  L("ka-flame-in", 0, 0, 62, 62, { fill: GOLD }, { j: 0, hold: { type: "flicker", seed: 9 } }),
+  L("ellipse", -3, 24, 4, 4, { fill: "#FFB64A", op: 0.9 }, { j: 1, in: "none", out: false, tr: { opacity: [kf(900, 0.9, "linear"), kf(1400, 0.2, "linear"), kf(1500, 0.9, "linear")] } }),
+];
 const specStarBadge = (c) => [
-  L("star", 0, 2, 62, 62, { fill: tone(c.color, -0.25) }, { j: 0, hold: { type: "pulse", amp: 1.06, period: 820 } }),
-  L("star", 0, -1, 62, 62, { fill: c.color }, { j: 0, hold: { type: "pulse", amp: 1.06, period: 820 } }),
-  L("ellipse", -11, -14, 16, 9, { fill: PURE, op: 0.3, rot: -25 }, { j: 1, hold: { type: "pulse", amp: 1.06, period: 820 } }),
-  L("cross", 25, -20, 8, 8, { fill: PURE }, { j: 2, hold: { type: "blink", period: 1100 } }),
-  L("cross", -26, 12, 6, 6, { fill: PURE, op: 0.8 }, { j: 3, hold: { type: "blink", period: 1400 } }),
+  L("ka-star", 0, 2.6, 66, 66, { fill: tone(c.color, -0.25) }, { j: 0, hold: { type: "pulse", amp: 1.06, period: 820 } }),
+  L("ka-star", 0, -0.6, 66, 66, { fill: c.color }, { j: 0, hold: { type: "pulse", amp: 1.06, period: 820 } }),
+  L("ka-sheen", -10, -13, 22, 22, { fill: tone(c.color, 0.5), op: 0.55, rot: -18 }, { j: 1, hold: { type: "pulse", amp: 1.06, period: 820 } }),
+  L("ka-spark", 25, -21, 9, 9, { fill: PURE }, { j: 2, hold: { type: "blink", period: 1100 } }),
+  L("ka-spark", -26, 13, 7, 7, { fill: PURE, op: 0.85 }, { j: 3, hold: { type: "blink", period: 1400 } }),
 ];
 const specHundred = (c) => [
   LT("100", 0, -8, 36, { fill: c.color, fw: 800, ff: "Archivo Black" }, { j: 0, hold: { type: "bob", amp: 3.5, period: 1000 } }),
   L("rect", 0, 17, 46, 5.5, { fill: c.color, cr: 49 }, { j: 1, hold: { type: "bob", amp: 3.5, period: 1000 } }),
   L("rect", 0, 25, 46, 5.5, { fill: tone(c.color, -0.25), cr: 49 }, { j: 2, hold: { type: "bob", amp: 3.5, period: 1000 } }),
+  L("ka-spark", 29, -22, 9, 9, { fill: GOLD }, { j: 3, hold: { type: "blink", period: 1100 } }),
+  L("ka-spark", -30, 8, 7, 7, { fill: GOLD, op: 0.85 }, { j: 4, hold: { type: "blink", period: 1400 } }),
 ];
 const specMuscles = (c) => [
-  /* flexed arm 💪: upper arm horizontal, forearm + fist rise on the right */
-  L("rect", 0, 15, 48, 18, { fill: tone(c.color, -0.18), cr: 45 }, { j: 0 }),
-  L("rect", 0, 13, 48, 18, { fill: c.color, cr: 45 }, { j: 0 }),
-  L("ellipse", 8, 2, 17, 15, { fill: c.color }, { j: 1, hold: { type: "pulse", amp: 1.08, period: 900 } }),
-  L("rect", 19, -10, 17, 30, { fill: c.color, cr: 45 }, { j: 2, hold: { type: "rock", amp: 3, period: 900 } }),
-  L("ellipse", 19, -27, 16, 15, { fill: c.color }, { j: 3, hold: { type: "rock", amp: 3, period: 900 } }),
-  L("rect", 19, -28, 9, 2.6, { fill: tone(c.color, -0.28), cr: 49 }, { j: 4, hold: { type: "rock", amp: 3, period: 900 } }),
-  L("rect", 19, -23.5, 9, 2.6, { fill: tone(c.color, -0.28), cr: 49 }, { j: 4, hold: { type: "rock", amp: 3, period: 900 } }),
-  L("ellipse", 12, 9, 7, 10, { fill: tone(c.color, -0.24), op: 0.55, rot: -15 }, { j: 5 }),
-  L("ellipse", 6, -2, 9, 5, { fill: PURE, op: 0.3, rot: -18 }, { j: 6 }),
+  L("ka-arm", 0, 3, 64, 64, { fill: tone(c.color, -0.22) }, { j: 0, hold: { type: "pulse", amp: 1.04, period: 900 } }),
+  L("ka-arm", 0, 0, 64, 64, { fill: c.color }, { j: 0, hold: { type: "pulse", amp: 1.04, period: 900 } }),
+  /* fist knuckle grooves + biceps shine */
+  L("rect", 19, -18.5, 2.6, 6, { fill: tone(c.color, -0.28), cr: 49, rot: 10 }, { j: 1, hold: { type: "pulse", amp: 1.04, period: 900 } }),
+  L("rect", 22.5, -16.5, 2.6, 5.5, { fill: tone(c.color, -0.28), cr: 49, rot: 10 }, { j: 1, hold: { type: "pulse", amp: 1.04, period: 900 } }),
+  L("ellipse", 3.5, -9.5, 9, 4.5, { fill: PURE, op: 0.32, rot: -20 }, { j: 2, hold: { type: "pulse", amp: 1.04, period: 900 } }),
 ];
 const specBrokenHeart = (c) => [
-  L("heart", 0, 2.5, 62, 58, { fill: tone(c.color, -0.32) }, { j: 0, hold: { type: "rock", amp: 3, period: 1300 } }),
-  L("heart", 0, -1, 62, 58, { fill: c.color }, { j: 0, hold: { type: "rock", amp: 3, period: 1300 } }),
-  L("bolt", 1, -1, 18, 34, { fill: tone(c.color, -0.55), rot: 6 }, { j: 1, hold: { type: "blink", period: 1600 } }),
-  L("heart", -25, -18, 10, 9, { fill: c.color, rot: -18 }, { j: 2, in: "none", out: false, tr: driftTr(c, -25, -18, -7, -9, 1250, { ro: 0.85 }) }),
-  L("heart", 25, -22, 8, 7.5, { fill: tone(c.color, -0.2), rot: 16 }, { j: 3, in: "none", out: false, tr: driftTr(c, 25, -22, 7, -9, 1100, { phase: 500, ro: 0.85 }) }),
+  L("heart", 0, 3.4, 64, 60, { fill: tone(c.color, -0.3) }, { j: 0, hold: { type: "rock", amp: 3, period: 1300 } }),
+  L("heart", 0, -0.8, 64, 60, { fill: c.color }, { j: 0, hold: { type: "rock", amp: 3, period: 1300 } }),
+  L("ka-sheen", -13, -15, 22, 22, { fill: tone(c.color, 0.45), op: 0.5, rot: -16 }, { j: 1, hold: { type: "rock", amp: 3, period: 1300 } }),
+  L("ka-crack", 1, 0, 26, 26, { fill: tone(c.color, -0.5), rot: 4 }, { j: 1, hold: { type: "rock", amp: 3, period: 1300 } }),
+  L("heart", -26, -19, 10, 9, { fill: c.color, rot: -18 }, { j: 2, in: "none", out: false, tr: driftTr(c, -26, -19, -7, -9, 1250, { ro: 0.85 }) }),
+  L("heart", 26, -23, 8, 7.5, { fill: tone(c.color, -0.2), rot: 16 }, { j: 3, in: "none", out: false, tr: driftTr(c, 26, -23, 7, -9, 1100, { phase: 500, ro: 0.85 }) }),
 ];
 const specPartyPopper = (c) => [
-  L("triangle", -8, 16, 30, 36, { fill: c.color, rot: -38 }, { j: 0, hold: { type: "rock", amp: 4, period: 900 } }),
-  L("rect", -8, 12, 20, 4.5, { fill: GOLD, cr: 49, rot: -38 }, { j: 1, hold: { type: "rock", amp: 4, period: 900 } }),
-  L("rect", -11, 22, 14, 4.5, { fill: PURE, cr: 49, rot: -38 }, { j: 1, hold: { type: "rock", amp: 4, period: 900 } }),
-  L("star", 12, -14, 13, 13, { fill: GOLD }, { j: 2, in: "none", out: false, tr: driftTr(c, 12, -14, 10, -10, 1150) }),
-  L("rect", 20, -2, 6, 6, { fill: BLUE, rot: 20 }, { j: 3, in: "none", out: false, tr: driftTr(c, 20, -2, 13, -7, 950, { phase: 300 }) }),
-  L("ellipse", 4, -22, 6, 6, { fill: PINK }, { j: 4, in: "none", out: false, tr: driftTr(c, 4, -22, 4, -13, 1050, { phase: 620 }) }),
-  L("rect", 28, -16, 5, 5, { fill: MINT, rot: -20 }, { j: 5, in: "none", out: false, tr: driftTr(c, 28, -16, 11, -9, 1250, { phase: 850 }) }),
-  L("ellipse", 14, 2, 5, 5, { fill: GOLD }, { j: 6, in: "none", out: false, tr: driftTr(c, 14, 2, 15, -4, 880, { phase: 150 }) }),
+  L("ka-popper", -10, 12, 50, 50, { fill: tone(c.color, -0.24), rot: -30 }, { j: 0, hold: { type: "rock", amp: 4, period: 900 } }),
+  L("ka-popper", -11, 10, 50, 50, { fill: c.color, rot: -30 }, { j: 0, hold: { type: "rock", amp: 4, period: 900 } }),
+  L("rect", -14, 8, 14, 4.6, { fill: GOLD, cr: 49, rot: -30 }, { j: 1, hold: { type: "rock", amp: 4, period: 900 } }),
+  L("rect", -8, 16, 10, 4.6, { fill: PURE, cr: 49, rot: -30 }, { j: 1, hold: { type: "rock", amp: 4, period: 900 } }),
+  /* the burst */
+  L("ka-spark", 13, -15, 12, 12, { fill: GOLD }, { j: 2, in: "none", out: false, tr: driftTr(c, 13, -15, 10, -10, 1150) }),
+  L("ka-conf", 21, -3, 7, 7, { fill: BLUE, rot: 20 }, { j: 3, in: "none", out: false, tr: driftTr(c, 21, -3, 13, -7, 950, { phase: 300 }) }),
+  L("ka-curl", 5, -23, 8, 8, { fill: PINK, rot: 12 }, { j: 4, in: "none", out: false, tr: driftTr(c, 5, -23, 4, -13, 1050, { phase: 620 }) }),
+  L("ka-conf", 29, -17, 6, 6, { fill: GREEN, rot: -20 }, { j: 5, in: "none", out: false, tr: driftTr(c, 29, -17, 11, -9, 1250, { phase: 850 }) }),
+  L("ellipse", 15, 1, 5, 5, { fill: GOLD }, { j: 6, in: "none", out: false, tr: driftTr(c, 15, 1, 15, -4, 880, { phase: 150 }) }),
 ];
+
+/* ============================================================
+   OBJECTS ART — bell / bow / trophy / rocket / cup / steam / gem /
+   balloon + string
+   ============================================================ */
+/* bell: knob + dome + flared lip, ONE silhouette */
+regArt("ka-bell", [
+  ["M", 0, -19], ["C", 2.5, -19, 4, -17.5, 4, -15.5], ["L", 4, -14], ["C", 11, -12, 15, -6, 15, 1],
+  ["L", 15, 8], ["L", 19, 12], ["C", 20.5, 13.5, 19.5, 16, 17, 16], ["L", -17, 16],
+  ["C", -19.5, 16, -20.5, 13.5, -19, 12], ["L", -15, 8], ["L", -15, 1], ["C", -15, -6, -11, -12, -4, -14],
+  ["L", -4, -15.5], ["C", -4, -17.5, -2.5, -19, 0, -19], ["Z"],
+]);
+/* gift bow loop + mirrored twin */
+const bowLoopCmd = [
+  ["M", 0, 0], ["C", -6, -9, -17, -8, -17, -1], ["C", -17, 5, -7, 6, 0, 1], ["Z"],
+];
+regArt("ka-bow", bowLoopCmd);
+regArt("ka-bow-r", flipXCmds(bowLoopCmd));
+/* trophy: cup + stem + base one silhouette; handles share the frame */
+regSet(
+  ["ka-trophy", [
+    ["M", -15, -17], ["L", 15, -17], ["L", 15, -6], ["C", 15, 4, 9, 9, 4, 10], ["L", 4, 14],
+    ["L", 9, 14], ["C", 10.5, 14, 11, 15, 11, 16.5], ["L", 11, 19], ["L", -11, 19], ["L", -11, 16.5],
+    ["C", -11, 15, -10.5, 14, -9, 14], ["L", -4, 14], ["L", -4, 10], ["C", -9, 9, -15, 4, -15, -6], ["Z"],
+  ]],
+  ["ka-trophy-hl", arcBandCmd(-18, -8, 8.5, 4.8, 90, 270)],
+  ["ka-trophy-hr", arcBandCmd(18, -8, 8.5, 4.8, -90, 90)]
+);
+/* rocket: hull one silhouette; swept fins share the frame */
+const finCmdL = [
+  ["M", -7, -1], ["C", -13, 2, -16, 8, -16, 16], ["C", -13, 13.5, -10, 12.5, -7, 12.5], ["Z"],
+];
+regSet(
+  ["ka-rocket", [
+    ["M", 0, -23], ["C", 5.5, -17, 8.5, -9, 8.5, 0], ["C", 8.5, 4, 8, 8, 6.5, 11],
+    ["L", -6.5, 11], ["C", -8, 8, -8.5, 4, -8.5, 0], ["C", -8.5, -9, -5.5, -17, 0, -23], ["Z"],
+  ]],
+  ["ka-fin-l", finCmdL],
+  ["ka-fin-r", flipXCmds(finCmdL)]
+);
+/* coffee cup + handle, one frame */
+regSet(
+  ["ka-cup", [
+    ["M", -14, -9], ["L", 14, -9], ["C", 14, -6, 14, -4, 13.5, -2], ["C", 12, 7, 8, 13, 2, 13],
+    ["L", -2, 13], ["C", -8, 13, -12, 7, -13.5, -2], ["C", -14, -4, -14, -6, -14, -9], ["Z"],
+  ]],
+  ["ka-cup-h", arcBandCmd(14.5, 1, 6, 3.8, -80, 80)]
+);
+/* steam wisp */
+regArt("ka-steam", [
+  ["M", 1, 12], ["C", -3, 8, 5, 4, 1, 0], ["C", -3, -4, 3, -7, 0, -13], ["L", 3, -14],
+  ["C", 7, -8, 0, -5, 4, -1], ["C", 8, 3, 0, 7, 4, 11], ["Z"],
+]);
+/* gem: faceted silhouette + top table + side facets (one frame) */
+regSet(
+  ["ka-gem", polyRoundCmd([[-13, -9], [13, -9], [19, 0], [0, 18], [-19, 0]], 1.8)],
+  ["ka-gem-t", polyRoundCmd([[-7.5, -9], [7.5, -9], [10.5, 0], [0, 9.5], [-10.5, 0]], 1.2)],
+  ["ka-gem-fl", [["M", -13, -9], ["L", -10.5, 0], ["L", -8, 0], ["L", -10.5, -9], ["Z"]]],
+  ["ka-gem-fr", [["M", 13, -9], ["L", 10.5, 0], ["L", 8, 0], ["L", 10.5, -9], ["Z"]]]
+);
+/* balloon: body + knot, one silhouette */
+regArt("ka-balloon", [
+  ["M", 0, -21], ["C", 9, -21, 15, -13, 15, -4], ["C", 15, 5, 8, 11, 2, 14], ["L", 3.5, 18.5],
+  ["L", -3.5, 18.5], ["L", -2, 14], ["C", -8, 11, -15, 5, -15, -4], ["C", -15, -13, -9, -21, 0, -21], ["Z"],
+]);
+/* wavy string */
+regArt("ka-string", [
+  ["M", 0, 0], ["C", 2, 5, -3, 8, -1, 13], ["C", 1, 18, -2, 21, 0, 26], ["L", -1.8, 26],
+  ["C", -3.5, 21, 0, 18, -2, 13], ["C", -4, 8, 1, 5, -1.5, 0], ["Z"],
+]);
 
 /* ---------- OBJECTS (8) ---------- */
 const specBell = (c) => [
   LG("Bell swing", [
-    L("ellipse", 0, -27, 9, 8, { fill: tone(c.color, -0.2) }, { j: 0 }),
-    L("ellipse", 0, -4, 38, 36, { fill: tone(c.color, -0.22) }, { j: 0 }),
-    L("ellipse", 0, -6, 38, 36, { fill: c.color }, { j: 0 }),
-    L("rect", 0, 14, 48, 17, { fill: tone(c.color, -0.22), cr: 40 }, { j: 1 }),
-    L("rect", 0, 12, 48, 17, { fill: c.color, cr: 40 }, { j: 1 }),
-    L("ellipse", -9, -14, 12, 16, { fill: PURE, op: 0.25, rot: -18 }, { j: 2 }),
-    L("ellipse", 0, 26, 12, 12, { fill: "#E8890C" }, { j: 3, hold: { type: "sway", amp: 3, period: 760 } }),
+    L("ka-bell", 0, -0.5, 62, 62, { fill: tone(c.color, -0.22) }, { j: 0 }),
+    L("ka-bell", 0, -3.5, 62, 62, { fill: c.color }, { j: 0 }),
+    L("ka-sheen", -8, -12, 20, 20, { fill: tone(c.color, 0.5), op: 0.5, rot: -10 }, { j: 1 }),
+    L("ellipse", 0, 17.5, 10, 10, { fill: tone(c.color, -0.38) }, { j: 2, hold: { type: "sway", amp: 3, period: 760 } }),
   ], { hold: { type: "rock", amp: 6, period: 760 } }),
-  L("rect", -33, -12, 3.6, 10, { fill: GOLD, cr: 49, rot: -32 }, { j: 4, hold: { type: "blink", period: 780 } }),
-  L("rect", -36, 2, 3.6, 10, { fill: GOLD, cr: 49, rot: -68 }, { j: 5, hold: { type: "blink", period: 920 } }),
-  L("rect", 33, -12, 3.6, 10, { fill: GOLD, cr: 49, rot: 32 }, { j: 6, hold: { type: "blink", period: 780 } }),
-  L("rect", 36, 2, 3.6, 10, { fill: GOLD, cr: 49, rot: 68 }, { j: 7, hold: { type: "blink", period: 920 } }),
+  L("rect", -31, -10, 3.6, 10, { fill: GOLD, cr: 49, rot: -32 }, { j: 3, hold: { type: "blink", period: 780 } }),
+  L("rect", -34, 3, 3.6, 10, { fill: GOLD, cr: 49, rot: -68 }, { j: 4, hold: { type: "blink", period: 920 } }),
+  L("rect", 31, -10, 3.6, 10, { fill: GOLD, cr: 49, rot: 32 }, { j: 5, hold: { type: "blink", period: 780 } }),
+  L("rect", 34, 3, 3.6, 10, { fill: GOLD, cr: 49, rot: 68 }, { j: 6, hold: { type: "blink", period: 920 } }),
 ];
 const specGift = (c) => [
-  L("rect", 0, 13, 46, 32, { fill: tone(c.color, -0.24), cr: 14 }, { j: 0 }),
-  L("rect", 0, 11, 46, 32, { fill: c.color, cr: 14 }, { j: 0 }),
+  L("rect", 0, 13, 46, 32, { fill: tone(c.color, -0.24), cr: 12 }, { j: 0 }),
+  L("rect", 0, 11, 46, 32, { fill: c.color, cr: 12 }, { j: 0 }),
   L("rect", 0, 11, 10, 32, { fill: GOLD }, { j: 1 }),
+  L("rect", 0, 24.5, 46, 4, { fill: tone(c.color, -0.32), cr: 2, op: 0.5 }, { j: 1 }),
   LG("Lid pop", [
-    L("rect", 0, -9, 54, 15, { fill: tone(c.color, -0.24), cr: 18 }, { j: 2 }),
-    L("rect", 0, -11, 54, 15, { fill: c.color, cr: 18 }, { j: 2 }),
+    L("rect", 0, -9, 54, 15, { fill: tone(c.color, -0.24), cr: 16 }, { j: 2 }),
+    L("rect", 0, -11, 54, 15, { fill: c.color, cr: 16 }, { j: 2 }),
     L("rect", 0, -11, 10, 15, { fill: GOLD }, { j: 3 }),
-    L("ellipse", -8, -24, 14, 9, { fill: GOLD, rot: -28 }, { j: 4, hold: { type: "pulse", amp: 1.1, period: 720 } }),
-    L("ellipse", 8, -24, 14, 9, { fill: GOLD, rot: 28 }, { j: 4, hold: { type: "pulse", amp: 1.1, period: 720 } }),
-    L("ellipse", 0, -21, 7, 6, { fill: tone(GOLD, -0.25) }, { j: 5 }),
+    L("ka-bow", -6.5, -22, 18, 18, { fill: GOLD, rot: -6 }, { j: 4, hold: { type: "pulse", amp: 1.1, period: 720 } }),
+    L("ka-bow-r", 6.5, -22, 18, 18, { fill: GOLD, rot: 6 }, { j: 4, hold: { type: "pulse", amp: 1.1, period: 720 } }),
+    L("ellipse", 0, -20.5, 6.5, 6, { fill: tone(GOLD, -0.22) }, { j: 5 }),
   ], { tr: hopTr(c, by(0, c.u), -7, Math.round(c.D * 0.55)) }),
 ];
 const specTrophy = (c) => [
-  L("ellipse", -25, -10, 17, 19, { fill: "none", fm: "stroke", sC: tone(c.color, -0.15), sW: 5.5 }, { j: 0 }),
-  L("ellipse", 25, -10, 17, 19, { fill: "none", fm: "stroke", sC: tone(c.color, -0.15), sW: 5.5 }, { j: 0 }),
-  L("rect", 0, -6, 40, 32, { fill: tone(c.color, -0.22), cr: 28 }, { j: 1 }),
-  L("rect", 0, -8, 40, 32, { fill: c.color, cr: 28 }, { j: 1 }),
-  L("star", 0, -9, 14, 14, { fill: PURE, op: 0.92 }, { j: 2 }),
-  L("rect", 0, 14, 10, 13, { fill: tone(c.color, -0.15) }, { j: 3 }),
-  L("rect", 0, 25, 32, 9, { fill: tone(c.color, -0.28), cr: 25 }, { j: 4 }),
-  L("rect", -4, -8, 3.6, 22, { fill: PURE, op: 0.55, rot: 18 }, { j: 5, in: "none", out: false, tr: driftTr(c, -10, -8, 18, 0, 1600, { ro: 0.55 }) }),
+  L("ka-trophy-hl", 0, 1.5, 60, 60, { fill: tone(c.color, -0.32) }, { j: 0 }),
+  L("ka-trophy-hr", 0, 1.5, 60, 60, { fill: tone(c.color, -0.32) }, { j: 0 }),
+  L("ka-trophy", 0, 1.5, 60, 60, { fill: tone(c.color, -0.22) }, { j: 1 }),
+  L("ka-trophy", 0, -1.5, 60, 60, { fill: c.color }, { j: 1 }),
+  L("ka-star", 0, -6.5, 15, 15, { fill: PURE, op: 0.92 }, { j: 2 }),
+  L("rect", -6, -6, 3.4, 20, { fill: PURE, op: 0.5, cr: 49, rot: 18 }, { j: 3, in: "none", out: false, tr: driftTr(c, -10, -6, 16, 0, 1600, { ro: 0.5 }) }),
 ];
 const specRocket = (c) => {
   const hover = { type: "bob", amp: 4, period: 1100 };
   return [
-    L("ellipse", 0, 36, 19, 19, { fill: ORANGE }, { j: 0, hold: { type: "flicker", seed: 6 } }),
-    L("triangle", 0, 33, 13, 17, { fill: ORANGE, rot: 180 }, { j: 0, hold: { type: "flicker", seed: 6 } }),
-    L("ellipse", 0, 37, 10, 10, { fill: GOLD }, { j: 0, hold: { type: "flicker", seed: 12 } }),
-    L("triangle", 0, 34, 7, 10, { fill: GOLD, rot: 180 }, { j: 0, hold: { type: "flicker", seed: 12 } }),
-    L("triangle", -17, 18, 15, 19, { fill: RED, rot: -90 }, { j: 1 }),
-    L("triangle", 17, 18, 15, 19, { fill: RED, rot: 90 }, { j: 2 }),
-    L("rect", 0, 0, 26, 52, { fill: tone(c.color, -0.32), cr: 45 }, { j: 3, hold: hover }),
-    L("rect", 0, -2, 26, 52, { fill: c.color, cr: 45 }, { j: 3, hold: hover }),
-    L("triangle", 0, -31, 26, 17, { fill: RED }, { j: 4, hold: hover }),
-    L("ellipse", 0, -10, 14, 14, { fill: tone(c.color, -0.35) }, { j: 5, hold: hover }),
-    L("ellipse", 0, -10, 9.5, 9.5, { fill: BLUE }, { j: 6, hold: hover }),
-    L("ellipse", -2, -12, 3, 3, { fill: PURE, op: 0.85 }, { j: 7, hold: hover }),
+    L("ka-flame", 0, 30, 26, 26, { fill: ORANGE, rot: 180 }, { j: 0, hold: { type: "flicker", seed: 6 } }),
+    L("ka-flame-in", 0, 30, 26, 26, { fill: GOLD, rot: 180 }, { j: 0, hold: { type: "flicker", seed: 12 } }),
+    L("ka-fin-l", 0, 2, 60, 60, { fill: RED }, { j: 1, hold: hover }),
+    L("ka-fin-r", 0, 2, 60, 60, { fill: RED }, { j: 1, hold: hover }),
+    L("ka-rocket", 1.2, 2, 60, 60, { fill: tone(c.color, -0.3) }, { j: 2, hold: hover }),
+    L("ka-rocket", 0, 0, 60, 60, { fill: c.color }, { j: 2, hold: hover }),
+    /* nose tip accent + porthole */
+    L("ellipse", 0, -20, 7, 5.5, { fill: RED }, { j: 3, hold: hover }),
+    L("ellipse", 0, -7, 13, 13, { fill: tone(c.color, -0.35) }, { j: 4, hold: hover }),
+    L("ellipse", 0, -7, 8.5, 8.5, { fill: BLUE }, { j: 5, hold: hover }),
+    L("ellipse", -1.8, -9, 2.6, 2.6, { fill: PURE, op: 0.85 }, { j: 6, hold: hover }),
   ];
 };
 const specLightning = (c) => [
-  L("bolt", 1.5, 2, 46, 64, { fill: tone(c.color, -0.3) }, { j: 0, hold: { type: "pulse", amp: 1.05, period: 700 } }),
-  L("bolt", 0, -1, 46, 64, { fill: c.color }, { j: 0, hold: { type: "flicker", seed: 11 } }),
-  L("ellipse", -7, -17, 8, 15, { fill: PURE, op: 0.4, rot: 14 }, { j: 1 }),
+  L("ka-bolt", 1.5, 2, 52, 52, { fill: tone(c.color, -0.3) }, { j: 0, hold: { type: "pulse", amp: 1.05, period: 700 } }),
+  L("ka-bolt", 0, -1, 52, 52, { fill: c.color }, { j: 0, hold: { type: "flicker", seed: 11 } }),
+  L("ka-sheen", -6, -14, 18, 18, { fill: tone(c.color, 0.55), op: 0.5, rot: 10 }, { j: 1 }),
 ];
 const specCoffee = (c) => [
-  L("rect", 0, 27, 54, 8, { fill: tone(c.color, -0.3), cr: 49 }, { j: 0 }),
-  L("ellipse", 24, 5, 14, 17, { fill: "none", fm: "stroke", sC: tone(c.color, -0.38), sW: 5 }, { j: 1 }),
-  L("rect", 0, 7, 42, 34, { fill: tone(c.color, -0.34), cr: 18 }, { j: 2 }),
-  L("rect", 0, 5, 42, 34, { fill: c.color, cr: 18 }, { j: 2 }),
-  L("ellipse", 0, -9, 34, 11, { fill: "#8A5A3B" }, { j: 3 }),
-  L("ellipse", 0, -10, 34, 10, { fill: "#A06A42" }, { j: 3 }),
-  L("rect", -6, -24, 4.5, 13, { fill: PURE, cr: 49, rot: -8 }, { j: 4, in: "none", out: false, tr: driftTr(c, -6, -24, -2, -13, 1500, { ro: 0.75 }) }),
-  L("rect", 7, -27, 4.5, 13, { fill: PURE, cr: 49, rot: 8 }, { j: 5, in: "none", out: false, tr: driftTr(c, 7, -27, 2, -13, 1500, { phase: 700, ro: 0.75 }) }),
+  L("rect", 0, 25, 50, 7, { fill: tone(c.color, -0.3), cr: 49 }, { j: 0 }),
+  L("ka-cup-h", 0, 3, 58, 58, { fill: tone(c.color, -0.5) }, { j: 1 }),
+  L("ka-cup", 0, 3, 58, 58, { fill: tone(c.color, -0.32) }, { j: 2 }),
+  L("ka-cup", 0, 1, 58, 58, { fill: c.color }, { j: 2 }),
+  L("ellipse", 0, -6.5, 24, 6.5, { fill: "#8A5A3B" }, { j: 3 }),
+  L("ellipse", 0, -7.5, 24, 5.5, { fill: "#A06A42" }, { j: 3 }),
+  L("ka-steam", -5, -20, 11, 11, { fill: PURE, op: 0.75 }, { j: 4, in: "none", out: false, tr: driftTr(c, -5, -20, -2, -11, 1500, { ro: 0.75 }) }),
+  L("ka-steam", 6, -22, 11, 11, { fill: PURE, op: 0.75 }, { j: 5, in: "none", out: false, tr: driftTr(c, 6, -22, 2, -11, 1500, { phase: 700, ro: 0.75 }) }),
 ];
 const specGem = (c) => {
   const rock = { type: "rock", amp: 3, period: 1400 };
   return [
-    L("diamond", 0, 4, 56, 48, { fill: tone(c.color, -0.25) }, { j: 0, hold: rock }),
-    L("diamond", 0, 1, 56, 48, { fill: c.color }, { j: 0, hold: rock }),
-    L("diamond", 0, -10, 30, 20, { fill: tone(c.color, 0.32), op: 0.85 }, { j: 1, hold: rock }),
-    L("rect", -9, 2, 3, 26, { fill: PURE, op: 0.4, cr: 49, rot: 28 }, { j: 2, hold: rock }),
-    L("rect", 11, 0, 3, 30, { fill: PURE, op: 0.28, cr: 49, rot: -32 }, { j: 2, hold: rock }),
-    L("cross", 25, -18, 9, 9, { fill: PURE }, { j: 3, hold: { type: "blink", period: 1200 } }),
-    L("cross", -24, 16, 6.5, 6.5, { fill: PURE, op: 0.85 }, { j: 4, hold: { type: "blink", period: 1500 } }),
+    L("ka-gem", 0, 3, 64, 64, { fill: tone(c.color, -0.25) }, { j: 0, hold: rock }),
+    L("ka-gem", 0, 0, 64, 64, { fill: c.color }, { j: 0, hold: rock }),
+    L("ka-gem-fl", 0, 0, 64, 64, { fill: tone(c.color, 0.22), op: 0.9 }, { j: 1, hold: rock }),
+    L("ka-gem-fr", 0, 0, 64, 64, { fill: tone(c.color, -0.14), op: 0.9 }, { j: 1, hold: rock }),
+    L("ka-gem-t", 0, 0, 64, 64, { fill: tone(c.color, 0.38), op: 0.85 }, { j: 1, hold: rock }),
+    L("ka-spark", 24, -17, 9, 9, { fill: PURE }, { j: 2, hold: { type: "blink", period: 1200 } }),
+    L("ka-spark", -23, 15, 7, 7, { fill: PURE, op: 0.85 }, { j: 3, hold: { type: "blink", period: 1500 } }),
   ];
 };
 const specBalloon = (c) => {
   const bob = { type: "bob", amp: 6, period: 1400 };
   return [
-    L("rect", 0, 36, 2.6, 22, { fill: tone(c.color, -0.45), cr: 49 }, { j: 0, hold: { type: "rock", amp: 8, period: 1300 } }),
-    L("triangle", 0, 22, 10, 8, { fill: tone(c.color, -0.3), rot: 180 }, { j: 1, hold: bob }),
-    L("ellipse", 0, -6, 45, 53, { fill: tone(c.color, -0.26) }, { j: 2, hold: bob }),
-    L("ellipse", 0, -8, 45, 53, { fill: c.color }, { j: 2, hold: bob }),
-    L("ellipse", -11, -22, 13, 19, { fill: PURE, op: 0.3, rot: -18 }, { j: 3, hold: bob }),
+    L("ka-string", 0, 27, 14, 14, { fill: tone(c.color, -0.45) }, { j: 0, hold: { type: "rock", amp: 6, period: 1300 } }),
+    L("ka-balloon", 1.2, -5, 56, 56, { fill: tone(c.color, -0.26) }, { j: 1, hold: bob }),
+    L("ka-balloon", 0, -7, 56, 56, { fill: c.color }, { j: 1, hold: bob }),
+    L("ka-sheen", -7, -18, 18, 18, { fill: tone(c.color, 0.5), op: 0.5, rot: -16 }, { j: 2, hold: bob }),
   ];
 };
+
+/* ============================================================
+   WEATHER ART — cloud / moon crescent
+   ============================================================ */
+/* puffy flat-bottom cloud, ONE silhouette */
+regArt("ka-cloud", [
+  ["M", -24, 11], ["L", 20, 11], ["C", 26, 11, 30, 7, 29, 2], ["C", 28, -2, 23, -4, 19, -3],
+  ["C", 19, -10, 13, -16, 5, -16], ["C", -2, -16, -7, -13, -8, -8], ["C", -13, -11, -20, -9, -22, -3],
+  ["C", -27, -2, -29, 3, -27, 7], ["C", -26, 10, -25, 11, -24, 11], ["Z"],
+]);
+/* crescent moon */
+regArt("ka-moon", [
+  ["M", 8, -15.5], ["C", -4, -12.5, -13, -5, -13, 2], ["C", -13, 10, -5, 15.5, 9, 16.5],
+  ["C", 3, 11.5, 0, 6.5, 0, 0.5], ["C", 0, -7, 3, -12.5, 8, -15.5], ["Z"],
+]);
+/* rainbow arcs — concentric bands sharing one frame */
+regSet(
+  ["ka-band-1", arcBandCmd(0, 0, 31, 9, 180, 360)],
+  ["ka-band-2", arcBandCmd(0, 0, 21, 9, 180, 360)],
+  ["ka-band-3", arcBandCmd(0, 0, 11, 9, 180, 360)]
+);
 
 /* ---------- WEATHER / NATURE (6) ---------- */
 const specSun = (c) => {
   const kids = [
-    L("ellipse", 0, 1.5, 34, 34, { fill: tone(c.color, -0.2) }, { j: 0 }),
-    L("ellipse", 0, 0, 34, 34, { fill: c.color }, { j: 0 }),
-    L("ellipse", -6, -7, 10, 6, { fill: PURE, op: 0.35, rot: -20 }, { j: 1 }),
+    L("ellipse", 0, 1.8, 38, 38, { fill: tone(c.color, -0.2) }, { j: 0 }),
+    L("ellipse", 0, 0, 38, 38, { fill: c.color }, { j: 0 }),
+    L("ka-sheen", -7, -9, 14, 14, { fill: tone(c.color, 0.55), op: 0.5, rot: -20 }, { j: 1 }),
+    L("ka-spark", 25, -22, 8, 8, { fill: PURE }, { j: 1, hold: { type: "blink", period: 1500 } }),
   ];
   for (let i = 0; i < 8; i++) {
     const a = (i * Math.PI) / 4;
-    kids.push(L("rect", Math.cos(a) * 28, Math.sin(a) * 28, 12, 5.5, { fill: c.color, cr: 49, rot: i * 45 }, { j: i + 2, stag: 60 }));
+    kids.push(L("rect", Math.cos(a) * 30, Math.sin(a) * 30, 12, 6, { fill: c.color, cr: 49, rot: i * 45 }, { j: i + 2, stag: 60 }));
   }
   return [LG("Sun rays", kids, { spin: 0.5 })];
 };
-/* cloud: shade puffs offset down + main puffs (8 layers, one j → one motion) */
-const cloudPuffs = (c, j, o = {}) => [
-  L("ellipse", -18, 10, 34, 24, { fill: lerpColor(c.color, "#8FA3C8", 0.62) }, { j, hold: o.hold }),
-  L("ellipse", 3, 0, 42, 32, { fill: lerpColor(c.color, "#8FA3C8", 0.62) }, { j, hold: o.hold }),
-  L("ellipse", 21, 12, 28, 20, { fill: lerpColor(c.color, "#8FA3C8", 0.62) }, { j, hold: o.hold }),
-  L("rect", 2, 17, 60, 15, { fill: tone(c.color, -0.3), cr: 49 }, { j, hold: o.hold }),
-  L("ellipse", -18, 7, 34, 24, { fill: c.color }, { j, hold: o.hold }),
-  L("ellipse", 3, -3, 42, 32, { fill: c.color }, { j, hold: o.hold }),
-  L("ellipse", 21, 9, 28, 20, { fill: c.color }, { j, hold: o.hold }),
-  L("rect", 2, 14, 60, 15, { fill: c.color, cr: 49 }, { j, hold: o.hold }),
+const cloudBase = (c, j, o = {}) => [
+  L("ka-cloud", 0, 3.2, 64, 64, { fill: lerpColor(c.color, "#8FA3C8", 0.55) }, { j, hold: o.hold }),
+  L("ka-cloud", 0, 0, 64, 64, { fill: c.color }, { j, hold: o.hold }),
+  L("ka-sheen", -12, -8, 17, 17, { fill: PURE, op: 0.45, rot: -14 }, { j: j + 1, hold: o.hold }),
 ];
-const specCloud = (c) => cloudPuffs(c, 0, { hold: { type: "sway", amp: 4, period: 1500 } });
+const specCloud = (c) => cloudBase(c, 0, { hold: { type: "sway", amp: 4, period: 1500 } });
 const specRain = (c) => [
-  ...cloudPuffs(c, 0),
-  ...dropS(1, -15, 27, 1.1, BLUE, { in: "none", out: false, tr: driftTr(c, -15, 27, 0, 17, 850) }),
-  ...dropS(2, 1, 29, 1.1, BLUE, { in: "none", out: false, tr: driftTr(c, 1, 29, 0, 17, 850, { phase: 280 }) }),
-  ...dropS(3, 16, 27, 1.1, BLUE, { in: "none", out: false, tr: driftTr(c, 16, 27, 0, 17, 850, { phase: 560 }) }),
+  ...cloudBase(c, 0),
+  ...dropFly(1, -14, 25, 9, 0, 16, 850, { c, fill: BLUE }),
+  ...dropFly(2, 1, 27, 9, 0, 16, 850, { c, fill: BLUE, phase: 280 }),
+  ...dropFly(3, 15, 25, 9, 0, 16, 850, { c, fill: BLUE, phase: 560 }),
 ];
 const specRainbow = () => {
   const bob = { type: "bob", amp: 2.5, period: 1300 };
   return [
-    L("ellipse", 0, 34, 84, 84, { fill: "none", fm: "stroke", sC: RED, sW: 8 }, { j: 0, in: "rise" }),
-    L("ellipse", 0, 34, 66, 66, { fill: "none", fm: "stroke", sC: GOLD, sW: 8 }, { j: 1, in: "rise" }),
-    L("ellipse", 0, 34, 48, 48, { fill: "none", fm: "stroke", sC: BLUE, sW: 8 }, { j: 2, in: "rise" }),
-    /* cloud bank hides the lower half of the rings */
-    L("rect", 0, 40, 92, 26, { fill: "#C7D3E8", cr: 49 }, { j: 3, hold: bob }),
-    L("ellipse", -28, 30, 30, 20, { fill: PURE }, { j: 4, hold: bob }),
-    L("ellipse", 0, 27, 36, 24, { fill: PURE }, { j: 4, hold: bob }),
-    L("ellipse", 28, 30, 30, 20, { fill: PURE }, { j: 4, hold: bob }),
-    L("rect", 0, 38, 92, 26, { fill: PURE, cr: 49 }, { j: 4, hold: bob }),
+    L("ka-band-1", 0, 32, 80, 80, { fill: RED }, { j: 0, in: "rise" }),
+    L("ka-band-2", 0, 32, 80, 80, { fill: GOLD }, { j: 1, in: "rise" }),
+    L("ka-band-3", 0, 32, 80, 80, { fill: BLUE }, { j: 2, in: "rise" }),
+    /* cloud banks at the arc feet */
+    L("ka-cloud", -27, 27, 26, 26, { fill: PURE }, { j: 3, hold: bob }),
+    L("ka-cloud", 27, 27, 26, 26, { fill: PURE }, { j: 3, hold: bob }),
   ];
 };
 const specMoon = (c) => {
   const bob = { type: "bob", amp: 3, period: 1500 };
   return [
-    L("ellipse", 0, 2, 58, 58, { fill: tone(c.color, -0.16) }, { j: 0, hold: bob }),
-    L("ellipse", 0, 0, 58, 58, { fill: c.color }, { j: 0, hold: bob }),
-    L("ellipse", -12, -10, 11, 11, { fill: tone(c.color, -0.22), op: 0.8 }, { j: 1, hold: bob }),
-    L("ellipse", 10, 6, 14, 14, { fill: tone(c.color, -0.22), op: 0.8 }, { j: 1, hold: bob }),
-    L("ellipse", -5, 17, 8, 8, { fill: tone(c.color, -0.22), op: 0.8 }, { j: 1, hold: bob }),
-    L("star", 29, -23, 9, 9, { fill: GOLD }, { j: 2, hold: { type: "blink", period: 1200 } }),
-    L("star", 36, 9, 6.5, 6.5, { fill: GOLD, op: 0.85 }, { j: 3, hold: { type: "blink", period: 1600 } }),
+    L("ka-moon", 1.5, 1.5, 60, 60, { fill: tone(c.color, -0.16) }, { j: 0, hold: bob }),
+    L("ka-moon", 0, 0, 60, 60, { fill: c.color }, { j: 0, hold: bob }),
+    L("ellipse", -5, -6, 6, 6, { fill: tone(c.color, -0.14), op: 0.8 }, { j: 1, hold: bob }),
+    L("ellipse", -6, 6, 4.5, 4.5, { fill: tone(c.color, -0.14), op: 0.8 }, { j: 1, hold: bob }),
+    L("ellipse", 3, 12, 3.5, 3.5, { fill: tone(c.color, -0.14), op: 0.8 }, { j: 1, hold: bob }),
+    L("ka-spark", 26, -20, 9, 9, { fill: GOLD }, { j: 2, hold: { type: "blink", period: 1200 } }),
+    L("ka-spark", 32, 8, 7, 7, { fill: GOLD, op: 0.85 }, { j: 3, hold: { type: "blink", period: 1600 } }),
   ];
 };
 const specStorm = (c) => [
-  ...cloudPuffs(c, 0),
-  L("bolt", 1, 25, 17, 26, { fill: tone(GOLD, -0.3) }, { j: 1, hold: { type: "flicker", seed: 8 } }),
-  L("bolt", 0, 24, 17, 26, { fill: GOLD }, { j: 1, hold: { type: "flicker", seed: 8 } }),
-  ...dropS(2, -16, 26, 1, BLUE, { in: "none", out: false, tr: driftTr(c, -16, 26, 0, 15, 900) }),
-  ...dropS(3, 16, 26, 1, BLUE, { in: "none", out: false, tr: driftTr(c, 16, 26, 0, 15, 900, { phase: 450 }) }),
+  ...cloudBase(c, 0),
+  L("ka-bolt", 1, 22, 22, 22, { fill: tone(GOLD, -0.3) }, { j: 1, hold: { type: "flicker", seed: 8 } }),
+  L("ka-bolt", 0, 21, 22, 22, { fill: GOLD }, { j: 1, hold: { type: "flicker", seed: 8 } }),
+  ...dropFly(2, -15, 24, 8, 0, 14, 900, { c, fill: BLUE }),
+  ...dropFly(3, 15, 24, 8, 0, 14, 900, { c, fill: BLUE, phase: 450 }),
 ];
+
+/* ============================================================
+   MEDIA ART — bubble / flap / handset / note / play / mic cradle
+   ============================================================ */
+/* chat bubble: rounded body + tail, one silhouette */
+regArt("ka-bubble", [
+  ["M", -20, -13], ["C", -26, -13, -29, -10, -29, -5], ["L", -29, 3], ["C", -29, 8, -26, 11, -20, 11],
+  ["L", -9, 11], ["L", -14, 19], ["L", -3, 11], ["L", 20, 11], ["C", 26, 11, 29, 8, 29, 3],
+  ["L", 29, -5], ["C", 29, -10, 26, -13, 20, -13], ["Z"],
+]);
+/* envelope flap (the V) */
+regArt("ka-flap", [
+  ["M", -19, -9], ["L", 19, -9], ["L", 19, -6], ["C", 12, 0.5, 6, 3.5, 0, 3.5],
+  ["C", -6, 3.5, -12, 0.5, -19, -6], ["Z"],
+]);
+/* phone handset — crescent with round ear/mouth caps */
+regArt("ka-handset", arcBandCmd(0, 4, 16.5, 8.5, 200, 340));
+/* music note: stems + slanted beam + heads, ONE aligned frame */
+regSet(
+  ["ka-note", [
+    ["M", -6, -14], ["C", -6, -15, -5, -15.6, -4, -15.4], ["L", 14, -18.4], ["C", 15.4, -18.7, 16, -18, 16, -16.8],
+    ["L", 16, 5], ["C", 16, 6, 15, 7, 14, 7], ["L", 13, 7], ["C", 12, 7, 11, 6, 11, 5],
+    ["L", 11, -9.6], ["L", -1, -6.8], ["L", -1, 8], ["C", -1, 9, -2, 10, -3, 10], ["L", -4, 10],
+    ["C", -5, 10, -6, 9, -6, 8], ["Z"],
+  ]],
+  ["ka-note-h1", ellCmd(-3.5, 11.5, 6.6, 4.9, -18)],
+  ["ka-note-h2", ellCmd(13.5, 8.5, 6.6, 4.9, -18)]
+);
+/* play triangle, generously rounded */
+regArt("ka-play", polyRoundCmd([[-9, -13], [13, 0], [-9, 13]], 4.2));
+/* mic cradle ∪ */
+regArt("ka-cradle", arcBandCmd(0, -2, 14, 4.6, 25, 155));
 
 /* ---------- COMMUNICATION / MEDIA (8) ---------- */
 const specChat = (c) => [
-  L("triangle", -17, 20, 16, 14, { fill: tone(c.color, -0.2), rot: 180 }, { j: 0 }),
-  L("rect", 0, -3, 58, 42, { fill: tone(c.color, -0.2), cr: 30 }, { j: 0 }),
-  L("rect", 0, -5, 58, 42, { fill: c.color, cr: 30 }, { j: 0 }),
-  L("ellipse", -14, -5, 7.5, 7.5, { fill: PURE }, { j: 1, hold: { type: "bob", amp: -3.5, period: 620 } }),
-  L("ellipse", 0, -5, 7.5, 7.5, { fill: PURE }, { j: 2, hold: { type: "bob", amp: -3.5, period: 620 } }),
-  L("ellipse", 14, -5, 7.5, 7.5, { fill: PURE }, { j: 3, hold: { type: "bob", amp: -3.5, period: 620 } }),
+  L("ka-bubble", 0, 1.6, 62, 62, { fill: tone(c.color, -0.2) }, { j: 0 }),
+  L("ka-bubble", 0, -1, 62, 62, { fill: c.color }, { j: 0 }),
+  L("ellipse", -13, -4, 7.5, 7.5, { fill: PURE }, { j: 1, hold: { type: "bob", amp: -3.5, period: 620 } }),
+  L("ellipse", 0, -4, 7.5, 7.5, { fill: PURE }, { j: 2, hold: { type: "bob", amp: -3.5, period: 620 } }),
+  L("ellipse", 13, -4, 7.5, 7.5, { fill: PURE }, { j: 3, hold: { type: "bob", amp: -3.5, period: 620 } }),
 ];
 const specMail = (c) => [
   L("rect", 0, 2, 60, 42, { fill: tone(c.color, -0.34), cr: 10 }, { j: 0 }),
   L("rect", 0, 0, 60, 42, { fill: c.color, cr: 10 }, { j: 0 }),
-  L("triangle", 0, -8, 58, 26, { fill: tone(c.color, -0.44), rot: 180 }, { j: 1 }),
+  L("ka-flap", 0, -8.5, 58, 58, { fill: tone(c.color, -0.44) }, { j: 1 }),
+  L("ka-sheen", -16, -10, 16, 16, { fill: tone(c.color, 0.4), op: 0.4, rot: -16 }, { j: 1 }),
   L("ellipse", 27, -19, 15, 15, { fill: RED, fm: "both", sC: PURE, sW: 3 }, { j: 2, hold: { type: "pulse", amp: 1.16, period: 900 } }),
 ];
 const specPhone = (c) => {
   const ring = { type: "rock", amp: 7, period: 520 };
   return [
-    L("rect", 0, 0, 46, 15, { fill: tone(c.color, -0.22), cr: 49, rot: -45 }, { j: 0, hold: ring }),
-    L("rect", 0, -1.5, 46, 15, { fill: c.color, cr: 49, rot: -45 }, { j: 0, hold: ring }),
-    L("ellipse", -15, 15, 18, 18, { fill: c.color }, { j: 1, hold: ring }),
-    L("ellipse", 15, -15, 18, 18, { fill: c.color }, { j: 2, hold: ring }),
-    L("rect", 25, -25, 3.6, 10, { fill: tone(c.color, -0.35), cr: 49, rot: 45 }, { j: 3, hold: { type: "blink", period: 700 } }),
-    L("rect", 31, -31, 3.6, 10, { fill: tone(c.color, -0.35), cr: 49, rot: 45, op: 0.7 }, { j: 4, hold: { type: "blink", period: 950 } }),
+    L("ka-handset", 1.5, 2.5, 58, 58, { fill: tone(c.color, -0.22), rot: -42 }, { j: 0, hold: ring }),
+    L("ka-handset", 0, 0, 58, 58, { fill: c.color, rot: -42 }, { j: 0, hold: ring }),
+    /* signal arcs top-right */
+    L("ka-sig-1", 25, -25, 20, 20, { fill: tone(c.color, -0.25) }, { j: 1, hold: { type: "blink", period: 700 } }),
+    L("ka-sig-2", 25, -25, 33, 33, { fill: tone(c.color, -0.25), op: 0.7 }, { j: 2, hold: { type: "blink", period: 950 } }),
   ];
 };
 const specCamera = (c) => {
   const lens = { type: "pulse", amp: 1.07, period: 1100 };
   return [
-    L("rect", -13, -21, 18, 10, { fill: tone(c.color, -0.2), cr: 24 }, { j: 0 }),
+    L("rect", -12, -22, 17, 9, { fill: tone(c.color, -0.2), cr: 24 }, { j: 0 }),
     L("rect", 0, 3, 60, 42, { fill: tone(c.color, -0.22), cr: 14 }, { j: 0 }),
     L("rect", 0, 1, 60, 42, { fill: c.color, cr: 14 }, { j: 0 }),
-    L("ellipse", 2, 1, 30, 30, { fill: PURE }, { j: 1, hold: lens }),
-    L("ellipse", 2, 1, 20, 20, { fill: NAVY }, { j: 2, hold: lens }),
-    L("ellipse", -3, -4, 6, 6, { fill: PURE, op: 0.85 }, { j: 3, hold: lens }),
-    L("ellipse", 21, -13, 6, 6, { fill: tone(c.color, -0.35) }, { j: 4 }),
-    L("star", 21, -13, 13, 13, { fill: PURE }, { j: 5, hold: { type: "blink", period: 1700 } }),
+    L("rect", 0, -18.5, 60, 5, { fill: tone(c.color, -0.32), cr: 2, op: 0.6 }, { j: 1 }),
+    L("ellipse", 2, 1, 28, 28, { fill: PURE }, { j: 1, hold: lens }),
+    L("ellipse", 2, 1, 18, 18, { fill: NAVY }, { j: 2, hold: lens }),
+    L("ellipse", -2.5, -3.5, 5.5, 5.5, { fill: PURE, op: 0.85 }, { j: 3, hold: lens }),
+    L("ellipse", 21, -12, 6, 6, { fill: tone(c.color, -0.35) }, { j: 4 }),
+    L("ka-spark", 21, -12, 12, 12, { fill: PURE }, { j: 5, hold: { type: "blink", period: 1700 } }),
+    L("ka-sheen", -16, -11, 15, 15, { fill: tone(c.color, 0.4), op: 0.4, rot: -16 }, { j: 5 }),
   ];
 };
 const specMusic = (c) => [
   LG("Note groove", [
-    L("ellipse", -13, 16, 13, 10, { fill: tone(c.color, -0.22), rot: -18 }, { j: 0 }),
-    L("ellipse", -13, 14.5, 13, 10, { fill: c.color, rot: -18 }, { j: 0 }),
-    L("rect", -6, -3, 3.6, 36, { fill: c.color }, { j: 1 }),
-    L("ellipse", 13, 12, 13, 10, { fill: tone(c.color, -0.22), rot: -18 }, { j: 2 }),
-    L("ellipse", 13, 10.5, 13, 10, { fill: c.color, rot: -18 }, { j: 2 }),
-    L("rect", 20, -7, 3.6, 36, { fill: c.color }, { j: 3 }),
-    L("rect", 7, -25, 29, 6.5, { fill: c.color, cr: 49, rot: -9 }, { j: 4 }),
+    L("ka-note", 2, -0.5, 52, 52, { fill: tone(c.color, -0.22) }, { j: 0 }),
+    L("ka-note-h1", 2, -0.5, 52, 52, { fill: tone(c.color, -0.22) }, { j: 0 }),
+    L("ka-note-h2", 2, -0.5, 52, 52, { fill: tone(c.color, -0.22) }, { j: 0 }),
+    L("ka-note", 2, -2.5, 52, 52, { fill: c.color }, { j: 1 }),
+    L("ka-note-h1", 2, -2.5, 52, 52, { fill: c.color }, { j: 1 }),
+    L("ka-note-h2", 2, -2.5, 52, 52, { fill: c.color }, { j: 1 }),
   ], { hold: { type: "rock", amp: 4, period: 900 } }),
-  L("rect", -26, -14, 3.2, 8, { fill: tone(c.color, -0.3), cr: 49, rot: -28 }, { j: 5, hold: { type: "blink", period: 900 } }),
-  L("rect", 30, 14, 3.2, 8, { fill: tone(c.color, -0.3), cr: 49, rot: 28 }, { j: 6, hold: { type: "blink", period: 1150 } }),
+  L("rect", -24, -13, 3.2, 8, { fill: tone(c.color, -0.3), cr: 49, rot: -28 }, { j: 3, hold: { type: "blink", period: 900 } }),
+  L("rect", 28, 13, 3.2, 8, { fill: tone(c.color, -0.3), cr: 49, rot: 28 }, { j: 4, hold: { type: "blink", period: 1150 } }),
 ];
 const specPlay = (c) => [
   L("ellipse", 0, 0, 64, 64, { fill: "none", fm: "stroke", sC: c.color, sW: 4 }, { j: 0, in: "none", out: false, tr: rippleTr(c, 0.9, 1.35, 1500, { ro: 0.6 }) }),
-  L("ellipse", 0, 2, 64, 64, { fill: tone(c.color, -0.24) }, { j: 1 }),
+  L("ellipse", 0, 2.2, 64, 64, { fill: tone(c.color, -0.24) }, { j: 1 }),
   L("ellipse", 0, 0, 64, 64, { fill: c.color }, { j: 1 }),
-  L("ellipse", -12, -18, 18, 10, { fill: PURE, op: 0.25, rot: -22 }, { j: 2 }),
-  L("triangle", 6, 0, 22, 26, { fill: PURE, rot: 90 }, { j: 3, hold: { type: "pulse", amp: 1.09, period: 900 } }),
+  L("ka-sheen", -13, -16, 26, 26, { fill: tone(c.color, 0.5), op: 0.45, rot: -20 }, { j: 2 }),
+  L("ka-play", 3, 0, 30, 30, { fill: PURE }, { j: 3, hold: { type: "pulse", amp: 1.09, period: 900 } }),
 ];
 const specMic = (c) => {
   const bob = { type: "bob", amp: 3, period: 1200 };
   return [
-    L("rect", 0, 20, 5, 14, { fill: tone(c.color, -0.35) }, { j: 0 }),
-    L("rect", 0, 30, 26, 6, { fill: tone(c.color, -0.35), cr: 49 }, { j: 0 }),
-    L("rect", -13, 8, 4, 14, { fill: tone(c.color, -0.35), cr: 49, rot: -28 }, { j: 1 }),
-    L("rect", 13, 8, 4, 14, { fill: tone(c.color, -0.35), cr: 49, rot: 28 }, { j: 1 }),
-    L("rect", 0, -6, 24, 40, { fill: tone(c.color, -0.25), cr: 49 }, { j: 2, hold: bob }),
-    L("rect", 0, -8, 24, 40, { fill: c.color, cr: 49 }, { j: 2, hold: bob }),
-    L("rect", 0, -16, 14, 3, { fill: PURE, op: 0.45, cr: 49 }, { j: 3, hold: bob }),
-    L("rect", 0, -8, 14, 3, { fill: PURE, op: 0.45, cr: 49 }, { j: 3, hold: bob }),
+    L("rect", 0, 24, 5, 13, { fill: tone(c.color, -0.35) }, { j: 0 }),
+    L("rect", 0, 32, 26, 6, { fill: tone(c.color, -0.35), cr: 49 }, { j: 0 }),
+    L("ka-cradle", 0, 5, 46, 46, { fill: tone(c.color, -0.35) }, { j: 1, hold: bob }),
+    L("rect", 0, -8, 24, 38, { fill: tone(c.color, -0.25), cr: 49 }, { j: 2, hold: bob }),
+    L("rect", 0, -10, 24, 38, { fill: c.color, cr: 49 }, { j: 2, hold: bob }),
+    L("ka-sheen", -5, -21, 11, 11, { fill: tone(c.color, 0.45), op: 0.45, rot: -20 }, { j: 3, hold: bob }),
+    L("rect", 0, -17, 13, 2.8, { fill: PURE, op: 0.45, cr: 49 }, { j: 3, hold: bob }),
+    L("rect", 0, -10, 13, 2.8, { fill: PURE, op: 0.45, cr: 49 }, { j: 3, hold: bob }),
+    L("rect", 0, -3, 13, 2.8, { fill: PURE, op: 0.45, cr: 49 }, { j: 3, hold: bob }),
   ];
 };
-const specVolume = (c) => [
-  L("rect", -23, 0, 16, 26, { fill: c.color, cr: 20 }, { j: 0 }),
-  L("triangle", -3, 0, 26, 42, { fill: tone(c.color, -0.16), rot: 90 }, { j: 1 }),
-  L("rect", 14, 0, 6, 22, { fill: tone(c.color, -0.35), cr: 49 }, { j: 2, hold: { type: "pulse", amp: 1.28, period: 520 } }),
-  L("rect", 26, 0, 6, 34, { fill: tone(c.color, -0.35), cr: 49, op: 0.75 }, { j: 3, hold: { type: "pulse", amp: 1.16, period: 760 } }),
+const specVolume = (c) => [ /* classic shapes only — embedded in templates.js */
+  L("rect", -24, 0, 15, 26, { fill: c.color, cr: 24 }, { j: 0 }),
+  L("triangle", -3, 0, 27, 42, { fill: tone(c.color, -0.16), rot: 90 }, { j: 1 }),
+  L("ellipse", -13, -8, 5, 8, { fill: PURE, op: 0.3 }, { j: 1 }),
+  L("rect", 16, 0, 6, 22, { fill: tone(c.color, -0.32), cr: 49 }, { j: 2, hold: { type: "pulse", amp: 1.28, period: 520 } }),
+  L("rect", 27, 0, 6, 34, { fill: tone(c.color, -0.32), cr: 49, op: 0.7 }, { j: 3, hold: { type: "pulse", amp: 1.16, period: 760 } }),
 ];
+
+/* ============================================================
+   COMMERCE ART — cart / tag / pin / shackle
+   ============================================================ */
+/* shopping cart: handle + basket, one silhouette */
+regArt("ka-cart", [
+  ["M", -26, -17], ["C", -26, -19, -24, -20, -22, -20], ["L", -17, -20], ["C", -15, -20, -13, -19, -12, -17],
+  ["L", -10, -11], ["L", 20, -11], ["C", 23, -11, 24, -9, 23, -7], ["L", 20, 6], ["C", 19, 9, 17, 10, 14, 10],
+  ["L", -4, 10], ["C", -7, 10, -9, 9, -9, 6], ["L", -13, -14], ["L", -22, -14], ["C", -24, -14, -26, -15, -26, -17], ["Z"],
+]);
+/* price tag with notched corner */
+regArt("ka-tag", [
+  ["M", -15, -15], ["L", 1, -15], ["C", 3, -15, 5, -14, 6, -13], ["L", 15, -4],
+  ["C", 17, -2, 17, 1, 15, 3], ["L", 3, 15], ["C", 1, 17, -2, 17, -4, 15], ["L", -13, 6],
+  ["C", -14, 5, -15, 3, -15, 1], ["Z"],
+]);
+/* map pin: round head + point, one silhouette */
+regArt("ka-pin", [
+  ["M", 0, 17], ["C", -1.5, 12, -13, 3, -13, -5], ["C", -13, -13, -7, -17, 0, -17],
+  ["C", 7, -17, 13, -13, 13, -5], ["C", 13, 3, 1.5, 12, 0, 17], ["Z"],
+]);
+/* lock shackle ∩ */
+regArt("ka-shackle", arcBandCmd(0, 5, 10.5, 5.5, 180, 360));
+/* signal arcs (phone waves) — quarter bands */
+regArt("ka-sig-1", arcBandCmd(-9, 9, 9, 5, -90, 0));
+regArt("ka-sig-2", arcBandCmd(-9, 9, 17, 5, -90, 0));
 
 /* ---------- COMMERCE / MISC (6) ---------- */
 const specCart = (c) => {
   const roll = { type: "sway", amp: 4, period: 900 };
   return [
-    L("rect", -26, -15, 15, 5, { fill: tone(c.color, -0.3), cr: 49, rot: 24 }, { j: 0 }),
-    L("rect", 6, -18, 15, 13, { fill: GOLD, cr: 12 }, { j: 1, hold: { type: "bob", amp: 2.5, period: 800 } }),
-    L("rect", 2, -3, 48, 28, { fill: tone(c.color, -0.22), cr: 12 }, { j: 2, hold: roll }),
-    L("rect", 2, -5, 48, 28, { fill: c.color, cr: 12 }, { j: 2, hold: roll }),
-    L("rect", -6, -5, 3.4, 19, { fill: PURE, op: 0.35, cr: 49 }, { j: 3, hold: roll }),
-    L("rect", 10, -5, 3.4, 19, { fill: PURE, op: 0.35, cr: 49 }, { j: 3, hold: roll }),
-    L("ellipse", -10, 19, 11, 11, { fill: NAVY }, { j: 4 }),
-    L("ellipse", -10, 19, 4.5, 4.5, { fill: PURE, op: 0.85 }, { j: 4 }),
-    L("ellipse", 14, 19, 11, 11, { fill: NAVY }, { j: 5 }),
-    L("ellipse", 14, 19, 4.5, 4.5, { fill: PURE, op: 0.85 }, { j: 5 }),
+    L("rect", 5, -18, 14, 12, { fill: GOLD, cr: 14 }, { j: 0, hold: { type: "bob", amp: 2.5, period: 800 } }),
+    L("ka-cart", 2, 1.5, 62, 62, { fill: tone(c.color, -0.22) }, { j: 1, hold: roll }),
+    L("ka-cart", 2, -0.5, 62, 62, { fill: c.color }, { j: 1, hold: roll }),
+    /* basket grooves */
+    L("rect", 0, -2, 3, 14, { fill: tone(c.color, -0.18), op: 0.55, cr: 49 }, { j: 2, hold: roll }),
+    L("rect", 10, -2, 3, 14, { fill: tone(c.color, -0.18), op: 0.55, cr: 49 }, { j: 2, hold: roll }),
+    L("ellipse", -8, 18, 11, 11, { fill: NAVY }, { j: 3 }),
+    L("ellipse", -8, 18, 4.5, 4.5, { fill: PURE, op: 0.85 }, { j: 3 }),
+    L("ellipse", 15, 18, 11, 11, { fill: NAVY }, { j: 4 }),
+    L("ellipse", 15, 18, 4.5, 4.5, { fill: PURE, op: 0.85 }, { j: 4 }),
   ];
 };
 const specTag = (c) => [
   LG("Tag dangle", [
-    L("diamond", 1.5, 4, 50, 50, { fill: tone(c.color, -0.24) }, { j: 0 }),
-    L("diamond", 0, 1, 50, 50, { fill: c.color }, { j: 0 }),
-    L("ellipse", -9, -9, 8.5, 8.5, { fill: PURE }, { j: 1 }),
-    L("rect", -18, -18, 12, 3, { fill: tone(c.color, -0.4), cr: 49, rot: -45 }, { j: 2 }),
-    LT("%", 3, 5, 19, { fill: PURE, fw: 800 }, { j: 3 }),
+    L("rect", -17.5, -16.5, 11, 3, { fill: tone(c.color, -0.4), cr: 49, rot: -45 }, { j: 0 }),
+    L("ka-tag", 1.5, 4, 56, 56, { fill: tone(c.color, -0.24) }, { j: 0 }),
+    L("ka-tag", 0, 1, 56, 56, { fill: c.color }, { j: 0 }),
+    L("ellipse", -14, -13, 8, 8, { fill: PURE }, { j: 1 }),
+    LT("%", 3.5, 5, 19, { fill: PURE, fw: 800 }, { j: 2 }),
   ], { hold: { type: "rock", amp: 6, period: 1100 } }),
 ];
 const specPin = (c) => {
   const bounce = { type: "bounce", amp: 9, period: 1100 };
   return [
-    L("ellipse", 0, 38, 30, 7, { fill: NAVY, op: 0.18 }, { j: 0, hold: { type: "pulse", amp: 1.15, period: 1100 } }),
-    L("triangle", 0, 15, 27, 30, { fill: tone(c.color, -0.22), rot: 180 }, { j: 1, hold: bounce }),
-    L("ellipse", 0, -8, 40, 40, { fill: tone(c.color, -0.22) }, { j: 1, hold: bounce }),
-    L("triangle", 0, 13, 27, 30, { fill: c.color, rot: 180 }, { j: 1, hold: bounce }),
-    L("ellipse", 0, -10, 40, 40, { fill: c.color }, { j: 1, hold: bounce }),
-    L("ellipse", 0, -10, 14, 14, { fill: PURE }, { j: 2, hold: bounce }),
+    L("ellipse", 0, 32, 30, 7, { fill: NAVY, op: 0.18 }, { j: 0, hold: { type: "pulse", amp: 1.15, period: 1100 } }),
+    L("ka-pin", 1.2, -1, 58, 58, { fill: tone(c.color, -0.22) }, { j: 1, hold: bounce }),
+    L("ka-pin", 0, -3, 58, 58, { fill: c.color }, { j: 1, hold: bounce }),
+    L("ellipse", 0, -11, 13, 13, { fill: PURE }, { j: 2, hold: bounce }),
   ];
 };
 const specCalendar = (c) => [
@@ -1023,19 +1478,21 @@ const specCalendar = (c) => [
   ...[-13, 0, 13].flatMap((dx) => [0, 12].map((dy, i) =>
     L("rect", dx, dy, 7.5, 7.5, { fill: tone(c.color, -0.25), cr: 20 }, { j: 3 + i }))),
   L("rect", 0, 0, 7.5, 7.5, { fill: CORAL, cr: 20 }, { j: 4, hold: { type: "pulse", amp: 1.25, period: 900 } }),
+  L("ka-sheen", -15, -9, 14, 14, { fill: tone(c.color, 0.4), op: 0.4, rot: -16 }, { j: 5 }),
+  L("ka-spark", 25, -25, 8, 8, { fill: GOLD }, { j: 5, hold: { type: "blink", period: 1300 } }),
 ];
 const specLock = (c) => {
   const tm = Math.round(c.D * 0.5);
   return [
-    L("ellipse", 0, -15, 24, 28, { fill: "none", fm: "stroke", sC: tone(c.color, -0.4), sW: 6.5 }, { j: 0, tr: hopTr(c, by(-15, c.u), -4, tm) }),
+    L("ka-shackle", 0, -14, 36, 36, { fill: tone(c.color, -0.4) }, { j: 0, tr: hopTr(c, by(-14, c.u), -4, tm) }),
     L("rect", 0, 10, 44, 34, { fill: tone(c.color, -0.25), cr: 16 }, { j: 1 }),
     L("rect", 0, 8, 44, 34, { fill: c.color, cr: 16 }, { j: 1 }),
-    L("ellipse", 0, 4, 9.5, 9.5, { fill: NAVY }, { j: 2 }),
-    L("rect", 0, 13, 4.6, 11, { fill: NAVY, cr: 49 }, { j: 2 }),
-    L("ellipse", -10, -1, 12, 6, { fill: PURE, op: 0.22, rot: -20 }, { j: 3 }),
+    L("ellipse", 0, 3, 10, 10, { fill: NAVY }, { j: 2 }),
+    L("rect", 0, 12, 4.6, 12, { fill: NAVY, cr: 49 }, { j: 2 }),
+    L("ka-sheen", -11, 0, 15, 15, { fill: tone(c.color, 0.4), op: 0.4, rot: -20 }, { j: 3 }),
   ];
 };
-const specArrowUpRight = (c) => [
+const specArrowUpRight = (c) => [ /* classic shapes only — embedded in templates.js */
   L("arrow", 1.5, 2.5, 58, 42, { fill: tone(c.color, -0.25), rot: -45 }, { j: 0, hold: { type: "sway", amp: 5, period: 800 } }),
   L("arrow", 0, 0, 58, 42, { fill: c.color, rot: -45 }, { j: 0, hold: { type: "bob", amp: -5, period: 800 } }),
   L("ellipse", 8, -8, 9, 15, { fill: PURE, op: 0.32, rot: -45 }, { j: 1, hold: { type: "bob", amp: -5, period: 800 } }),
