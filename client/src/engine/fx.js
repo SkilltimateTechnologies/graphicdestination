@@ -133,6 +133,36 @@ export function formatNumber(value, format = "plain", decimals = 0) {
   return v.toFixed(dec); /* "plain" + unknown formats → legacy */
 }
 
+/* ============================================================
+   COUNTDOWN VISUAL STYLES (props.cdStyle) — rich renders for
+   countdown-MODE number layers. Pure style variants, deterministic,
+   export-safe (components/StageObject.jsx is the single render point
+   shared by preview + export). ABSENT/unknown cdStyle ⇒ "digits" ⇒
+   the legacy render path, so old projects stay byte-identical.
+   ============================================================ */
+export const CD_STYLES = [
+  { id: "digits", name: "Digits" },     /* current plain digits (legacy) */
+  { id: "flip", name: "Flip cards" },   /* digit on a dark card, center split line */
+  { id: "ring", name: "Progress ring" },/* remaining fraction as an arc around the number */
+  { id: "bar", name: "Progress bar" },  /* number + remaining-fraction bar under it */
+  { id: "boxed", name: "LED boxes" },   /* each digit in its own mono box, LED glow */
+];
+export const cdStyleOf = (P) => (P && P.mode === "countdown" && CD_STYLES.some((s) => s.id === P.cdStyle) ? P.cdStyle : "digits");
+
+/* Remaining share of a countdown run: 1 at the start, 0 at the end.
+   VALUE-based (via numberValue, so the arc/bar tracks the digits exactly
+   under any numEase): distance from the run's END value over the full
+   sweep. Countdown mode plays to→from, so this is (v − from)/(to − from)
+   = 1 − eased u; for other modes it's the distance to the target. */
+export function countdownFraction(P, time) {
+  const a = P.from, b = P.to;
+  if (!(Math.abs(b - a) > 0)) return 0;
+  const v = numberValue(P, time);
+  const endV = P.mode === "countdown" ? a : b;
+  const startV = P.mode === "countdown" ? b : a;
+  return clamp01((v - endV) / (startV - endV));
+}
+
 /* pill-preset contrast ink: dark text on light pill backgrounds
    (amber pill ⇒ dark digits), light text on dark pills. Pure WCAG
    relative-luminance on #rrggbb / #rgb — identical in editor + export. */

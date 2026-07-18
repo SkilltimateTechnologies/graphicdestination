@@ -7,7 +7,7 @@ import { Card, ChipRow, ColorKfRow, PropRow, FontControls, WorldPicker, Row, Sli
 import { EASE, EASE_LABEL } from "../../engine/easing.js";
 import { SHAPE_IDS, SHAPE_DEFS, ptsToStr } from "../../engine/shapes.js";
 import { MAPS, CONTINENT_NAMES, CONTINENTS, normHi } from "../../engine/maps.js";
-import { CONFETTI_STYLES, confettiStyleOf, NUM_FORMATS } from "../../engine/fx.js";
+import { CONFETTI_STYLES, confettiStyleOf, NUM_FORMATS, CD_STYLES, cdStyleOf } from "../../engine/fx.js";
 import { CAM_PROPS, CAM_ZOOM_MIN, CAM_ZOOM_MAX, CAM_DEPTH_MIN, CAM_DEPTH_MAX, cameraAt, camTrackHost, clampDepth } from "../../engine/camera.js";
 
 /* one-click camera presets — each writes TWO keyframes spanning the whole
@@ -288,6 +288,14 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                   {/* mode selection lives in the Number rail panel (count up / countdown / odometer insert buttons) — no duplicate chips here */}
                   <ChipRow label="Format" options={NUM_FORMATS.map((f) => [f.id, f.name])} value={sel.props.format || "plain"} onChange={(v) => patchProps(sel.id, { format: v })} wrap />
                   {(sel.props.format || "plain") === "time" && <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.5, margin: "-4px 0 8px" }}>Seconds in, mm:ss out — pairs with Countdown mode.</div>}
+                  {/* countdown visual style (props.cdStyle) — countdown-mode layers only;
+                      ring/bar progress uses the Ring color as its accent */}
+                  {sel.props.mode === "countdown" && (
+                    <ChipRow label="Cd style" options={CD_STYLES.map((s) => [s.id, s.name])} value={cdStyleOf(sel.props)} onChange={(v) => patchProps(sel.id, { cdStyle: v })} wrap />
+                  )}
+                  {sel.props.mode === "countdown" && (cdStyleOf(sel.props) === "ring" || cdStyleOf(sel.props) === "bar") && (
+                    <Row label="Accent"><input type="color" value={(sel.props.ringC || "#FFB224").slice(0, 7)} onChange={(e) => patchProps(sel.id, { ringC: e.target.value })} /></Row>
+                  )}
                   <div style={{ color: C.dim, fontSize: 11, fontWeight: 600, marginBottom: 5 }}>Style presets</div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 8 }}>
                     {NUM_STYLE_PRESETS.map((p) => {

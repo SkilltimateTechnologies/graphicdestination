@@ -1,8 +1,15 @@
 /* Sanity check: every template's buildProject() output parses and matches the
-   GraphicDestinationMotion project schema (v5), and every buildClip() returns
-   a clip-shaped payload (type "clip", children, 0-relative start, template-
-   length dur, fades, fresh ids per call) for the editor's insert-as-clip path
-   — run with: node check-templates.mjs */
+   GraphicDestinationMotion project schema (v5), every buildClip() returns a
+   clip-shaped payload (type "clip", children, 0-relative start, template-
+   length dur, fades, fresh ids per call) for the editor's insert-as-clip path,
+   and every template renders a NON-EMPTY live thumbnail frame (TemplateThumb
+   → the real StageObject, SSR) without throwing or falling back to its
+   placeholder — run with: node check-templates.mjs */
+import { build } from "vite";
+import react from "@vitejs/plugin-react";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { TEMPLATES, blankProject } from "./src/templates/templates.js";
 
 const EASE_IDS = ["linear", "easeOutQuad", "easeInQuad", "easeInOutCubic", "easeOutCubic", "easeInCubic", "easeOutBack", "easeOutElastic", "easeOutBounce", "easeInOutSine"];
@@ -142,5 +149,61 @@ const b = blankProject();
 if (b.app !== "graphic-destination-motion" || b.v !== 5 || !Array.isArray(b.objects) || b.objects.length !== 0 || b.stage.w !== 1280 || b.stage.h !== 720 || b.stage.dur !== 5000) fail("blankProject: invalid empty project");
 else ok("valid empty project");
 
-if (failures) { console.error(`\n${failures} failure(s)`); process.exit(1); }
-console.log("\nAll templates match the engine schema.");
+/* live thumbnail frames — bundle the REAL TemplateThumb (which renders the
+   template's t = 40% frame through the app's own StageObject) and SSR every
+   template: must not throw, must not fall back to the placeholder, non-empty
+   markup on the template's own stage background, ≥ 1 positioned wrapper per
+   root layer, no NaN. A deliberately broken template must degrade to the
+   accent-tinted placeholder with its initial. */
+const here = path.dirname(fileURLToPath(import.meta.url));
+const tmpDir = path.join(here, ".templates-thumb-tmp");
+async function checkThumbs() {
+  console.log("\n• live thumbnail frames (TemplateThumb → StageObject SSR)");
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+  fs.mkdirSync(tmpDir, { recursive: true });
+  const entry = path.join(tmpDir, "entry.js");
+  fs.writeFileSync(entry, [
+    `export { default as TemplateThumb } from ${JSON.stringify(path.join(here, "src", "components", "editor", "TemplateThumb.jsx"))};`,
+    `export { createElement } from "react";`,
+    `export { renderToStaticMarkup } from "react-dom/server";`,
+    "",
+  ].join("\n"));
+  await build({
+    configFile: false,
+    logLevel: "silent",
+    plugins: [react()],
+    build: { outDir: tmpDir, lib: { entry, formats: ["es"], fileName: () => "thumb.mjs" } },
+  });
+  const M = await import(pathToFileURL(path.join(tmpDir, "thumb.mjs")).href);
+  const { TemplateThumb, createElement: h, renderToStaticMarkup } = M;
+  if (!(typeof TemplateThumb === "function" || (typeof TemplateThumb === "object" && TemplateThumb !== null))) { fail("TemplateThumb export missing"); return; }
+  for (const t of TEMPLATES) {
+    let html = "", err = null;
+    try { html = renderToStaticMarkup(h(TemplateThumb, { tpl: t })); } catch (e) { err = e; }
+    if (err) { fail(`${t.id}: thumb render threw — ${err.message || err}`); continue; }
+    const proj = t.buildProject();
+    const abs = (html.match(/position:absolute/g) || []).length;
+    const probs = [];
+    if (html.includes("data-thumb-fallback")) probs.push("fell back to the placeholder");
+    if (!html.includes(`data-thumb="${t.id}"`)) probs.push("thumb marker missing");
+    if (!html.includes(`background:${proj.stage.bg}`)) probs.push(`stage bg ${proj.stage.bg} not the thumb background`);
+    if (html.includes("NaN")) probs.push("markup contains NaN");
+    if (html.length < 400) probs.push(`markup suspiciously small (${html.length} bytes)`);
+    if (abs < proj.objects.length) probs.push(`only ${abs} positioned wrappers for ${proj.objects.length} root layers`);
+    if (probs.length) fail(`${t.id}: ${probs.join(" · ")}`);
+    else ok(`${t.id}: renders at t=${Math.round(proj.stage.dur * 0.4)} (${html.length} bytes, ${proj.objects.length} layers)`);
+  }
+  /* guard: a template whose buildProject throws must degrade gracefully */
+  const broken = { id: "broken", name: "Broken", accent: "#FF6B6B", category: "X", description: "", buildProject() { throw new Error("boom"); } };
+  let bh = "", berr = null;
+  try { bh = renderToStaticMarkup(h(TemplateThumb, { tpl: broken })); } catch (e) { berr = e; }
+  if (berr) fail(`broken template crashed the guard — ${berr.message || berr}`);
+  else if (!bh.includes("data-thumb-fallback") || !bh.includes(">B<") || !bh.includes("#FF6B6B")) fail("broken template did not render the accent placeholder with its initial");
+  else ok("broken template → accent-tinted placeholder with initial");
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+}
+
+checkThumbs().then(() => {
+  if (failures) { console.error(`\n${failures} failure(s)`); process.exit(1); }
+  console.log("\nAll templates match the engine schema, and every thumbnail renders.");
+}).catch((e) => { console.error(e); fs.rmSync(tmpDir, { recursive: true, force: true }); process.exit(1); });

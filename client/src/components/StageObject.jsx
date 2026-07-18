@@ -10,7 +10,7 @@ import { ptsToStr, pathSamples, pointOnPath, morphPtsAt } from "../engine/shapes
 import { valueAt, colorAt, lerpColor, clipLocalTime, clipTransition } from "../engine/keyframes.js";
 import { cameraTransform, camTransformCss } from "../engine/camera.js";
 import { MAPS, WORLD_H, CONTINENTS, WORLD_EXT, ringsToPath, arcPath, mapBox, WORLD_D, normHi } from "../engine/maps.js";
-import { SWATCHES, CONFETTI_STYLES, confettiStyleOf, confettiLife, confettiParticles, charFx, numberValue, numberColumns, formatNumber, contrastOn, parseChart, highlightFlick, worldCameraAt } from "../engine/fx.js";
+import { SWATCHES, CONFETTI_STYLES, confettiStyleOf, confettiLife, confettiParticles, charFx, numberValue, numberColumns, formatNumber, contrastOn, parseChart, highlightFlick, worldCameraAt, cdStyleOf, countdownFraction } from "../engine/fx.js";
 
 /* ---------- on-canvas selection handles (direct manipulation) ----------
    Rendered inside the SAME transformed wrapper as the selection outline, so they
@@ -380,6 +380,81 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
     if (P.tnum) numFx.fontVariantNumeric = "tabular-nums";
     if (P.stroke) numFx.WebkitTextStroke = `${P.strokeW || 2}px ${P.stroke}`;
     if (P.glow) numFx.textShadow = `0 0 5px ${P.glow}A6, 0 0 16px ${P.glow}59, 0 0 38px ${P.glow}2E`;
+    /* countdown visual styles (props.cdStyle) — rich variants for countdown-
+       MODE layers (engine/fx.js CD_STYLES). cdStyleOf() returns "digits" for
+       absent/unknown cdStyle or non-countdown modes ⇒ those layers fall
+       through to the legacy paths below, byte-identical. All variants draw
+       the SAME value the plain path would show (formatNumber(numberValue)),
+       and ring/bar progress = countdownFraction (remaining share 1 → 0).
+       data-cdstyle/data-cd markers double as the SSR/export render hooks. */
+    const cdStyle = cdStyleOf(P);
+    if (cdStyle !== "digits") {
+      const p = countdownFraction(P, time);
+      const txt = formatNumber(Math.max(0, numberValue(P, time)), fmt, P.decimals);
+      const accent = P.ringC || "#FFB224";
+      const fontCss = { fontFamily: `'${P.fontFamily}'`, fontWeight: P.fontWeight || 700, fontSize: P.fontSize, color, lineHeight: 1, ...numFx };
+      const chars = txt.split("");
+      const affix = (a, key) => (a ? <span key={key} style={{ whiteSpace: "pre" }}>{a}</span> : null);
+      let cdBody = null;
+      if (cdStyle === "flip") {
+        /* flip-clock: every digit on a dark rounded card, split at the middle */
+        cdBody = (
+          <span style={{ display: "flex", alignItems: "center", gap: "0.09em" }}>
+            {affix(P.prefix, "pre")}
+            {chars.map((ch, i) => (ch >= "0" && ch <= "9") ? (
+              <span key={i} style={{ position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: "1em", padding: "0.07em 0.12em", background: "linear-gradient(180deg,#202634 0%,#202634 49%,#131824 51%,#131824 100%)", border: "1px solid rgba(255,255,255,.09)", borderRadius: "0.1em", boxShadow: "0 0.07em 0.2em rgba(0,0,0,.45)" }}>
+                {ch}
+                <span data-cd="split" style={{ position: "absolute", left: 0, right: 0, top: "50%", height: "0.032em", background: "rgba(0,0,0,.62)", transform: "translateY(-50%)", pointerEvents: "none" }} />
+              </span>
+            ) : <span key={i} style={{ whiteSpace: "pre" }}>{ch}</span>)}
+            {affix(P.suffix, "suf")}
+          </span>
+        );
+      } else if (cdStyle === "ring") {
+        /* progress ring: remaining fraction sweeps an arc around the number
+           (same geometry as the Counter ring below) */
+        const R = P.fontSize * 1.15;
+        const size = R * 2 + (P.ringW || 8) * 2 + 10;
+        const c = size / 2;
+        cdBody = (
+          <span style={{ position: "relative", width: size, height: size, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <svg width={size} height={size} style={{ position: "absolute", inset: 0, overflow: "visible" }}>
+              <circle cx={c} cy={c} r={R} fill="none" stroke={accent} strokeOpacity={0.16} strokeWidth={P.ringW || 8} />
+              {p > 0.0005 && <path data-cd="arc" d={arcStrokeD(c, c, R, -90, -90 + 359.9 * p)} fill="none" stroke={accent} strokeWidth={P.ringW || 8} strokeLinecap="round" style={{ filter: `drop-shadow(0 0 6px ${accent})` }} />}
+            </svg>
+            <span style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center" }}>{affix(P.prefix, "pre")}{txt}{affix(P.suffix, "suf")}</span>
+          </span>
+        );
+      } else if (cdStyle === "bar") {
+        /* number + remaining-fraction bar under it (shrinks as time runs out) */
+        const pct = Math.round(p * 1000) / 10;
+        cdBody = (
+          <span style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: "0.17em" }}>
+            <span style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>{affix(P.prefix, "pre")}{txt}{affix(P.suffix, "suf")}</span>
+            <span style={{ display: "block", height: "0.15em", minHeight: 3, borderRadius: 999, background: "rgba(255,255,255,.14)", overflow: "hidden" }}>
+              <span data-cd="fill" style={{ display: "block", width: `${pct}%`, height: "100%", borderRadius: 999, background: accent, boxShadow: `0 0 0.22em ${accent}` }} />
+            </span>
+          </span>
+        );
+      } else {
+        /* boxed — each digit in its own mono box, LED glow */
+        cdBody = (
+          <span style={{ display: "flex", alignItems: "center", gap: "0.12em" }}>
+            {affix(P.prefix, "pre")}
+            {chars.map((ch, i) => (ch >= "0" && ch <= "9") ? (
+              <span key={i} data-cd="digit" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: "1.04em", height: "1.44em", background: "#0B0E13", border: "1px solid rgba(255,255,255,.12)", borderRadius: "0.09em", boxShadow: "inset 0 0 0.24em rgba(0,0,0,.75)", fontFamily: "'JetBrains Mono'", fontVariantNumeric: "tabular-nums", textShadow: `0 0 0.14em ${color}, 0 0 0.42em ${color}66` }}>{ch}</span>
+            ) : <span key={i} style={{ whiteSpace: "pre", opacity: 0.75 }}>{ch}</span>)}
+            {affix(P.suffix, "suf")}
+          </span>
+        );
+      }
+      return (
+        <div onPointerDown={down} style={{ ...common, ...fontCss }} data-cdstyle={cdStyle}>
+          {cdBody}
+          {handles}
+        </div>
+      );
+    }
     /* formats (compact/currency/percent/time) can't be column-rolled → they
        force the plain-text path; "plain" + style "count" is the legacy text
        path (formatNumber(v,"plain",dec) === v.toFixed(dec), zero drift) */
