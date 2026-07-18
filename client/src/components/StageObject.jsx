@@ -11,7 +11,7 @@ import { valueAt, colorAt, lerpColor, clipLocalTime, clipTransition } from "../e
 import { cameraTransform, camTransformCss } from "../engine/camera.js";
 import { blurCss, blendCss } from "../engine/filters.js";
 import { MAPS, WORLD_H, CONTINENTS, WORLD_EXT, ringsToPath, arcPath, mapBox, WORLD_D, normHi } from "../engine/maps.js";
-import { SWATCHES, CONFETTI_STYLES, confettiStyleOf, confettiLife, confettiParticles, charFx, numberValue, numberColumns, formatNumber, contrastOn, parseChart, highlightFlick, worldCameraAt, cdStyleOf, countdownFraction } from "../engine/fx.js";
+import { CONFETTI_STYLES, confettiStyleOf, confettiLife, confettiParticles, charFx, numberValue, numberColumns, formatNumber, contrastOn, chartModel, highlightFlick, worldCameraAt, cdStyleOf, countdownFraction } from "../engine/fx.js";
 import { backdropModel } from "../engine/backdrops.js";
 
 /* ---------- on-canvas selection handles (direct manipulation) ----------
@@ -579,120 +579,35 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
   }
 
   if (obj.type === "chart") {
-    const data = parseChart(P.dataStr);
-    const n = data.length;
-    const W = P.w, Hh = P.h;
-    const padL = 14, padB = P.showVals ? 30 : 18, padT = 20;
-    const plotW = W - padL * 2, plotH = Hh - padT - padB;
-    const vmax = Math.max(1, ...data.map((d) => d.v));
-    const eAll = EASE.easeInOutSine(clamp01((time - P.start) / P.dur));
-    const els = [];
-    /* faint grid */
-    for (let gI = 1; gI <= 3; gI++) els.push(<line key={"g" + gI} x1={padL} x2={W - padL} y1={padT + (plotH * gI) / 4} y2={padT + (plotH * gI) / 4} stroke="#FFFFFF" strokeOpacity={0.07} />);
-    if (P.chartType === "bar" && n) {
-      const bw = Math.min(72, (plotW / n) * 0.56);
-      data.forEach((d, i) => {
-        const ui = clamp01((time - P.start - i * 110) / Math.max(300, P.dur * 0.55));
-        const eh = Math.min(1.04, EASE.easeOutBack(ui)) * (d.v / vmax) * plotH;
-        const bx = padL + (plotW / n) * (i + 0.5) - bw / 2;
-        const col = SWATCHES[i % 5];
-        els.push(<rect key={"b" + i} x={bx} y={padT + plotH - Math.max(0, eh)} width={bw} height={Math.max(0, eh)} rx={Math.min(8, bw / 4)} fill={col} style={{ filter: `drop-shadow(0 4px 10px ${col}44)` }} />);
-        els.push(<text key={"l" + i} x={bx + bw / 2} y={Hh - 4} textAnchor="middle" fill="#98A0B4" fontSize={12} fontFamily="'Inter'" fontWeight={600} opacity={eAll}>{d.l}</text>);
-        if (P.showVals) els.push(<text key={"v" + i} x={bx + bw / 2} y={padT + plotH - Math.max(0, eh) - 7} textAnchor="middle" fill="#E9EBF2" fontSize={13} fontFamily="'JetBrains Mono'" fontWeight={600} opacity={clamp01(ui * 1.4)}>{Math.round(d.v * EASE.easeOutCubic(ui))}</text>);
-      });
-    }
-    if (P.chartType === "line" && n > 1) {
-      const pts2 = data.map((d, i) => [padL + (plotW * i) / (n - 1), padT + plotH - (d.v / vmax) * plotH]);
-      const dStr = pts2.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join("");
-      const areaStr = dStr + `L${(padL + plotW).toFixed(1)} ${(padT + plotH).toFixed(1)}L${padL} ${(padT + plotH).toFixed(1)}Z`;
-      els.push(<path key="ar" d={areaStr} fill={SWATCHES[2]} fillOpacity={0.12 * eAll} />);
-      els.push(<path key="ln" d={dStr} fill="none" stroke={SWATCHES[2]} strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" pathLength={100} strokeDasharray={100} strokeDashoffset={100 * (1 - eAll)} style={{ filter: `drop-shadow(0 0 6px ${SWATCHES[2]}66)` }} />);
-      pts2.forEach((p, i) => {
-        const ui = clamp01((eAll * (n - 1) - i + 0.5) * 2);
-        els.push(<circle key={"d" + i} cx={p[0]} cy={p[1]} r={4.5 * Math.min(1.15, EASE.easeOutBack(ui))} fill="#fff" stroke={SWATCHES[2]} strokeWidth={2.5} opacity={ui} />);
-        if (P.showVals) els.push(<text key={"v" + i} x={p[0]} y={p[1] - 12} textAnchor="middle" fill="#E9EBF2" fontSize={12.5} fontFamily="'JetBrains Mono'" fontWeight={600} opacity={ui}>{data[i].v}</text>);
-        els.push(<text key={"l" + i} x={p[0]} y={Hh - 4} textAnchor="middle" fill="#98A0B4" fontSize={12} fontFamily="'Inter'" fontWeight={600} opacity={eAll}>{data[i].l}</text>);
-      });
-    }
-    if (P.chartType === "area" && n > 1) {
-      /* line's filled sibling: solid translucent fill (no gradient) + the same draw-on stroke */
-      const pts2 = data.map((d, i) => [padL + (plotW * i) / (n - 1), padT + plotH - (d.v / vmax) * plotH]);
-      const dStr = pts2.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join("");
-      const fillStr = dStr + `L${(padL + plotW).toFixed(1)} ${(padT + plotH).toFixed(1)}L${padL} ${(padT + plotH).toFixed(1)}Z`;
-      els.push(<path key="af" d={fillStr} fill={SWATCHES[3]} fillOpacity={0.3 * eAll} />);
-      els.push(<path key="al" d={dStr} fill="none" stroke={SWATCHES[3]} strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" pathLength={100} strokeDasharray={100} strokeDashoffset={100 * (1 - eAll)} style={{ filter: `drop-shadow(0 0 6px ${SWATCHES[3]}66)` }} />);
-      pts2.forEach((p, i) => {
-        const ui = clamp01((eAll * (n - 1) - i + 0.5) * 2);
-        if (P.showVals) els.push(<text key={"v" + i} x={p[0]} y={p[1] - 12} textAnchor="middle" fill="#E9EBF2" fontSize={12.5} fontFamily="'JetBrains Mono'" fontWeight={600} opacity={ui}>{data[i].v}</text>);
-        els.push(<text key={"l" + i} x={p[0]} y={Hh - 4} textAnchor="middle" fill="#98A0B4" fontSize={12} fontFamily="'Inter'" fontWeight={600} opacity={eAll}>{data[i].l}</text>);
-      });
-    }
-    if (P.chartType === "hbar" && n) {
-      /* horizontal bars: label gutter on the left, bars grow left→right with the bar stagger */
-      const gx = padL + 84;
-      const maxW = Math.max(40, W - gx - padL - (P.showVals ? 44 : 0));
-      const bh = Math.min(34, (plotH / n) * 0.58);
-      data.forEach((d, i) => {
-        const ui = clamp01((time - P.start - i * 110) / Math.max(300, P.dur * 0.55));
-        const ew = Math.min(1.04, EASE.easeOutBack(ui)) * (d.v / vmax) * maxW;
-        const by = padT + (plotH / n) * (i + 0.5) - bh / 2;
-        const col = SWATCHES[i % 5];
-        els.push(<rect key={"b" + i} x={gx} y={by} width={Math.max(0, ew)} height={bh} rx={Math.min(8, bh / 3)} fill={col} style={{ filter: `drop-shadow(0 4px 10px ${col}44)` }} />);
-        els.push(<text key={"l" + i} x={gx - 8} y={by + bh / 2 + 4} textAnchor="end" fill="#98A0B4" fontSize={12} fontFamily="'Inter'" fontWeight={600} opacity={eAll}>{d.l}</text>);
-        if (P.showVals) els.push(<text key={"v" + i} x={gx + Math.max(0, ew) + 8} y={by + bh / 2 + 4.5} fill="#E9EBF2" fontSize={12.5} fontFamily="'JetBrains Mono'" fontWeight={600} opacity={clamp01(ui * 1.4)}>{Math.round(d.v * EASE.easeOutCubic(ui))}</text>);
-      });
-    }
-    if ((P.chartType === "donut" || P.chartType === "pie") && n) {
-      const isPie = P.chartType === "pie"; /* pie = donut with the inner radius at 0 (+ per-slice % labels) */
-      const total = data.reduce((a, d) => a + d.v, 0) || 1;
-      const cx2 = W / 2, cy2 = padT + plotH / 2, R2 = Math.min(plotW, plotH) / 2 - 6;
-      const sweep = eAll * 359.9;
-      let acc = 0;
-      const slices = [];
-      data.forEach((d, i) => {
-        const a0 = (acc / total) * 359.9;
-        acc += d.v;
-        const a1 = (acc / total) * 359.9;
-        slices.push({ a0, a1 });
-        const vis0 = Math.min(a0, sweep), vis1 = Math.min(a1, sweep);
-        if (vis1 <= vis0) return;
-        els.push(<path key={"s" + i} d={arcPath(cx2, cy2, R2, -90 + vis0, -90 + vis1)} fill={SWATCHES[i % 5]} style={{ filter: `drop-shadow(0 3px 8px ${SWATCHES[i % 5]}33)` }} />);
-      });
-      if (!isPie) {
-        els.push(<circle key="hole" cx={cx2} cy={cy2} r={R2 * 0.62} fill="#12151C" />);
-        if (P.showVals) els.push(<text key="tot" x={cx2} y={cy2 + 6} textAnchor="middle" fill="#E9EBF2" fontSize={Math.max(16, R2 * 0.34)} fontFamily="'JetBrains Mono'" fontWeight={700}>{Math.round(total * EASE.easeOutCubic(eAll))}</text>);
-      } else if (P.showVals) {
-        data.forEach((d, i) => {
-          const share = d.v / total;
-          if (share < 0.045) return; /* slivers stay unlabeled */
-          const mid = -90 + (slices[i].a0 + slices[i].a1) / 2;
-          const a = (mid * Math.PI) / 180;
-          els.push(<text key={"pv" + i} x={cx2 + Math.cos(a) * R2 * 0.62} y={cy2 + Math.sin(a) * R2 * 0.62 + 4.5} textAnchor="middle" fill="#10131A" fontSize={13} fontFamily="'JetBrains Mono'" fontWeight={700} opacity={clamp01((sweep - slices[i].a1) / 30)}>{Math.round(share * 100)}%</text>);
-        });
-      }
-      data.forEach((d, i) => {
-        els.push(<circle key={"lg" + i} cx={14} cy={16 + i * 18} r={5} fill={SWATCHES[i % 5]} opacity={eAll} />);
-        els.push(<text key={"lt" + i} x={25} y={20 + i * 18} fill="#98A0B4" fontSize={11.5} fontFamily="'Inter'" fontWeight={600} opacity={eAll}>{d.l}</text>);
-      });
-    }
-    if (P.chartType === "gauge") {
-      /* single-value radial meter: first data row reads 0–100, big mono % in the middle */
-      const uAll = clamp01((time - P.start) / Math.max(1, P.dur));
-      const e = EASE.easeOutCubic(uAll);
-      const pct = clamp01((n ? data[0].v : 0) / 100);
-      const cx2 = W / 2, cy2 = padT + plotH / 2, R2 = Math.min(plotW, plotH) / 2 - 6;
-      const sw2 = Math.max(10, R2 * 0.16);
-      const A0 = 135, SPAN = 270; /* bottom-left → bottom-right, through the top */
-      els.push(<path key="gt" d={arcStrokeD(cx2, cy2, R2, A0, A0 + SPAN)} fill="none" stroke="#2B3140" strokeWidth={sw2} strokeLinecap="round" />);
-      if (pct * e > 0.004) els.push(<path key="gv" d={arcStrokeD(cx2, cy2, R2, A0, A0 + SPAN * pct * e)} fill="none" stroke={SWATCHES[0]} strokeWidth={sw2} strokeLinecap="round" style={{ filter: `drop-shadow(0 0 7px ${SWATCHES[0]}66)` }} />);
-      els.push(<text key="gl" x={cx2} y={cy2 + R2 * 0.12} textAnchor="middle" fill="#E9EBF2" fontSize={Math.max(20, R2 * 0.5)} fontFamily="'JetBrains Mono'" fontWeight={700}>{Math.round(pct * 100 * e)}%</text>);
-      if (n > 0 && data[0].l) els.push(<text key="gc" x={cx2} y={cy2 + R2 * 0.12 + Math.max(17, R2 * 0.22)} textAnchor="middle" fill="#98A0B4" fontSize={13} fontFamily="'Inter'" fontWeight={600} opacity={eAll}>{data[0].l}</text>);
-    }
+    /* Jitter-grade charts — engine/fx.js chartModel(P, time) is the single
+       source of truth (pure, deterministic, in → hold → out); the markup
+       below maps the model 1:1, so preview, SSR checks and the export frame
+       renderer produce identical frames. Gradient ids are prefixed per layer
+       (several charts/thumbnails can share a document). The card backdrop
+       (radius + soft shadow) lives on the wrapper div. */
+    const M = chartModel(P, time);
     const pad = P.pad || 0;
+    const pid = "ch" + obj.id;
     return (
       <div onPointerDown={down} style={common}>
-        <div style={{ width: W + pad * 2, height: Hh + pad * 2, padding: pad, boxSizing: "border-box", background: P.bg || "transparent", opacity: P.bg ? P.bgOp : 1, borderRadius: P.radius, border: P.borderW ? `${P.borderW}px solid ${P.borderC}` : "none" }}>
-          <svg width={W} height={Hh} style={{ display: "block", overflow: "visible" }}>{els}</svg>
+        <div style={{ width: M.w + pad * 2, height: M.h + pad * 2, padding: pad, boxSizing: "border-box", background: P.bg || "transparent", opacity: P.bg ? P.bgOp : 1, borderRadius: P.radius, border: P.borderW ? `${P.borderW}px solid ${P.borderC}` : "none", boxShadow: P.bg ? "0 24px 60px rgba(0,0,0,.42), 0 4px 14px rgba(0,0,0,.30)" : "none" }}>
+          <svg width={M.w} height={M.h} data-chart={M.type} style={{ display: "block", overflow: "visible" }}>
+            {M.grads.length > 0 && (
+              <defs>
+                {M.grads.map((g) => (
+                  <linearGradient key={g.id} id={pid + g.id} x1={g.x1} y1={g.y1} x2={g.x2} y2={g.y2}>
+                    {g.stops.map((s, i) => <stop key={i} offset={s[0]} stopColor={s[1]} stopOpacity={s[2]} />)}
+                  </linearGradient>
+                ))}
+              </defs>
+            )}
+            {M.items.map((it, i) => {
+              if (it.k === "line") return <line key={i} x1={it.x1} y1={it.y1} x2={it.x2} y2={it.y2} stroke={it.stroke} strokeWidth={it.sw} strokeDasharray={it.dash} strokeLinecap={it.cap} opacity={it.op} />;
+              if (it.k === "circle") return <circle key={i} cx={it.cx} cy={it.cy} r={it.r} fill={it.fill || "none"} stroke={it.stroke || "none"} strokeWidth={it.sw} opacity={it.op} transform={it.tr} />;
+              if (it.k === "text") return <text key={i} x={it.x} y={it.y} textAnchor={it.anchor} fill={it.fill} fontSize={it.size} fontFamily={it.fam} fontWeight={it.wt} letterSpacing={it.ls} opacity={it.op} transform={it.tr} style={it.tnum ? { fontVariantNumeric: "tabular-nums" } : undefined}>{it.s}</text>;
+              return <path key={i} d={it.d} fill={it.grad ? `url(#${pid}${it.grad})` : it.fill || "none"} stroke={it.stroke || "none"} strokeWidth={it.sw} strokeLinecap={it.cap} strokeLinejoin={it.stroke ? "round" : undefined} pathLength={it.plen} strokeDasharray={it.dash} strokeDashoffset={it.off} opacity={it.op} transform={it.tr} style={it.glow ? { filter: `drop-shadow(${it.glow})` } : undefined} />;
+            })}
+          </svg>
         </div>
         {handles}
       </div>

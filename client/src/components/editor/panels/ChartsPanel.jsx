@@ -1,40 +1,75 @@
-/* charts drawer — 7 chart types as separate insertables. The type is chosen
-   HERE at insert time (the inspector no longer switches it): click runs the
-   normal addObject("chart") path and patches chartType via over.props.
-   Mirrors the MapsPanel rows + close-on-insert behavior. */
+/* charts drawer — 11 Jitter-grade chart types as separate one-click widgets.
+   Every card shows a LIVE animated thumbnail: the SAME StageObject/chartModel
+   render the stage and the export use (engine/fx.js — pure, deterministic,
+   in → hold → out), driven by a shared 120ms ticker. The type is chosen HERE
+   at insert time (the inspector no longer switches it): click runs the normal
+   addObject("chart") path and patches chartType/dataStr via over.props.
+   Mirrors the BackgroundsPanel cards + close-on-insert behavior. */
+import { useEffect, useState } from "react";
 import { C, sectionLabel } from "../model";
+import { StageObject } from "../../StageObject";
 
-const IC = "#939BAD"; /* C.dim — icon ink */
+const THUMB_W = 114, THUMB_H = 82;
+
+/* one shared ticker for the whole panel — every card animates off the same
+   interval (preview-only wall-clock; the engine stays a pure f(time)). The
+   4200ms wrap leaves a beat after each widget's 120+3400ms in→hold→out
+   window, so every thumbnail loops seamlessly. */
+function usePreviewTime() {
+  const [t, setT] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => setT((v) => (v + 120) % 4200), 120);
+    return () => clearInterval(iv);
+  }, []);
+  return t;
+}
+
 const CHART_DEFS = [
-  { id: "bar", name: "Bars", hint: "Vertical, staggered in",
-    icon: <svg width="26" height="26" viewBox="0 0 26 26"><rect x="4" y="12" width="5" height="10" rx="1.5" fill={IC} /><rect x="11" y="5" width="5" height="17" rx="1.5" fill={IC} /><rect x="18" y="9" width="5" height="13" rx="1.5" fill={IC} /></svg> },
-  { id: "line", name: "Line", hint: "Draws on left → right",
-    icon: <svg width="26" height="26" viewBox="0 0 26 26"><polyline points="4,19 10,11 15,15 22,6" fill="none" stroke={IC} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /><circle cx="10" cy="11" r="2" fill={IC} /><circle cx="15" cy="15" r="2" fill={IC} /></svg> },
-  { id: "donut", name: "Donut", hint: "Sweeps around the dial",
-    icon: <svg width="26" height="26" viewBox="0 0 26 26"><circle cx="13" cy="13" r="8.5" fill="none" stroke={IC} strokeWidth="5" strokeDasharray="40 14" strokeLinecap="round" transform="rotate(-90 13 13)" /></svg> },
-  { id: "pie", name: "Pie", hint: "Filled slices + % labels",
-    icon: <svg width="26" height="26" viewBox="0 0 26 26"><circle cx="13" cy="13" r="9" fill="none" stroke={IC} strokeWidth="2" /><path d="M13 13 L13 4 A9 9 0 0 1 21.4 17.5 Z" fill={IC} /></svg> },
-  { id: "area", name: "Area", hint: "Line with a filled body",
-    icon: <svg width="26" height="26" viewBox="0 0 26 26"><path d="M4 19 L10 11 L15 15 L22 6 L22 22 L4 22 Z" fill={IC} fillOpacity="0.45" /><polyline points="4,19 10,11 15,15 22,6" fill="none" stroke={IC} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg> },
-  { id: "hbar", name: "H-Bars", hint: "Horizontal, row labels",
-    icon: <svg width="26" height="26" viewBox="0 0 26 26"><rect x="4" y="4.5" width="13" height="5" rx="1.5" fill={IC} /><rect x="4" y="11" width="18" height="5" rx="1.5" fill={IC} /><rect x="4" y="17.5" width="9" height="5" rx="1.5" fill={IC} /></svg> },
-  { id: "gauge", name: "Gauge", hint: "0–100 radial meter", props: { dataStr: "Progress, 68" },
-    icon: <svg width="26" height="26" viewBox="0 0 26 26"><path d="M5 19 A9.5 9.5 0 0 1 21 19" fill="none" stroke={IC} strokeWidth="3" strokeLinecap="round" /><path d="M13 19 L17.5 12.5" stroke={IC} strokeWidth="2.2" strokeLinecap="round" /><circle cx="13" cy="19" r="2" fill={IC} /></svg> },
+  { id: "bar", name: "Bars", hint: "Rise + overshoot, staggered", data: "Q1, 42\nQ2, 65\nQ3, 38\nQ4, 84" },
+  { id: "grouped", name: "Grouped", hint: "Two series side by side", data: "Q1, 42, 58\nQ2, 65, 44\nQ3, 38, 62\nQ4, 84, 70" },
+  { id: "stacked", name: "Stacked", hint: "Segments grow bottom-up", data: "Q1, 30, 22\nQ2, 45, 28\nQ3, 26, 34\nQ4, 52, 30" },
+  { id: "hbar", name: "H-Bars", hint: "Horizontal, row labels", data: "Alpha, 72\nBeta, 48\nGamma, 91\nDelta, 33" },
+  { id: "line", name: "Line", hint: "Draws on, points pop", data: "Jan, 24\nFeb, 48\nMar, 36\nApr, 72\nMay, 58" },
+  { id: "area", name: "Area", hint: "Gradient fill + draw-on", data: "Jan, 18\nFeb, 42\nMar, 30\nApr, 66\nMay, 52" },
+  { id: "donut", name: "Donut", hint: "Sweep + spin, counts up", data: "Subs, 46\nAds, 28\nSales, 18\nOther, 8", w: 430 },
+  { id: "pie", name: "Pie", hint: "Slices sweep + % labels", data: "Subs, 46\nAds, 28\nSales, 18\nOther, 8", w: 430 },
+  { id: "ring", name: "Ring", hint: "Radial progress, overshoots", data: "Goal, 72", w: 430 },
+  { id: "lollipop", name: "Lollipop", hint: "Stems + popping heads", data: "A, 34\nB, 58\nC, 44\nD, 76" },
+  { id: "gauge", name: "Gauge", hint: "0–100 radial meter", data: "Progress, 68", w: 430 },
 ];
 
+function Thumb({ def, time }) {
+  const obj = {
+    id: `chthumb-${def.id}`, type: "chart", name: def.name, tracks: {}, locked: false, hidden: false,
+    props: {
+      x: THUMB_W / 2, y: THUMB_H / 2, scale: 1, rotation: 0, opacity: 1, fill: "#F9F9F9", inT: 0, outT: null, path: null, prog: 0,
+      w: THUMB_W - 12, h: THUMB_H - 12, chartType: def.id, dataStr: def.data, start: 120, dur: 3400, showVals: false,
+      bg: "#141824", bgOp: 1, radius: 10, borderC: "#2B3140", borderW: 1, pad: 5,
+    },
+  };
+  return <StageObject obj={obj} time={time} stage={{ w: THUMB_W, h: THUMB_H }} selected={false} interactive={false} />;
+}
+
 export default function ChartsPanel({ addObject, setChartsOpen }) {
+  const time = usePreviewTime();
   return (
-          <div className="gd-panel" style={{ position: "absolute", left: 84, top: 12, width: 240, background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 8, padding: 12, zIndex: 30, boxShadow: "0 12px 40px rgba(0,0,0,.5)" }}>
-            <div style={{ ...sectionLabel, marginBottom: 10 }}>Charts</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 7, maxHeight: 380, overflowY: "auto" }}>
+          <div className="gd-panel" style={{ position: "absolute", left: 84, top: 12, width: 268, maxHeight: "calc(100% - 24px)", overflowY: "auto", background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 8, padding: 12, zIndex: 30, boxShadow: "0 12px 40px rgba(0,0,0,.5)" }}>
+            <div style={{ ...sectionLabel, marginBottom: 4 }}>Charts · in → hold → out</div>
+            <div style={{ color: C.faint, fontSize: 9.5, lineHeight: 1.5, marginBottom: 10 }}>Click a card to insert. Every widget springs in with a stagger, holds, then accelerates off — loops cleanly at its duration.</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               {CHART_DEFS.map((c) => (
-                <button key={c.id} className="gd-btn" onClick={() => { addObject("chart", { name: c.name, props: { chartType: c.id, ...c.props } }); setChartsOpen(false); }}
-                  style={{ display: "flex", alignItems: "center", gap: 10, background: C.bg1, border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 10px", cursor: "pointer", textAlign: "left" }}>
-                  <span style={{ flexShrink: 0, display: "flex" }}>{c.icon}</span>
-                  <span><div style={{ fontSize: 12.5, fontWeight: 700, color: C.txt }}>{c.name}</div><div style={{ fontSize: 10, color: C.faint }}>{c.hint}</div></span>
+                <button key={c.id} className="gd-btn" title={`${c.name} — ${c.hint}. Click to insert.`}
+                  onClick={() => { addObject("chart", { name: c.name, props: { chartType: c.id, dataStr: c.data, ...(c.w ? { w: c.w } : {}), radius: 32, showVals: true } }); setChartsOpen(false); }}
+                  style={{ background: C.bg1, border: `1px solid ${C.line}`, borderRadius: 8, padding: 5, cursor: "pointer", textAlign: "left" }}>
+                  <span style={{ display: "block", position: "relative", width: THUMB_W, height: THUMB_H, borderRadius: 6, overflow: "hidden", border: `1px solid ${C.line}`, pointerEvents: "none", background: "#0A0C10" }}>
+                    <Thumb def={c} time={time} />
+                  </span>
+                  <span style={{ display: "block", fontSize: 10.5, fontWeight: 700, color: C.txt, marginTop: 5 }}>{c.name}</span>
+                  <span style={{ display: "block", fontSize: 9, color: C.faint, marginTop: 1 }}>{c.hint}</span>
                 </button>
               ))}
             </div>
+            <div style={{ color: C.faint, fontSize: 9.5, lineHeight: 1.5, marginTop: 9 }}>Pure timeline-driven motion — the exported video renders these exact frames. Edit rows, timing and the card in the Inspector.</div>
           </div>
   );
 }
