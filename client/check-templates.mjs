@@ -123,7 +123,7 @@ function checkProject(tid, p) {
 }
 
 /* confetti emission styles the engine supports (engine/fx.js CONFETTI_STYLES) */
-const CONFETTI_STYLE_IDS = ["burst", "rain", "cannonL", "cannonR", "firework", "spiral", "snow", "pop"];
+const CONFETTI_STYLE_IDS = ["burst", "rain", "cannonL", "cannonR", "firework", "spiral", "snow", "pop", "cannons", "fountain", "celebration", "patriotic", "mono", "streamers", "tornado", "popring", "drift"];
 const CLIP_TRANSITION_IDS = ["none", "fade", "slideU", "slideD", "slideL", "slideR", "zoom", "zoomOut"];
 
 function collectIds(l, out) {

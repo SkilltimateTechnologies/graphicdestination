@@ -422,31 +422,84 @@ export function counterModel(P, time) {
 }
 
 /* ============================================================
-   CONFETTI (seeded) — 8 emission styles. Missing/unknown
+   CONFETTI (seeded) — 17 emission styles. Missing/unknown
    props.style falls back to "burst", the original upward
    fountain, so projects saved before styles existed render
    EXACTLY as before (same rng order, same particle fields).
    All math is pure/deterministic (mulberry32) — the renderer
    (components/StageObject.jsx) only plays the kinematics back.
+
+   MOTION FAMILIES — the renderer's kinematics player is selected
+   by the NORMALIZED style (confettiStyleOf). Nine newer styles
+   reuse an existing player family but generate their own particle
+   fields (below), so the shared renderer needed no changes:
+     streamers → "rain" player (top-fall + sine sway)
+     tornado   → "spiral" player (radial vortex)
+     popring   → "pop" player (eased radial ring)
+     drift     → "snow" player (slow ambient fall)
+   The remaining new styles (cannons/fountain/celebration/
+   patriotic/mono) play the default burst kinematics with their
+   own field recipes. Family entries carry the SAME lifetime as
+   their player family, so confettiLife(raw) ≡ confettiLife(
+   normalized) no matter which id is looked up.
    ============================================================ */
 export const CONFETTI_LIFE = 2400;
 /* per-style particle lifetime (ms) — the renderer's active window */
-const CONFETTI_LIVES = { burst: CONFETTI_LIFE, rain: 3400, cannonL: 2600, cannonR: 2600, firework: 2800, spiral: 2600, snow: 6500, pop: 700 };
+const CONFETTI_LIVES = {
+  burst: CONFETTI_LIFE, rain: 3400, cannonL: 2600, cannonR: 2600, firework: 2800, spiral: 2600, snow: 6500, pop: 700,
+  cannons: CONFETTI_LIFE, fountain: CONFETTI_LIFE, celebration: CONFETTI_LIFE, patriotic: CONFETTI_LIFE, mono: CONFETTI_LIFE,
+  streamers: 3400 /* = rain */, tornado: 2600 /* = spiral */, popring: 700 /* = pop */, drift: 6500 /* = snow */,
+};
+/* new style id → renderer kinematics family (confettiStyleOf applies it);
+   anything NOT listed here plays under its own id (default burst player) */
+const CONFETTI_FAMILY = { streamers: "rain", tornado: "spiral", popring: "pop", drift: "snow" };
 export const CONFETTI_STYLES = [
-  { id: "burst", name: "Burst", glyph: "🎉" },
-  { id: "rain", name: "Rain", glyph: "🌧" },
-  { id: "cannonL", name: "Cannon L", glyph: "◣" },
-  { id: "cannonR", name: "Cannon R", glyph: "◢" },
-  { id: "firework", name: "Firework", glyph: "🎆" },
-  { id: "spiral", name: "Spiral", glyph: "🌀" },
-  { id: "snow", name: "Snow", glyph: "❄" },
-  { id: "pop", name: "Pop", glyph: "💥" },
+  { id: "burst", name: "Burst", glyph: "🎉", hint: "Classic upward fountain" },
+  { id: "cannons", name: "Cross Cannons", glyph: "🎊", hint: "Twin angled streams crossing overhead" },
+  { id: "celebration", name: "Celebration", glyph: "🥳", hint: "Rich radial mix, all hues + white" },
+  { id: "rain", name: "Rain", glyph: "🌧", hint: "Steady top fall with sway" },
+  { id: "streamers", name: "Streamers", glyph: "🎗", hint: "Long ribbons curling down" },
+  { id: "drift", name: "Drift", glyph: "🍃", hint: "Slow ambient fall, long loop" },
+  { id: "fountain", name: "Fountain", glyph: "⛲", hint: "Tall narrow plume, gravity falloff" },
+  { id: "cannonL", name: "Cannon L", glyph: "◣", hint: "Bottom-left corner blast" },
+  { id: "cannonR", name: "Cannon R", glyph: "◢", hint: "Bottom-right corner blast" },
+  { id: "firework", name: "Firework", glyph: "🎆", hint: "Radial shell + twinkle" },
+  { id: "tornado", name: "Tornado", glyph: "🌪", hint: "One-way vortex around center" },
+  { id: "spiral", name: "Spiral", glyph: "🌀", hint: "Two-way outward swirl" },
+  { id: "patriotic", name: "Patriotic", glyph: "★", hint: "Red / white / blue radial pop" },
+  { id: "mono", name: "Mono", glyph: "◆", hint: "Single-hue brand shades" },
+  { id: "snow", name: "Snow", glyph: "❄", hint: "Gentle white flakes" },
+  { id: "pop", name: "Pop", glyph: "💥", hint: "Quick jittered ring burst" },
+  { id: "popring", name: "Pop Ring", glyph: "◎", hint: "Crisp two-tone even ring" },
 ];
-export const confettiStyleOf = (P) => (P && CONFETTI_LIVES[P.style] ? P.style : "burst");
+/* raw validity (field generation + fallback) — NEVER family-mapped, so an
+   unknown/absent style still generates EXACTLY the legacy burst fields */
+const confettiRawStyleOf = (P) => (P && CONFETTI_LIVES[P.style] ? P.style : "burst");
+export const confettiStyleOf = (P) => { const s = confettiRawStyleOf(P); return CONFETTI_FAMILY[s] || s; };
 export function confettiLife(style) { return CONFETTI_LIVES[style] || CONFETTI_LIFE; }
+
+/* #rrggbb → [h 0..360, s 0..100, l 0..100] (pure — mono's brand-hue shades) */
+function hexToHsl(hex) {
+  const r = parseInt(hex.slice(1, 3), 16) / 255, g = parseInt(hex.slice(3, 5), 16) / 255, b = parseInt(hex.slice(5, 7), 16) / 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0;
+  if (d) { if (mx === r) h = 60 * (((g - b) / d) % 6); else if (mx === g) h = 60 * ((b - r) / d + 2); else h = 60 * ((r - g) / d + 4); }
+  if (h < 0) h += 360;
+  const l = (mx + mn) / 2;
+  return [h, d ? (d / (1 - Math.abs(2 * l - 1))) * 100 : 0, l * 100];
+}
+/* [h, s, l] → #rrggbb (inverse of the above; Math.round keeps it deterministic) */
+function hslToHex(h, s, l) {
+  const sn = Math.max(0, Math.min(100, s)) / 100, ln = Math.max(0, Math.min(100, l)) / 100;
+  const c = (1 - Math.abs(2 * ln - 1)) * sn, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = ln - c / 2;
+  const seg = ((h % 360) + 360) % 360 / 60 | 0;
+  const rgb = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]][seg];
+  const to = (v) => Math.round((v + m) * 255).toString(16).padStart(2, "0");
+  return `#${to(rgb[0])}${to(rgb[1])}${to(rgb[2])}`;
+}
 export function confettiParticles(obj) {
   const P = obj.props;
-  const style = confettiStyleOf(P);
+  const style = confettiRawStyleOf(P); /* raw id — family styles generate their OWN fields */
   const rng = mulberry32(P.seed);
   const power = P.power || 1;
   const out = [];
@@ -511,6 +564,114 @@ export function confettiParticles(obj) {
         size: 3 + rng() * 4, color: shade > 0.82 ? SWATCHES[3] : shade > 0.7 ? SWATCHES[2] : "#F9F9F9",
         spin: 0, round: true,
         swayA: 16 + rng() * 30, swayF: 0.9 + rng() * 1.2, wob: rng() * Math.PI * 2,
+      });
+    }
+    return out;
+  }
+  if (style === "cannons") {
+    /* dual angled cannon streams (default burst player): alternating ±vx blasts
+       fired upward so the two streams cross over the stage in gravity arcs */
+    for (let i = 0; i < P.count; i++) {
+      const side = i % 2 === 0 ? 1 : -1;
+      const vx = side * (0.55 + rng() * 0.75) * power;
+      const vy = -(1.05 + rng() * 0.75) * power;
+      out.push({ vx, vy, size: 5 + rng() * 8, color: SWATCHES[Math.floor(rng() * 5)], spin: (rng() - 0.5) * 1500, round: rng() > 0.55, drift: (rng() - 0.5) * 40, wob: rng() * Math.PI * 2 });
+    }
+    return out;
+  }
+  if (style === "fountain") {
+    /* tall narrow plume (default burst player): tight angle around straight-up,
+       wide speed range so pieces rain back continuously — gravity falloff */
+    for (let i = 0; i < P.count; i++) {
+      const ang = -Math.PI / 2 + (rng() - 0.5) * Math.PI * 0.34;
+      const speed = (0.85 + rng() * 1.15) * power;
+      out.push({ vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, size: 4 + rng() * 7, color: SWATCHES[Math.floor(rng() * 5)], spin: (rng() - 0.5) * 1100, round: rng() > 0.5, drift: (rng() - 0.5) * 90, wob: rng() * Math.PI * 2 });
+    }
+    return out;
+  }
+  if (style === "celebration") {
+    /* rich mixed burst (default burst player): full radial spread, mixed
+       circles/rects with a few oversized statement pieces, 5 hues + white */
+    for (let i = 0; i < P.count; i++) {
+      const ang = rng() * Math.PI * 2;
+      const speed = (0.4 + rng() * 1.05) * power;
+      const big = rng() > 0.72;
+      out.push({ vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed - 0.25 * power, size: big ? 9 + rng() * 8 : 3.5 + rng() * 5.5, color: SWATCHES[Math.floor(rng() * 6)], spin: (rng() - 0.5) * 1600, round: rng() > 0.45, drift: (rng() - 0.5) * 70, wob: rng() * Math.PI * 2 });
+    }
+    return out;
+  }
+  if (style === "patriotic") {
+    /* red/white/blue radial burst (default burst player) — palette pinned to
+       the red, white and blue swatches */
+    const RWB = [SWATCHES[1], SWATCHES[5], SWATCHES[2]];
+    for (let i = 0; i < P.count; i++) {
+      const ang = rng() * Math.PI * 2;
+      const speed = (0.45 + rng() * 0.95) * power;
+      out.push({ vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed - 0.2 * power, size: 4 + rng() * 7, color: RWB[Math.floor(rng() * 3)], spin: (rng() - 0.5) * 1300, round: rng() > 0.5, drift: (rng() - 0.5) * 50, wob: rng() * Math.PI * 2 });
+    }
+    return out;
+  }
+  if (style === "mono") {
+    /* single-hue brandable burst (default burst player): every piece is a
+       lightness shade of ONE hue — the object's own fill (accent prop) when
+       it's a valid #rrggbb, else the theme amber (SWATCHES[0]) */
+    const accent = /^#[0-9a-f]{6}$/i.test(P.fill || "") ? P.fill : SWATCHES[0];
+    const [h, s] = hexToHsl(accent);
+    for (let i = 0; i < P.count; i++) {
+      const ang = -Math.PI / 2 + (rng() - 0.5) * Math.PI * 1.3;
+      const speed = (0.5 + rng() * 0.95) * power;
+      const l = 42 + rng() * 34; /* same hue+sat, fanned lightness */
+      out.push({ vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, size: 4.5 + rng() * 8, color: hslToHex(h, s, l), spin: (rng() - 0.5) * 1300, round: rng() > 0.5, drift: (rng() - 0.5) * 55, wob: rng() * Math.PI * 2 });
+    }
+    return out;
+  }
+  if (style === "streamers") {
+    /* curling ribbon streamers (rain player): long non-round pieces tumbling
+       fast with a wide slow-ish sway as they fall — the sine sway plays back
+       as the ribbon's S-curve */
+    for (let i = 0; i < P.count; i++) {
+      out.push({
+        ox: (rng() - 0.5) * 660, vy: (0.22 + rng() * 0.3) * power,
+        size: 7 + rng() * 11, color: SWATCHES[Math.floor(rng() * 5)],
+        spin: (rng() - 0.5) * 1500, round: false,
+        swayA: 22 + rng() * 40, swayF: 1.6 + rng() * 2.4, wob: rng() * Math.PI * 2,
+      });
+    }
+    return out;
+  }
+  if (style === "tornado") {
+    /* vortex (spiral player): every particle sweeps the SAME direction (om
+       always positive — a true funnel, unlike spiral's two-way mix) from a
+       tight core, fast */
+    for (let i = 0; i < P.count; i++) {
+      out.push({
+        th0: rng() * Math.PI * 2, om: 4.5 + rng() * 3.5,
+        r0: 4 + rng() * 20, vr: (60 + rng() * 130) * power,
+        size: 3.5 + rng() * 6, color: SWATCHES[Math.floor(rng() * 5)],
+        spin: (rng() - 0.5) * 1100, round: rng() > 0.5, wob: rng() * Math.PI * 2,
+      });
+    }
+    return out;
+  }
+  if (style === "popring") {
+    /* crisp radial ring (pop player): perfectly even angular spread with no
+       jitter, uniform speed+size, two alternating hues — a clean expanding ring */
+    for (let i = 0; i < P.count; i++) {
+      const ang = (i / Math.max(1, P.count)) * Math.PI * 2;
+      const speed = (1.02 + rng() * 0.06) * power;
+      out.push({ vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, size: 5 + rng() * 2, color: SWATCHES[i % 2 === 0 ? 0 : 2], spin: (rng() - 0.5) * 300, round: true });
+    }
+    return out;
+  }
+  if (style === "drift") {
+    /* slow ambient fall (snow player): colored pieces, very low velocity,
+       gentle wide sway, extra-long life — loops gracefully */
+    for (let i = 0; i < P.count; i++) {
+      out.push({
+        ox: (rng() - 0.5) * 740, vy: (0.05 + rng() * 0.085) * power,
+        size: 4 + rng() * 5.5, color: SWATCHES[Math.floor(rng() * 5)],
+        spin: 0, round: rng() > 0.4,
+        swayA: 20 + rng() * 42, swayF: 0.5 + rng() * 1.1, wob: rng() * Math.PI * 2,
       });
     }
     return out;

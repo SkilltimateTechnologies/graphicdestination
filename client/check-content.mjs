@@ -1,7 +1,7 @@
 /**
  * check-content.mjs — node proof for the content features:
  *
- *   1. CONFETTI STYLES — all 8 styles × 2 seeds: confettiParticles() returns
+ *   1. CONFETTI STYLES — all 17 styles × 2 seeds: confettiParticles() returns
  *      deterministic arrays (same seed ⇒ identical JSON) with only finite
  *      numeric fields (no NaN/Infinity), and confettiLife() is a positive
  *      finite ms value. Missing/unknown props.style falls back to "burst",
@@ -50,7 +50,7 @@ const chartObj = (chartType, dataStr = "Q1, 42\nQ2, 65\nQ3, 38\nQ4, 84") => ({
 async function main() {
   /* ---------- 1. confetti styles: deterministic + finite ---------- */
   console.log(`confettiParticles — ${CONFETTI_STYLES.length} styles × 2 seeds`);
-  check("8 styles registered", CONFETTI_STYLES.length === 8, CONFETTI_STYLES.map((s) => s.id).join(","));
+  check("17 styles registered", CONFETTI_STYLES.length === 17, CONFETTI_STYLES.map((s) => s.id).join(","));
   for (const s of CONFETTI_STYLES) {
     for (const seed of [7, 1234]) {
       const a = confettiParticles(confettiObj(s.id, seed));
