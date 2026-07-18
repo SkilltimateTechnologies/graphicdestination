@@ -1,29 +1,40 @@
 /**
  * check-kits.mjs — node proof for the icon + UI-element kits (src/engine/kits.js):
  *
- *   1. LIBRARY META — ≥36 icons across ≥6 categories, ≥12 UI elements, unique
- *      ids, complete {id, name, category, tags, recipe, build} meta.
+ *   1. LIBRARY META — ≥48 flat icons across ≥6 categories, ≥12 UI elements,
+ *      unique ids, complete {id, name, category, tags, recipe, build} meta.
  *
  *   2. SCHEMA — every kit's build() returns ONE clip layer that satisfies the
  *      project layer schema (same rules check-templates.mjs enforces: layer
  *      keys, ob<n> ids, base + per-type props, known eases/shapes/fonts,
  *      sorted keyframes), with the kit contract: 0-relative start, 2.4–6 s
- *      dur, end "loop", and a non-empty children array.
+ *      dur, end "loop", and a non-empty children array. Icons build TWO
+ *      variants from the same art: "animated" (default) and "static".
  *
- *   3. SEAMLESS LOOP — structurally, every top-level child lives in a window
- *      strictly inside the loop (inT > 0 and outT < dur for plain layers;
- *      start > 0, start+dur < dur and end "hide" for group clips), so both
- *      loop ends render the same empty frame; then PROVEN via the real
- *      StageObject (SSR): the clip rendered at t=0 and t=dur (end "hold"
- *      probe) is byte-identical.
+ *   3. VARIANTS — the animated icon has ≥1 keyframed track; the static
+ *      variant has ZERO tracks anywhere in the tree and every part is
+ *      always visible (inT 0 / outT null). The animated variant is
+ *      structurally seamless: every top-level child lives strictly inside
+ *      the loop window (inT > 0, outT < dur; groups start > 0, end "hide"
+ *      before the loop point) so frame(0) ≡ frame(dur).
  *
- *   4. RENDER — every kit SSR-renders a non-empty, NaN-free frame at hold
- *      time through the real StageObject (bundled with the project's own
- *      Vite, one shared react instance), and is pure: same t ⇒ same bytes.
+ *   4. FLAT-FILL STYLE — icons are colored flat art, not line art: every
+ *      icon composes ≥3 solid-fill shapes (fillMode "fill"/"both") with
+ *      ≥2 distinct fill colors, and no icon is a stroke-only composition.
  *
- *   5. CUSTOMIZATION — build({color/accent}) recolors, build({size}) scales
- *      geometry, build({dur}) re-times the loop within schema bounds; two
- *      builds mint fresh ids and are otherwise identical (deterministic).
+ *   5. RENDER — every kit (both icon variants) SSR-renders a non-empty,
+ *      NaN-free frame at hold time through the real StageObject (bundled
+ *      with the project's own Vite, one shared react instance); is pure
+ *      (same t ⇒ same bytes); is seamless (frame(t=0) ≡ frame(t=dur) via
+ *      the end-"hold" probe); and the ANIMATED variant actually animates
+ *      (markup differs across hold-time samples) while the STATIC variant
+ *      is byte-identical across the whole loop.
+ *
+ *   6. CUSTOMIZATION — build({color}) recolors the primary fill (shades
+ *      re-derive from it), build({size}) scales geometry, build({dur})
+ *      re-times the loop within schema bounds, build({variant:"static"})
+ *      keeps the same art with no tracks; two builds mint fresh ids and
+ *      are otherwise identical (deterministic).
  *
  * Run:  node check-kits.mjs        (from client/)
  */
@@ -97,8 +108,8 @@ function layerProblems(l, seen, out) {
   }
 }
 
-/* every top-level child must live strictly inside the loop window so the
-   t=0 and t=dur frames are both empty (the seamless-loop contract) */
+/* every top-level child of an ANIMATED clip must live strictly inside the
+   loop window so the t=0 and t=dur frames are both empty (seamless wrap) */
 function loopWindowProblems(clip, out) {
   const D = clip.props.dur;
   for (const c of clip.children) {
@@ -115,28 +126,26 @@ function loopWindowProblems(clip, out) {
 
 const collectIds = (l, out = []) => { out.push(l.id); (l.children || []).forEach((c) => collectIds(c, out)); return out; };
 const stripIds = (o) => JSON.parse(JSON.stringify(o, (k, v) => (k === "id" ? "ID" : v)));
+const walkAll = (o, fn) => { fn(o); (o.children || []).forEach((c) => walkAll(c, fn)); };
+const trackCount = (clip) => { let n = 0; walkAll(clip, (o) => { n += Object.keys(o.tracks || {}).length; }); return n; };
 
 /* ---------- 1 · library meta ---------- */
 console.log("kits library — meta");
-check("≥36 icons", ICONS.length >= 36, `${ICONS.length} icons`);
+check("≥48 flat icons", ICONS.length >= 48, `${ICONS.length} icons`);
 check("≥6 icon categories", new Set(ICONS.map((k) => k.category)).size >= 6, [...new Set(ICONS.map((k) => k.category))].join(","));
 check("every icon category is declared in ICON_CATS", ICONS.every((k) => ICON_CATS.includes(k.category)));
 check("icon ids unique", new Set(ICONS.map((k) => k.id)).size === ICONS.length);
 check("every icon has name/tags/recipe/build", ICONS.every((k) => k.name && Array.isArray(k.tags) && k.tags.length >= 2 && typeof k.recipe === "string" && typeof k.build === "function"));
+check("template-embedded icon ids still exist (heart, arrow-up-right, volume)", ["heart", "arrow-up-right", "volume"].every((id) => ICONS.some((k) => k.id === id)));
 check("≥12 UI elements", UI_ELEMENTS.length >= 12, `${UI_ELEMENTS.length} elements`);
 check("UI element ids unique", new Set(UI_ELEMENTS.map((k) => k.id)).size === UI_ELEMENTS.length);
 check("every UI category is declared in UI_CATS", UI_ELEMENTS.every((k) => UI_CATS.includes(k.category)));
 check("every UI element has name/tags/recipe/build", UI_ELEMENTS.every((k) => k.name && Array.isArray(k.tags) && k.tags.length >= 2 && typeof k.recipe === "string" && typeof k.build === "function"));
 check("KIT_COLORS ≥ 5 engine swatches", Array.isArray(KIT_COLORS) && KIT_COLORS.length >= 5);
 
-/* ---------- 2 · build + schema + loop contract (pure, pre-SSR) ---------- */
-const built = new Map(); /* kit → default clip, reused by the SSR pass */
-function checkKit(k, kind) {
-  let clip = null, err = null;
-  try { clip = k.build(); } catch (e) { err = e; }
-  check(`${kind}:${k.id} builds`, !err && !!clip, err ? String(err && err.message || err) : "");
-  if (!clip) return;
-  built.set(k, clip);
+/* ---------- 2 · build + schema + variant contract (pure, pre-SSR) ---------- */
+const built = new Map(); /* `${kind}:${id}` → { k, kind, clip, variant } — reused by the SSR pass */
+function checkClipShell(k, kind, variant, clip) {
   const probs = [];
   if (clip.type !== "clip") probs.push(`payload must be a clip — got ${clip.type}`);
   if (clip.name !== k.name) probs.push(`clip titled "${clip.name}", expected "${k.name}"`);
@@ -145,19 +154,60 @@ function checkKit(k, kind) {
   if (clip.props.end !== "loop") probs.push(`clip end must be "loop" — got "${clip.props.end}"`);
   if (!Array.isArray(clip.children) || !clip.children.length) probs.push("no children");
   layerProblems(clip, new Set(), probs);
-  loopWindowProblems(clip, probs);
   if (JSON.stringify(clip).match(/NaN|Infinity/)) probs.push("JSON contains NaN/Infinity");
-  check(`${kind}:${k.id} clip schema + loop window`, probs.length === 0, probs.slice(0, 3).join(" · "));
-  /* animated: at least one keyframed track somewhere in the tree */
-  let kfs = 0;
-  const walk = (o) => { kfs += Object.keys(o.tracks || {}).length; (o.children || []).forEach(walk); };
-  walk(clip);
-  check(`${kind}:${k.id} is animated (${kfs} tracks)`, kfs >= 1);
+  check(`${kind}:${k.id} (${variant}) clip schema`, probs.length === 0, probs.slice(0, 3).join(" · "));
 }
-console.log("\nicons — build + schema + loop contract");
-for (const k of ICONS) checkKit(k, "icon");
+function checkIcon(k) {
+  for (const variant of ["animated", "static"]) {
+    let clip = null, err = null;
+    try { clip = k.build({ variant }); } catch (e) { err = e; }
+    check(`icon:${k.id} (${variant}) builds`, !err && !!clip, err ? String(err && err.message || err) : "");
+    if (!clip) continue;
+    built.set(`icon:${k.id}:${variant}`, { k, kind: "icon", variant, clip });
+    checkClipShell(k, "icon", variant, clip);
+    const kfs = trackCount(clip);
+    if (variant === "animated") {
+      const probs = [];
+      loopWindowProblems(clip, probs);
+      check(`icon:${k.id} (animated) loop window (structurally seamless)`, probs.length === 0, probs.slice(0, 3).join(" · "));
+      check(`icon:${k.id} (animated) is keyframed (${kfs} tracks)`, kfs >= 1);
+    } else {
+      check(`icon:${k.id} (static) has zero keyframed props`, kfs === 0, `${kfs} tracks`);
+      const open = [];
+      walkAll(clip, (o) => { if (o.type !== "clip" && (o.props.inT !== 0 || o.props.outT !== null)) open.push(`${o.name}: inT=${o.props.inT} outT=${o.props.outT}`); });
+      check(`icon:${k.id} (static) every part always visible (inT 0 / outT null)`, open.length === 0, open.slice(0, 2).join(" · "));
+    }
+  }
+  /* flat-fill style — the art is colored solid fills, not line strokes */
+  const art = k.build({ variant: "static" });
+  let filled = 0, stroked = 0; const fills = new Set();
+  walkAll(art, (o) => {
+    if (o.type === "text") { filled++; if (typeof o.props.fill === "string") fills.add(o.props.fill.toUpperCase()); return; }
+    if (o.type !== "shape") return;
+    const fm = o.props.fillMode || "fill";
+    if (typeof o.props.sC === "string" && fm !== "fill") fills.add(o.props.sC.toUpperCase());
+    if (fm === "stroke") stroked++;
+    else { filled++; if (typeof o.props.fill === "string") fills.add(o.props.fill.toUpperCase()); }
+  });
+  check(`icon:${k.id} flat-fill style (≥3 solid fills, ≥2 colors, not stroke-only)`, filled >= 3 && fills.size >= 2 && filled > stroked, `filled=${filled} stroked=${stroked} colors=${fills.size}`);
+}
+console.log("\nicons — build + schema + variant contract (animated × static)");
+for (const k of ICONS) checkIcon(k);
+
+function checkUi(k) {
+  let clip = null, err = null;
+  try { clip = k.build(); } catch (e) { err = e; }
+  check(`ui:${k.id} builds`, !err && !!clip, err ? String(err && err.message || err) : "");
+  if (!clip) return;
+  built.set(`ui:${k.id}:animated`, { k, kind: "ui", variant: "animated", clip });
+  checkClipShell(k, "ui", "default", clip);
+  const probs = [];
+  loopWindowProblems(clip, probs);
+  check(`ui:${k.id} clip schema + loop window`, probs.length === 0, probs.slice(0, 3).join(" · "));
+  check(`ui:${k.id} is animated (${trackCount(clip)} tracks)`, trackCount(clip) >= 1);
+}
 console.log("\nUI elements — build + schema + loop contract");
-for (const k of UI_ELEMENTS) checkKit(k, "ui");
+for (const k of UI_ELEMENTS) checkUi(k);
 
 /* ---------- 3 · bundle the real StageObject for SSR ---------- */
 async function main() {
@@ -183,39 +233,56 @@ async function main() {
   const stage = { w: 1280, h: 720 };
   const ssr = (obj, time) => renderToStaticMarkup(h(StageObject, { obj, time, stage, selected: false, interactive: false }));
 
-  /* ---------- 4 · render + purity + seamless loop, per kit ---------- */
-  console.log("\nSSR — non-empty frame · pure f(time) · seamless loop");
-  for (const [k, clip] of built) {
+  /* ---------- 4 · render + purity + seamless + motion, per kit × variant ---------- */
+  console.log("\nSSR — non-empty frame · pure f(time) · seamless loop · variant motion");
+  for (const [, { k, kind, variant, clip }] of built) {
     const D = clip.props.dur;
     const tHold = Math.round(D * 0.5);
+    const tAlt = Math.round(D * 0.66);
     const tExit = Math.round(D * 0.86);
-    let a = "", b = "", c = "", err = null;
-    try { a = ssr(clip, tHold); b = ssr(clip, tHold); c = ssr(clip, tExit); } catch (e) { err = e; }
-    check(`${k.id}: SSR non-empty at hold, no NaN`, !err && a.length > 200 && !a.includes("NaN") && !c.includes("NaN") && a.includes("position:absolute"), err ? String(err && err.message || err) : `${a.length} bytes`);
-    check(`${k.id}: pure — same t ⇒ same bytes`, a === b && a.length > 0);
+    let a = "", b = "", alt = "", exit = "", err = null;
+    try { a = ssr(clip, tHold); b = ssr(clip, tHold); alt = ssr(clip, tAlt); exit = ssr(clip, tExit); } catch (e) { err = e; }
+    check(`${k.id} (${variant}): SSR non-empty at hold, no NaN`, !err && a.length > 200 && !a.includes("NaN") && !exit.includes("NaN") && a.includes("position:absolute"), err ? String(err && err.message || err) : `${a.length} bytes`);
+    check(`${k.id} (${variant}): pure — same t ⇒ same bytes`, a === b && a.length > 0);
     /* seamless loop probe: end "hold" forces local time = dur at t=dur */
     const probe = JSON.parse(JSON.stringify(clip));
     probe.props.end = "hold";
     let f0 = "", f1 = "", err2 = null;
     try { f0 = ssr(probe, 0); f1 = ssr(probe, D); } catch (e) { err2 = e; }
-    check(`${k.id}: seamless — frame(t=0) ≡ frame(t=dur)`, !err2 && f0 === f1, err2 ? String(err2 && err2.message || err2) : "");
+    check(`${k.id} (${variant}): seamless — frame(t=0) ≡ frame(t=dur)`, !err2 && f0 === f1 && !f0.includes("NaN"), err2 ? String(err2 && err2.message || err2) : "");
+    if (kind === "icon" && variant === "animated") {
+      const frames = new Set([a, alt, exit]);
+      for (let i = 0; i < 8 && frames.size < 2; i++) frames.add(ssr(clip, Math.round(D * (0.28 + i * 0.09))));
+      check(`${k.id} (animated): actually animates (markup differs across t)`, frames.size >= 2, "identical markup at every sampled t");
+    }
+    if (kind === "icon" && variant === "static") {
+      check(`${k.id} (static): still frame — identical markup across the loop`, a === alt && a === exit && a.length > 200);
+    }
   }
 
   /* ---------- 5 · customization + determinism ---------- */
-  console.log("\ncustomization (color / accent / size / dur) + determinism");
-  for (const k of [ICONS[0], ICONS[12], ICONS[32]]) {
+  console.log("\ncustomization (color / size / dur / variant) + determinism");
+  for (const k of [ICONS[0], ICONS[21], ICONS[43]]) {
     const dflt = k.build();
     const tinted = k.build({ color: "#123ABC" });
     check(`icon:${k.id} build({color}) recolors the artwork`, JSON.stringify(tinted).includes("#123ABC") && !JSON.stringify(dflt).includes("#123ABC"));
+    const tintedStatic = k.build({ color: "#123ABC", variant: "static" });
+    check(`icon:${k.id} static variant recolors too`, JSON.stringify(tintedStatic).includes("#123ABC"));
   }
-  const sSmall = ICONS[0].build(), sBig = ICONS[0].build({ size: 500 });
+  const sSmall = ICONS[4].build(), sBig = ICONS[4].build({ size: 500 });
   const wOf = (c) => c.children[0].props.w;
   check("icon build({size:500}) scales geometry up", wOf(sBig) > wOf(sSmall) * 1.4, `${wOf(sSmall)} → ${wOf(sBig)}`);
   const dCustom = ICONS[3].build({ dur: 4000 });
   let maxT = 0;
-  const walkT = (o) => { for (const tr of Object.values(o.tracks || {})) tr.forEach((k) => { maxT = Math.max(maxT, k.t); }); if (o.props.outT != null) maxT = Math.max(maxT, o.props.outT); (o.children || []).forEach(walkT); };
-  walkT(dCustom);
+  walkAll(dCustom, (o) => {
+    for (const tr of Object.values(o.tracks || {})) tr.forEach((kk) => { maxT = Math.max(maxT, kk.t); });
+    if (o.props.outT != null) maxT = Math.max(maxT, o.props.outT);
+  });
   check("icon build({dur:4000}) re-times the whole loop", dCustom.props.dur === 4000 && maxT < 4000, `maxT=${maxT}`);
+  const artA = ICONS[6].build(), artS = ICONS[6].build({ variant: "static" });
+  const artEq = (o) => JSON.stringify(o, (k2, v) => (k2 === "tracks" || k2 === "inT" || k2 === "outT" || k2 === "id" ? undefined : v));
+  check("static variant keeps the animated art (same layers, same fills)",
+    collectIds(artA).length === collectIds(artS).length && artEq(artA) === artEq(artS));
   for (const k of [UI_ELEMENTS[1], UI_ELEMENTS[7], UI_ELEMENTS[11]]) {
     const tinted = k.build({ accent: "#10EFCD" });
     check(`ui:${k.id} build({accent}) recolors the accent`, JSON.stringify(tinted).includes("#10EFCD"));
@@ -231,13 +298,15 @@ async function main() {
   /* ---------- 6 · frameOf thumb bounds ---------- */
   console.log("\nframeOf — thumbnail content bounds");
   const fIcon = frameOf(ICONS[0].build());
-  check("frameOf(icon) finite, inside the stage", [fIcon.x, fIcon.y, fIcon.w, fIcon.h].every(Number.isFinite) && fIcon.x > 0 && fIcon.y > 0 && fIcon.x + fIcon.w < 1280 && fIcon.y + fIcon.h < 720);
+  check("frameOf(icon animated) finite, inside the stage", [fIcon.x, fIcon.y, fIcon.w, fIcon.h].every(Number.isFinite) && fIcon.x > 0 && fIcon.y > 0 && fIcon.x + fIcon.w < 1280 && fIcon.y + fIcon.h < 720);
+  const fIconS = frameOf(ICONS[0].build({ variant: "static" }));
+  check("frameOf(icon static) finite, sane size", [fIconS.x, fIconS.y, fIconS.w, fIconS.h].every(Number.isFinite) && fIconS.w > 60 && fIconS.h > 60);
   const fUi = frameOf(UI_ELEMENTS[0].build());
   check("frameOf(ui) finite, sane size", [fUi.x, fUi.y, fUi.w, fUi.h].every(Number.isFinite) && fUi.w > 100 && fUi.h > 60);
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
   console.log(`\n${passed} passed, ${failed} failed`);
-  if (passed < 80) { console.error(`expected ≥80 assertions, got ${passed}`); process.exit(1); }
+  if (passed < 150) { console.error(`expected ≥150 assertions, got ${passed}`); process.exit(1); }
   if (!failed) console.log("All kit checks pass.");
   process.exit(failed ? 1 : 0);
 }

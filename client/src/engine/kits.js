@@ -23,14 +23,18 @@
    exit always lands at the clip end (outT = dur − 60, the natural
    one-beat pause before re-entry).
 
-   Customization: build({ color, accent, size, dur }) — stroke/ink
-   color, accent color, geometry scale and loop length. All animation
-   is a pure function of timeline time (keyframes only; the one
-   "random" recipe — lightning flicker — is seeded via engine/random
-   mulberry32) so the export path re-renders identical frames.
+   Customization: build({ color, accent, size, dur, variant }) —
+   primary fill color (icon shades/highlights re-derive from it),
+   accent color (UI), geometry scale, loop length, and the icon
+   variant ("animated" default | "static" — identical art, zero
+   tracks). All animation is a pure function of timeline time
+   (keyframes only; the one "random" recipe — lightning flicker —
+   is seeded via engine/random mulberry32) so the export path
+   re-renders identical frames.
    ============================================================ */
 
 import { mulberry32 } from "./random.js";
+import { lerpColor } from "./keyframes.js";
 
 const STAGE_W = 1280;
 const STAGE_H = 720;
@@ -45,7 +49,7 @@ const DIM = "#939BAD";
 const CARD = "#171B24";
 const LINE = "#2E3546";
 
-export const ICON_CATS = ["Arrows", "Media", "Interface", "Communication", "Devices", "Weather", "Commerce"];
+export const ICON_CATS = ["Emoji", "Reactions", "Objects", "Weather", "Media", "Commerce"];
 export const UI_CATS = ["Controls", "Feedback", "Loaders", "Cards"];
 
 const ICON_DUR = 3200;
@@ -147,6 +151,14 @@ function holdTr(h, x, y, t0, t1, ro = 1) {
     if (!dn || tr[tr.length - 1].v !== y) tr.push(kf(t1, y, "easeInOutSine"));
     return { y: tr };
   }
+  if (h.type === "rock") { /* rotation oscillation around the rest pose (bell swing, laugh rock) */
+    const per = h.period || 900, amp = h.amp || 5;
+    const tr = [kf(t0, 0, "easeInOutSine")];
+    let t = t0, dir = 1;
+    while (t + per / 2 <= t1 - 40) { t += per / 2; tr.push(kf(t, dir * amp, "easeInOutSine")); dir = -dir; }
+    if (tr[tr.length - 1].v !== 0) tr.push(kf(t1, 0, "easeInOutSine"));
+    return { rotation: tr };
+  }
   if (h.type === "sway") {
     const per = h.period || 980, amp = h.amp || 7;
     const tr = [kf(t0, x, "easeInOutSine")];
@@ -223,21 +235,16 @@ const by = (dy, u) => CY + dy * u;
    ============================================================ */
 const clampDur = (d, dflt) => Math.max(DUR_MIN, Math.min(DUR_MAX, Number.isFinite(+d) ? Math.round(+d) : dflt));
 const iconOpts = (opts = {}) => ({
-  color: typeof opts.color === "string" && opts.color ? opts.color : WHITE,
+  color: typeof opts.color === "string" && opts.color ? opts.color : null, /* null → the icon's natural primary */
   size: Number.isFinite(+opts.size) ? Math.max(80, Math.min(720, +opts.size)) : 320,
   dur: clampDur(opts.dur, ICON_DUR),
+  animated: opts.variant !== "static", /* "animated" (default) | "static" — same art, zero tracks */
 });
 const uiOpts = (opts = {}) => ({
   accent: typeof opts.accent === "string" && opts.accent ? opts.accent : AMBER,
   color: typeof opts.color === "string" && opts.color ? opts.color : WHITE,
   dur: clampDur(opts.dur, UI_DUR),
 });
-
-/* ============================================================
-   ICONS — stroke-based line icons composed from shape/text layers.
-   Every icon: { id, name, category, tags, recipe, build(opts) } —
-   build returns one seamlessly-looping clip (0-relative, in→hold→out).
-   ============================================================ */
 
 /* compact prop-spec maker: g(shape, dx, dy, w, h, extra) in the 100-box */
 const spec = (u) => (shape, dx, dy, w, h, extra = {}) => ({ shape, x: bx(dx, u), y: by(dy, u), w: w * u, h: h * u, ...extra });
@@ -256,12 +263,14 @@ function gpart(type, name, p, j, o = {}) {
   return layer(type, name, { ...p, inT, outT: null }, tracks);
 }
 
-/* nested clip = group: collective spin/fade window (start → D−60, hide) */
+/* nested clip = group: collective spin/hold window (start → D−60, hide) */
 function groupClip(name, children, D, o = {}) {
   const start = o.start != null ? o.start : IN0;
   const end = o.end != null ? o.end : D - OUT_TAIL;
-  const tracks = {};
+  let tracks = {};
   if (o.spin) tracks.rotation = [kf(start + 520, 0, "linear"), kf(end - 340, 360 * o.spin, "linear")];
+  if (o.hold) tracks = MT(tracks, holdTr(o.hold, CX, CY, start + 520, end - 340));
+  if (o.tr) tracks = MT(tracks, o.tr);
   return layer("clip", name, {
     start, dur: end - start, speed: 1, end: "hide",
     tIn: o.tIn || "fade", tOut: o.tOut || "fade", tDur: o.tDur || 300,
@@ -269,414 +278,903 @@ function groupClip(name, children, D, o = {}) {
   }, tracks, children);
 }
 
-/* shared per-icon build context */
-function iconCtx(opts) {
-  const { color, size, dur: D } = iconOpts(opts);
-  const u = size / 100;
-  const g = spec(u);
-  const sw = Math.max(2.5, Math.round(size * 0.02 * 10) / 10); /* stroke px (non-scaling) */
-  const stroke = { fillMode: "stroke", sC: color, sW: sw, fill: color };
-  const S = (name, p, j, o) => part("shape", name, p, j, D, o);
-  return { color, size, D, u, g, sw, stroke, S };
+/* ============================================================
+   ICONS — flat, colored, filled icons in the Flaticon genre:
+   soft rounded geometry, solid fills, 2–4 colors per icon, one
+   shared visual language (bottom-rim shade twin + top-left light
+   blob for depth, dark navy-brown feature ink, 1–2 accents).
+
+   Every icon builds TWO variants from ONE art spec:
+     · animated (default) — the Jitter grammar: easeOutBack pop
+       entrances with 50–150 ms staggers, an icon-specific hold
+       motion (blink / heartbeat / flicker / fall / rock / drift…),
+       whip exit; structurally seamless (frame(0) ≡ frame(dur)).
+     · static — identical art, ZERO animation tracks, always
+       visible (inT 0 / outT null), for users who want still icons.
+   build(opts): { color, size, dur, variant: "animated"|"static" }
+     · color recolors the icon's PRIMARY fill (shades/highlights
+       re-derive from it via tone()); every icon has its own
+       natural default when no color is passed.
+   ============================================================ */
+
+/* flat-icon accent palette (shared across the family) */
+const FACE_Y = "#FFD54A";  /* emoji face warm yellow */
+const FEAT = "#3D3548";    /* feature ink — dark navy-brown */
+const CHEEK = "#FF8FA3";
+const TONGUE_C = "#FF6E8A";
+const TEAR_C = "#5BC8F5";
+const GOLD = "#FFC53D";
+const RED = "#FF5D5D";
+const PINK = "#FF7BA9";
+const ORANGE = "#FF9F43";
+const GREEN = "#3ED598";
+const VIOLET = "#C084FC";
+const NAVY = "#2E2A33";
+const PURE = "#FFFFFF";
+
+/* tone(): lighten (u>0, toward white) / darken (u<0, toward black) */
+const tone = (hex, u) => (u < 0 ? lerpColor(hex, "#000000", -u) : lerpColor(hex, "#FFFFFF", u));
+
+/* ---------- design-box spec DSL ----------
+   L:  shape spec  — L(shape, dx, dy, w, h, extras, anim)
+       extras: fill · cr(cornerR) · rot · op · fm+sC+sW · blur
+       anim:   j (stagger idx) · in · stag · hold · tr (extra
+               tracks) · out · es · inT · outT
+   LT: text spec   — LT(text, dx, dy, fontSize, extras, anim)
+   LG: group spec  — LG(name, kids, anim{ spin, hold })        */
+const L = (shape, dx, dy, w, h, x = {}, a = {}) => ({ k: "s", shape, dx, dy, w, h, x, a });
+const LT = (text, dx, dy, fs, x = {}, a = {}) => ({ k: "t", text, dx, dy, fs, x, a });
+const LG = (n, kids, a = {}) => ({ k: "g", n, kids, a });
+
+/* ---------- looped track factories (all pure f(D)) ---------- */
+/* blink crossfade: open eye hides / closed lid shows for ~200 ms at tb */
+function blinkTr(D, tb) {
+  return {
+    open: [kf(tb, 1, "linear"), kf(tb + 70, 0, "linear"), kf(tb + 200, 0, "linear"), kf(tb + 270, 1, "linear")],
+    closed: [kf(220, 0, "linear"), kf(tb, 0, "linear"), kf(tb + 70, 1, "linear"), kf(tb + 200, 1, "linear"), kf(tb + 270, 0, "linear"), kf(D - 80, 0, "linear")],
+  };
+}
+/* drift loop: the part repeatedly travels (ddx,ddy) box units from its
+   rest spot while fading in→out (flying tears, steam, confetti, shine).
+   Use with enter "none" + exit false — the part lives only in drifts. */
+function driftTr(c, dx, dy, ddx, ddy, per, o = {}) {
+  const D = c.D, u = c.u;
+  const x = bx(dx, u), y = by(dy, u);
+  const t0 = o.t0 != null ? o.t0 : 760 + (o.phase || 0);
+  const t1 = D - EXIT0, ro = o.ro != null ? o.ro : 0.95;
+  const tr = { x: [], y: [], opacity: [], scale: [] };
+  for (let t = t0; t + per <= t1 - 30; t += per) {
+    tr.x.push(kf(t, x, "easeOutQuad"), kf(t + per, x + ddx * u, "linear"));
+    tr.y.push(kf(t, y, "easeOutQuad"), kf(t + per, y + ddy * u, "linear"));
+    tr.opacity.push(kf(t, 0, "easeOutQuad"), kf(t + per * 0.26, ro, "linear"), kf(t + per * 0.66, ro, "easeInQuad"), kf(t + per, 0, "linear"));
+    tr.scale.push(kf(t, o.s0 != null ? o.s0 : 0.55, "easeOutQuad"), kf(t + per * 0.3, 1, "linear"));
+  }
+  tr.x.push(kf(t1, x, "linear")); tr.y.push(kf(t1, y, "linear"));
+  tr.opacity.push(kf(t1, 0, "linear")); tr.scale.push(kf(t1, 1, "linear"));
+  return tr;
+}
+/* ripple loop: scale s0→s1 while fading out (play-button ping) */
+function rippleTr(c, s0, s1, per, o = {}) {
+  const D = c.D;
+  const t0 = o.t0 != null ? o.t0 : 900, t1 = D - EXIT0, ro = o.ro != null ? o.ro : 0.7;
+  const tr = { scale: [], opacity: [] };
+  for (let t = t0; t + per <= t1 - 30; t += per) {
+    tr.scale.push(kf(t, s0, "easeOutCubic"), kf(t + per, s1, "linear"));
+    tr.opacity.push(kf(t, ro, "easeOutQuad"), kf(t + per, 0, "linear"));
+  }
+  tr.scale.push(kf(t1, s1, "linear")); tr.opacity.push(kf(t1, 0, "linear"));
+  return tr;
+}
+/* one mid-hold hop: y dips amp box units and settles back (gift lid pop) */
+function hopTr(c, y, amp, tm) {
+  return { y: [kf(tm, y, "easeOutBack"), kf(tm + 190, y + amp * c.u, "easeInOutSine"), kf(tm + 520, y, "linear")] };
 }
 
-/* ---------- ARROWS ---------- */
-function buildArrowRight(opts) {
-  const { D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Arrow Right", [
-    S("Arrow", g("arrow", 0, 0, 64, 46, stroke), 0, { hold: { type: "sway", amp: 8 } }),
-  ], D);
-}
-function buildArrowUpRight(opts) {
-  const { D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Arrow Up Right", [
-    S("Arrow", g("arrow", 0, 0, 64, 46, { ...stroke, rotation: -45 }), 0, { hold: { type: "sway", amp: 7 } }),
-  ], D);
-}
-function buildExpand(opts) {
-  const { D, g, stroke, S } = iconCtx(opts);
-  const a = (dx, dy, rot, j) => S(`Arrow ${j + 1}`, g("arrow", dx, dy, 30, 22, { ...stroke, rotation: rot }), j, { stag: 70 });
-  return kitClip("Expand Arrows", [
-    a(0, -26, -90, 0), a(26, 0, 0, 1), a(0, 26, 90, 2), a(-26, 0, 180, 3),
-  ], D);
-}
-function buildTrendUp(opts) {
-  const { color, D, u, g, S } = iconCtx(opts);
-  /* three rising steps + an arrow that travels the trend (prog draw-on) */
-  const steps = [[-30, 20, 16], [-8, 6, 30], [14, -10, 44]].map(([dx, dy, h], i) =>
-    S(`Step ${i + 1}`, g("rect", dx, dy + 12, 16, h, { fill: color, cornerR: 18, opacity: 0.55 }), i, { enter: "rise", stag: 110 }));
-  const pathPts = [[-38, 30], [-14, 8], [4, 14], [38, -30]].map(([dx, dy]) => [bx(dx, u), by(dy, u)]);
-  const arrow = part("shape", "Trend arrow", {
-    shape: "arrow", w: 30 * u, h: 22 * u, rotation: -32, fill: color,
-    x: pathPts[0][0], y: pathPts[0][1], path: { pts: pathPts, curved: true }, prog: 0,
-  }, 4, D, {
-    inT: 620, enter: "fade", exit: "fade",
-    tracks: { prog: [kf(620, 0, "easeInOutCubic"), kf(D - EXIT0 - 120, 1, "linear")] },
+/* ============================================================
+   EMOJI COMPOSERS — one shared face language. All generate spec
+   arrays in the 100-box; the face is a 74-unit circle at (0,−1).
+   ============================================================ */
+/* face: warm bottom-rim shade twin + base + top-left light blob */
+const faceBase = (c, j, a = {}) => [
+  L("ellipse", 0, 2.1, 74, 74, { fill: c.faceShade || lerpColor(c.color, "#E8871E", 0.45) }, { j, ...a }),
+  L("ellipse", 0, -1.1, 74, 74, { fill: c.color }, { j, ...a }),
+  L("ellipse", -15, -24, 27, 12, { fill: PURE, op: 0.2, rot: -22 }, { j: j + 1, ...a }),
+];
+const cheeks = (c, j, dy = 8) => [
+  L("ellipse", -21.5, dy, 10, 6.5, { fill: CHEEK, op: 0.5 }, { j }),
+  L("ellipse", 21.5, dy, 10, 6.5, { fill: CHEEK, op: 0.5 }, { j }),
+];
+/* dot eyes; o.blink adds closed lids + a mid-hold blink crossfade */
+const dotEyes = (c, j, dy = -9, o = {}) => {
+  const w = o.w || 7.5, h = o.h || 10, dx = o.dx || 13.5;
+  const tb = o.tb || Math.round(c.D * 0.52);
+  const pair = o.blink ? blinkTr(c.D, tb) : null;
+  const parts = [];
+  [-dx, dx].forEach((x, i) => {
+    parts.push(L("ellipse", x, dy, w, h, { fill: FEAT }, { j: j + i, hold: o.hold, tr: pair ? { opacity: pair.open } : undefined }));
+    if (pair) parts.push(L("ellipse", x, dy + 2.5, w + 2.5, 5, { fill: FEAT }, { j: j + i, in: "none", out: false, tr: { opacity: pair.closed } }));
   });
-  return kitClip("Trend Up", [...steps, arrow], D);
-}
-function buildRefresh(opts) {
-  const { color, D, g, stroke } = iconCtx(opts);
-  const ring = gpart("shape", "Ring", g("ellipse", 0, 0, 62, 62, { ...stroke, opacity: 0.9 }), 0);
-  const head = gpart("shape", "Arrowhead", g("arrow", 24, -26, 26, 19, { fill: color, rotation: 115 }), 1);
-  return kitClip("Refresh", [groupClip("Refresh spin", [ring, head], D, { spin: 1 })], D);
-}
-function buildSwap(opts) {
-  const { D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Swap Horizontal", [
-    S("Arrow top", g("arrow", 0, -17, 52, 34, stroke), 0, { hold: { type: "sway", amp: 7, period: 880 } }),
-    S("Arrow bottom", g("arrow", 0, 17, 52, 34, { ...stroke, rotation: 180 }), 1, { hold: { type: "sway", amp: -7, period: 880 } }),
-  ], D);
-}
+  return parts;
+};
+/* happy closed eyes ∩∩ (dark arc = ellipse + face cover below) */
+const arcEyes = (c, j, dy = -9, o = {}) => [-13.5, 13.5].flatMap((x, i) => [
+  L("ellipse", x, dy, 11, 9, { fill: FEAT }, { j: j + i, hold: o.hold }),
+  L("ellipse", x, dy + 5, 12.5, 10, { fill: c.color }, { j: j + i, hold: o.hold }),
+]);
+/* calm shut eyes ∪∪ */
+const shutEyes = (c, j, dy = -7, o = {}) => [-13.5, 13.5].flatMap((x, i) => [
+  L("ellipse", x, dy, 11, 8, { fill: FEAT }, { j: j + i, hold: o.hold }),
+  L("ellipse", x, dy - 4.5, 12.5, 9, { fill: c.color }, { j: j + i, hold: o.hold }),
+]);
+/* smile crescent (dark ellipse + face cover above) */
+const smileM = (c, j, dy = 13, o = {}) => [
+  L("ellipse", 0, dy - 5, 30, 23, { fill: FEAT }, { j, hold: o.hold }),
+  L("ellipse", 0, dy - 12, 34, 24, { fill: c.color }, { j, hold: o.hold }),
+];
+/* grin: open mouth with a teeth band */
+const grinM = (c, j, dy = 14, o = {}) => [
+  L("ellipse", 0, dy - 3, 33, 25, { fill: FEAT }, { j, hold: o.hold }),
+  L("rect", 0, dy - 1, 25, 8, { fill: PURE, cr: 30 }, { j, hold: o.hold }),
+  L("ellipse", 0, dy - 12, 37, 24, { fill: c.color }, { j, hold: o.hold }),
+];
+/* laugh: open mouth with tongue */
+const laughM = (c, j, dy = 14, o = {}) => [
+  L("ellipse", 0, dy - 2, 33, 26, { fill: FEAT }, { j, hold: o.hold }),
+  L("ellipse", 0, dy + 5, 20, 12, { fill: TONGUE_C }, { j, hold: o.hold }),
+  L("ellipse", 0, dy - 12, 37, 24, { fill: c.color }, { j, hold: o.hold }),
+];
+/* frown ∩ (dark ellipse + face cover below) */
+const frownM = (c, j, dy = 12, o = {}) => [
+  L("ellipse", 0, dy + 9, 24, 15, { fill: FEAT }, { j, hold: o.hold }),
+  L("ellipse", 0, dy + 15.5, 27, 14, { fill: c.color }, { j, hold: o.hold }),
+];
+/* smirk: off-center shallow crescent */
+const smirkM = (c, j, dy = 14, o = {}) => [
+  L("ellipse", 4, dy - 4, 26, 20, { fill: FEAT }, { j, hold: o.hold }),
+  L("ellipse", 4, dy - 11, 30, 21, { fill: c.color }, { j, hold: o.hold }),
+];
+const flatM = (c, j, dy = 14) => [L("rect", 0, dy, 21, 4.5, { fill: FEAT, cr: 49 }, { j })];
+const oMouth = (c, j, dy = 15, w = 11, h = 13, o = {}) => [L("ellipse", 0, dy, w, h, { fill: FEAT }, { j, hold: o.hold })];
+/* brows */
+const brow = (j, dx, dy, rot, o = {}) => L("rect", dx, dy, o.w || 13, o.h || 3.6, { fill: FEAT, cr: 49, rot }, { j, hold: o.hold });
+const angryBrows = (j, dy = -19) => [brow(j, -12, dy, 24, { h: 4.4 }), brow(j + 1, 12, dy, -24, { h: 4.4 })];
+const sadBrows = (j, dy = -20) => [brow(j, -12, dy, -22), brow(j + 1, 12, dy, 22)];
+/* composed teardrop (round bulb + pointy top), pointing up */
+const dropS = (j, dx, dy, s, fill, o = {}) => [
+  L("ellipse", dx, dy + 2.4 * s, 7.4 * s, 7.4 * s, { fill, rot: o.rot }, { j, ...o }),
+  L("triangle", dx, dy - 2.4 * s, 6.2 * s, 6.8 * s, { fill, rot: o.rot }, { j, ...o }),
+];
 
-/* ---------- MEDIA ---------- */
-function buildPlay(opts) {
-  const { color, D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Play", [
-    S("Ring", g("ellipse", 0, 0, 88, 88, stroke), 0),
-    S("Triangle", g("triangle", 5, 0, 32, 30, { fill: color, rotation: 90 }), 1, { hold: { type: "pulse", amp: 1.1 } }),
-  ], D);
-}
-function buildPause(opts) {
-  const { color, D, g, S } = iconCtx(opts);
-  return kitClip("Pause", [
-    S("Bar left", g("rect", -13, 0, 15, 46, { fill: color, cornerR: 32 }), 0),
-    S("Bar right", g("rect", 13, 0, 15, 46, { fill: color, cornerR: 32 }), 1, { stag: 120 }),
-  ], D);
-}
-function buildStop(opts) {
-  const { color, D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Stop", [
-    S("Ring", g("ellipse", 0, 0, 88, 88, stroke), 0),
-    S("Square", g("rect", 0, 0, 34, 34, { fill: color, cornerR: 12 }), 1, { hold: { type: "pulse", amp: 1.06 } }),
-  ], D);
-}
-function buildRewind(opts) {
-  const { color, D, g, S } = iconCtx(opts);
-  return kitClip("Rewind", [
-    S("Triangle 1", g("triangle", -16, 0, 32, 28, { fill: color, rotation: -90 }), 0, { stag: 110 }),
-    S("Triangle 2", g("triangle", 16, 0, 32, 28, { fill: color, rotation: -90 }), 1, { stag: 110, hold: { type: "sway", amp: -6 } }),
-  ], D);
-}
-function buildForward(opts) {
-  const { color, D, g, S } = iconCtx(opts);
-  return kitClip("Fast Forward", [
-    S("Triangle 1", g("triangle", -16, 0, 32, 28, { fill: color, rotation: 90 }), 0, { stag: 110, hold: { type: "sway", amp: 6 } }),
-    S("Triangle 2", g("triangle", 16, 0, 32, 28, { fill: color, rotation: 90 }), 1, { stag: 110 }),
-  ], D);
-}
-function buildVolume(opts) {
-  const { color, D, g, S } = iconCtx(opts);
-  return kitClip("Volume", [
-    S("Speaker box", g("rect", -26, 0, 16, 26, { fill: color, cornerR: 16 }), 0),
-    S("Speaker cone", g("triangle", -6, 0, 26, 40, { fill: color, rotation: 90, opacity: 0.9 }), 1),
-    S("Wave near", g("rect", 16, 0, 6, 26, { fill: color, cornerR: 49 }), 2, { hold: { type: "pulse", amp: 1.22, period: 520 } }),
-    S("Wave far", g("rect", 30, 0, 6, 42, { fill: color, cornerR: 49, opacity: 0.7 }), 3, { hold: { type: "pulse", amp: 1.16, period: 760 } }),
-  ], D);
-}
+/* ============================================================
+   ICON ART SPECS — one function per icon: (c) => spec[].
+   c = { color, shade, light, dark, D, u, g } (resolved per build).
+   ============================================================ */
 
-/* ---------- INTERFACE ---------- */
-function buildSearch(opts) {
-  const { D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Search", [
-    S("Lens", g("ellipse", -8, -8, 46, 46, stroke), 0, { enter: "rise" }),
-    S("Handle", g("rect", 18, 18, 26, 7.5, { ...stroke, rotation: 45, cornerR: 49 }), 1, { enter: "rise", stag: 190, hold: { type: "bob", amp: 3 } }),
-  ], D);
-}
-function buildMenu(opts) {
-  const { color, D, g, S } = iconCtx(opts);
-  return kitClip("Menu", [
-    S("Line 1", g("rect", 0, -16, 48, 6.5, { fill: color, cornerR: 49 }), 0, { enter: "rise", stag: 80 }),
-    S("Line 2", g("rect", 0, 0, 48, 6.5, { fill: color, cornerR: 49 }), 1, { enter: "rise", stag: 80, hold: { type: "sway", amp: 5 } }),
-    S("Line 3", g("rect", 0, 16, 48, 6.5, { fill: color, cornerR: 49 }), 2, { enter: "rise", stag: 80 }),
-  ], D);
-}
-function buildPlus(opts) {
-  const { D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Plus", [
-    S("Plus", g("cross", 0, 0, 52, 52, stroke), 0, { hold: { type: "spin", turns: 0.25 } }),
-  ], D);
-}
-function buildClose(opts) {
-  const { D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Close", [
-    S("Cross", g("cross", 0, 0, 50, 50, { ...stroke, rotation: 45 }), 0, { hold: { type: "pulse", amp: 1.08 } }),
-  ], D);
-}
-function buildCheck(opts) {
-  const { color, D, g, S } = iconCtx(opts);
-  return kitClip("Check", [
-    S("Arm short", g("rect", -15, 8, 22, 7.5, { fill: color, cornerR: 49, rotation: 48 }), 0, { enter: "rise", stag: 130 }),
-    S("Arm long", g("rect", 8, -1, 40, 7.5, { fill: color, cornerR: 49, rotation: -52 }), 1, { enter: "rise", stag: 130, hold: { type: "bob", amp: 3 } }),
-  ], D);
-}
-function buildSliders(opts) {
-  const { color, D, g, S } = iconCtx(opts);
-  const rows = [[-17, -12, 13], [0, 10, -13], [17, -6, 10]];
-  const kids = [];
-  rows.forEach(([dy, kx, slide], i) => {
-    kids.push(S(`Track ${i + 1}`, g("rect", 0, dy, 52, 5.5, { fill: color, cornerR: 49, opacity: 0.45 }), i * 2, { enter: "rise", stag: 70 }));
-    kids.push(S(`Knob ${i + 1}`, g("ellipse", kx, dy, 13, 13, { fill: color }), i * 2 + 1, {
-      stag: 70, hold: { type: "sway", amp: slide, period: 1480 + i * 240 },
-    }));
-  });
-  return kitClip("Sliders", kids, D);
-}
-function buildHome(opts) {
-  const { color, D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Home", [
-    S("Roof", g("triangle", 0, -13, 62, 40, stroke), 0, { enter: "rise" }),
-    S("Body", g("rect", 0, 13, 44, 32, stroke), 1, { enter: "rise" }),
-    S("Door", g("rect", 0, 19, 12, 20, { fill: color, cornerR: 20 }), 2, { enter: "rise" }),
-  ], D);
-}
+/* ---------- EMOJI (20) ---------- */
+const specSmile = (c) => [
+  LG("Smile idle", [
+    ...faceBase(c, 0),
+    ...dotEyes(c, 2, -9, { blink: true }),
+    ...smileM(c, 4),
+    ...cheeks(c, 5),
+  ], { hold: { type: "bob", amp: 2, period: 1400 } }),
+];
+const specLaugh = (c) => [
+  LG("Laugh rock", [
+    ...faceBase(c, 0),
+    ...arcEyes(c, 2),
+    ...grinM(c, 4),
+    ...cheeks(c, 5),
+  ], { hold: { type: "rock", amp: 3.5, period: 620 } }),
+];
+const specLaughTears = (c) => [
+  ...faceBase(c, 0),
+  ...arcEyes(c, 2),
+  ...laughM(c, 4),
+  ...cheeks(c, 5),
+  /* tears fly off both sides, looped */
+  ...dropS(6, -25, -10, 1.15, TEAR_C, { in: "none", out: false, rot: 30, tr: driftTr(c, -25, -10, -11, -7, 900) }),
+  ...dropS(7, 25, -10, 1.15, TEAR_C, { in: "none", out: false, rot: -30, tr: driftTr(c, 25, -10, 11, -7, 900, { phase: 450 }) }),
+];
+const specLoveEyes = (c) => [
+  ...faceBase(c, 0),
+  L("heart", -13.5, -9, 14, 13, { fill: PINK }, { j: 2, hold: { type: "heartbeat", period: 940 } }),
+  L("heart", 13.5, -9, 14, 13, { fill: PINK }, { j: 3, hold: { type: "heartbeat", period: 940 } }),
+  ...smileM(c, 4),
+  ...cheeks(c, 5),
+];
+const specStarStruck = (c) => [
+  ...faceBase(c, 0),
+  L("star", -13.5, -9, 15, 15, { fill: GOLD }, { j: 2, hold: { type: "spin", turns: 1 } }),
+  L("star", 13.5, -9, 15, 15, { fill: GOLD }, { j: 3, hold: { type: "spin", turns: 1 } }),
+  ...laughM(c, 4),
+  ...cheeks(c, 5),
+];
+const specWink = (c) => [
+  ...faceBase(c, 0),
+  /* left dot eye blinks, right eye is a static wink arc */
+  L("ellipse", -13.5, -9, 7.5, 10, { fill: FEAT }, { j: 2, tr: { opacity: blinkTr(c.D, Math.round(c.D * 0.52)).open } }),
+  L("ellipse", -13.5, -6.5, 10, 5, { fill: FEAT }, { j: 2, in: "none", out: false, tr: { opacity: blinkTr(c.D, Math.round(c.D * 0.52)).closed } }),
+  L("ellipse", 13.5, -9, 11, 9, { fill: FEAT }, { j: 3 }),
+  L("ellipse", 13.5, -4.5, 12.5, 10, { fill: c.color }, { j: 3 }),
+  brow(4, 13, -19, -14),
+  ...smirkM(c, 5),
+  ...cheeks(c, 6, 9),
+];
+const specParty = (c) => [
+  ...faceBase(c, 0),
+  ...arcEyes(c, 2),
+  ...laughM(c, 4),
+  /* party hat */
+  L("triangle", 6, -38, 26, 30, { fill: BLUE, rot: 12 }, { j: 6, hold: { type: "bob", amp: 2.5, period: 900 } }),
+  L("rect", 6, -34, 21, 4, { fill: PURE, cr: 49, rot: 12 }, { j: 7 }),
+  L("rect", 7, -42, 13, 4, { fill: GOLD, cr: 49, rot: 12 }, { j: 7 }),
+  L("ellipse", 9.5, -53, 9, 9, { fill: PINK }, { j: 8, hold: { type: "bob", amp: 3, period: 900 } }),
+  /* confetti bits drift up */
+  L("rect", -30, -24, 6, 6, { fill: GOLD, rot: 24 }, { j: 9, in: "none", out: false, tr: driftTr(c, -30, -24, -4, -14, 1100) }),
+  L("ellipse", 32, -16, 5.5, 5.5, { fill: MINT }, { j: 10, in: "none", out: false, tr: driftTr(c, 32, -16, 4, -16, 1250, { phase: 380 }) }),
+  L("rect", -36, 2, 5, 5, { fill: PINK, rot: -18 }, { j: 11, in: "none", out: false, tr: driftTr(c, -36, 2, -5, -15, 1000, { phase: 700 }) }),
+];
+const specCry = (c) => [
+  ...faceBase(c, 0),
+  ...sadBrows(2),
+  ...dotEyes(c, 3, -8),
+  ...frownM(c, 4),
+  /* big tears welling + falling from each eye */
+  ...dropS(5, -13.5, 2, 1.25, TEAR_C, { in: "none", out: false, tr: driftTr(c, -13.5, 2, 0, 24, 1150) }),
+  ...dropS(6, 13.5, 2, 1.25, TEAR_C, { in: "none", out: false, tr: driftTr(c, 13.5, 2, 0, 24, 1150, { phase: 560 }) }),
+];
+const specSad = (c) => [
+  LG("Sad droop", [
+    ...faceBase(c, 0),
+    ...sadBrows(2),
+    ...dotEyes(c, 3, -8),
+    ...frownM(c, 4),
+  ], { hold: { type: "bob", amp: 2.5, period: 1500 } }),
+];
+const specAngry = (c) => {
+  const tm = Math.round(c.D * 0.5);
+  return [
+    ...faceBase(c, 0, { tr: { fill: [kf(tm, c.color, "easeInOutSine"), kf(tm + 320, lerpColor(c.color, "#FF4D3D", 0.28), "easeInOutSine"), kf(tm + 760, c.color, "linear")] } }),
+    ...angryBrows(2),
+    ...dotEyes(c, 3, -7, { h: 8.5 }),
+    ...frownM(c, 4),
+    L("cross", 27, -26, 12, 12, { fill: RED, rot: 45 }, { j: 5, hold: { type: "pulse", amp: 1.18, period: 620 } }),
+  ];
+};
+const specSurprised = (c) => [
+  ...faceBase(c, 0),
+  brow(2, -13, -21, -6), brow(3, 13, -21, 6),
+  ...dotEyes(c, 4, -9, { w: 9.5, h: 12, hold: { type: "pulse", amp: 1.08, period: 900 } }),
+  L("ellipse", -16, -12, 3, 3, { fill: PURE, op: 0.85 }, { j: 5, hold: { type: "pulse", amp: 1.08, period: 900 } }),
+  L("ellipse", 11, -12, 3, 3, { fill: PURE, op: 0.85 }, { j: 5, hold: { type: "pulse", amp: 1.08, period: 900 } }),
+  ...oMouth(c, 6, 15, 12, 14, { hold: { type: "pulse", amp: 1.14, period: 900 } }),
+];
+const specNeutral = (c) => [
+  LG("Neutral idle", [
+    ...faceBase(c, 0),
+    ...dotEyes(c, 2, -9, { blink: true }),
+    ...flatM(c, 4),
+  ], { hold: { type: "bob", amp: 1.8, period: 1500 } }),
+];
+const specSleepy = (c) => [
+  ...faceBase(c, 0),
+  ...shutEyes(c, 2),
+  ...oMouth(c, 4, 16, 7, 8),
+  /* snot bubble */
+  L("ellipse", 19, 6, 13, 13, { fill: "#BFE8FF", op: 0.9 }, { j: 5, hold: { type: "pulse", amp: 1.22, period: 1150 } }),
+  L("ellipse", 13.5, 11, 5, 5, { fill: "#BFE8FF", op: 0.9 }, { j: 5, hold: { type: "pulse", amp: 1.22, period: 1150 } }),
+  /* floating Z's */
+  LT("Z", 24, -18, 11, { fill: "#7FC4FF", fw: 800 }, { j: 6, in: "none", out: false, tr: driftTr(c, 24, -18, 7, -12, 1400, { ro: 0.95 }) }),
+  LT("Z", 32, -28, 14, { fill: "#7FC4FF", fw: 800 }, { j: 7, in: "none", out: false, tr: driftTr(c, 32, -28, 8, -13, 1400, { phase: 460, ro: 0.95 }) }),
+  LT("Z", 41, -39, 17, { fill: "#7FC4FF", fw: 800 }, { j: 8, in: "none", out: false, tr: driftTr(c, 41, -39, 8, -13, 1400, { phase: 920, ro: 0.95 }) }),
+];
+const specCool = (c) => [
+  ...faceBase(c, 0),
+  /* sunglasses */
+  L("rect", -12.5, -9, 19, 13, { fill: NAVY, cr: 40 }, { j: 2 }),
+  L("rect", 12.5, -9, 19, 13, { fill: NAVY, cr: 40 }, { j: 3 }),
+  L("rect", 0, -10.5, 8, 3.5, { fill: NAVY, cr: 49 }, { j: 4 }),
+  L("rect", -24.5, -11, 6, 3, { fill: NAVY, cr: 49, rot: 14 }, { j: 4 }),
+  L("rect", 24.5, -11, 6, 3, { fill: NAVY, cr: 49, rot: -14 }, { j: 4 }),
+  /* glint sweeping the left lens */
+  L("rect", -15, -9, 2.6, 9, { fill: PURE, op: 0.85, rot: 22 }, { j: 5, in: "none", out: false, tr: driftTr(c, -15, -9, 7, 0, 1500, { ro: 0.9 }) }),
+  ...smirkM(c, 6),
+  ...cheeks(c, 7, 10),
+];
+const specAngel = (c) => [
+  ...faceBase(c, 0),
+  ...arcEyes(c, 2),
+  ...smileM(c, 4),
+  ...cheeks(c, 5),
+  L("ellipse", 0, -43, 30, 9.5, { fill: "none", fm: "stroke", sC: GOLD, sW: 5 }, { j: 6, hold: { type: "bob", amp: 3, period: 1300 } }),
+];
+const specDevil = (c) => {
+  c.faceShade = tone(c.color, -0.28);
+  return [
+    LG("Devil sway", [
+      ...faceBase(c, 0),
+      L("triangle", -20, -33, 13, 17, { fill: "#D64545", rot: -16 }, { j: 1, hold: { type: "pulse", amp: 1.08, period: 1100 } }),
+      L("triangle", 20, -33, 13, 17, { fill: "#D64545", rot: 16 }, { j: 2, hold: { type: "pulse", amp: 1.08, period: 1100 } }),
+      brow(3, -12, -18, 16), brow(4, 12, -18, -16),
+      ...dotEyes(c, 5, -8, { h: 8.5 }),
+      ...smirkM(c, 6),
+    ], { hold: { type: "rock", amp: 2.5, period: 1100 } }),
+  ];
+};
+const specTongueOut = (c) => [
+  ...faceBase(c, 0),
+  ...dotEyes(c, 2, -10, { blink: true }),
+  /* tongue sticks out below the smile */
+  L("rect", 3, 25, 13, 17, { fill: TONGUE_C, cr: 45 }, { j: 3, hold: { type: "rock", amp: 7, period: 700 } }),
+  L("ellipse", 0, 13, 30, 22, { fill: FEAT }, { j: 4 }),
+  L("ellipse", 0, 6, 34, 22, { fill: c.color }, { j: 4 }),
+];
+const specSick = (c) => {
+  c.faceShade = tone(c.color, -0.22);
+  return [
+    ...faceBase(c, 0),
+    ...shutEyes(c, 2, -8),
+    /* queasy squiggle mouth: two small ∩ arcs side by side */
+    L("ellipse", -6, 18, 12, 8, { fill: FEAT }, { j: 4 }),
+    L("ellipse", -6, 22.5, 13, 8, { fill: c.color }, { j: 4 }),
+    L("ellipse", 7, 18.5, 12, 8, { fill: FEAT }, { j: 4 }),
+    L("ellipse", 7, 23, 13, 8, { fill: c.color }, { j: 4 }),
+    /* cold sweat drop sliding down the temple */
+    ...dropS(5, 27, -16, 1.05, TEAR_C, { in: "none", out: false, tr: driftTr(c, 27, -16, 0, 13, 1500, { ro: 0.9 }) }),
+  ];
+};
+const specWorried = (c) => [
+  ...faceBase(c, 0),
+  brow(2, -13, -20, 2), brow(3, 13, -21, -14),
+  ...dotEyes(c, 4, -9, { hold: { type: "sway", amp: 2, period: 850 } }),
+  ...frownM(c, 5, 13),
+  ...dropS(6, 27, -15, 1.05, TEAR_C, { in: "none", out: false, tr: driftTr(c, 27, -15, 0, 13, 1350, { ro: 0.9 }) }),
+];
+const specMindBlown = (c) => [
+  ...faceBase(c, 0),
+  ...dotEyes(c, 2, -7, { w: 6, h: 8 }),
+  ...oMouth(c, 4, 16, 9, 11),
+  /* the blast where the crown was */
+  L("star", 0, -42, 34, 34, { fill: ORANGE }, { j: 5, hold: { type: "pulse", amp: 1.14, period: 640 } }),
+  L("star", 0, -42, 20, 20, { fill: GOLD, rot: 18 }, { j: 6, hold: { type: "pulse", amp: 1.22, period: 820 } }),
+  L("ellipse", -18, -50, 6, 6, { fill: ORANGE }, { j: 7, in: "none", out: false, tr: driftTr(c, -18, -50, -6, -12, 1050) }),
+  L("ellipse", 17, -54, 5, 5, { fill: GOLD }, { j: 8, in: "none", out: false, tr: driftTr(c, 17, -54, 6, -12, 900, { phase: 420 }) }),
+  L("ellipse", 0, -62, 4.5, 4.5, { fill: PURE }, { j: 9, in: "none", out: false, tr: driftTr(c, 0, -62, 0, -12, 1150, { phase: 700 }) }),
+];
 
-/* ---------- COMMUNICATION ---------- */
-function buildChat(opts) {
-  const { color, D, g, stroke, S } = iconCtx(opts);
-  const dots = [-14, 0, 14].map((dx, i) =>
-    S(`Dot ${i + 1}`, g("ellipse", dx, -4, 7.5, 7.5, { fill: color }), i + 2, { stag: 130, hold: { type: "bob", amp: -3.5, period: 620 } }));
-  return kitClip("Chat Bubble", [
-    S("Bubble", g("rect", 0, -4, 64, 44, { ...stroke, cornerR: 28 }), 0),
-    S("Tail", g("triangle", -18, 21, 15, 12, { ...stroke, rotation: 180 }), 1),
-    ...dots,
-  ], D);
-}
-function buildMail(opts) {
-  const { D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Mail", [
-    S("Envelope", g("rect", 0, 0, 66, 44, { ...stroke, cornerR: 10 }), 0),
-    S("Flap left", g("rect", -14, -6, 36, 5.5, { ...stroke, rotation: 32, cornerR: 49 }), 1, { enter: "rise", stag: 140 }),
-    S("Flap right", g("rect", 14, -6, 36, 5.5, { ...stroke, rotation: -32, cornerR: 49 }), 2, { enter: "rise", stag: 140 }),
-  ], D);
-}
-function buildMegaphone(opts) {
-  const { color, D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Megaphone", [
-    S("Cone", g("triangle", 6, -4, 42, 48, { ...stroke, rotation: 90 }), 0),
-    S("Mouth", g("rect", -20, -4, 14, 22, stroke), 1),
-    S("Handle", g("rect", -12, 16, 8, 18, { fill: color, cornerR: 20 }), 2, { hold: { type: "sway", amp: 4 } }),
-  ], D);
-}
-function buildHeart(opts) {
-  const { D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Heart", [
-    S("Heart", g("heart", 0, 0, 62, 58, stroke), 0, { hold: { type: "heartbeat", period: 940 } }),
-  ], D);
-}
-function buildStar(opts) {
-  const { D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Star", [
-    S("Star", g("star", 0, 0, 64, 64, stroke), 0, { hold: { type: "pulse", amp: 1.09, period: 760 } }),
-  ], D);
-}
-function buildShare(opts) {
-  const { color, D, g, S } = iconCtx(opts);
-  return kitClip("Share Nodes", [
-    S("Link up", g("rect", 1, -11, 30, 4.5, { fill: color, cornerR: 49, rotation: -33, opacity: 0.75 }), 1, { enter: "rise" }),
-    S("Link down", g("rect", 1, 11, 30, 4.5, { fill: color, cornerR: 49, rotation: 33, opacity: 0.75 }), 2, { enter: "rise" }),
-    S("Node left", g("ellipse", -20, 0, 15, 15, { fill: color }), 0, { hold: { type: "bob", amp: 3 } }),
-    S("Node up", g("ellipse", 17, -21, 15, 15, { fill: color }), 3),
-    S("Node down", g("ellipse", 17, 21, 15, 15, { fill: color }), 4),
-  ], D);
-}
+/* ---------- REACTIONS (9) ---------- */
+const specHeart = (c) => [
+  L("heart", 0, 2.5, 64, 60, { fill: tone(c.color, -0.28) }, { j: 0, hold: { type: "heartbeat", period: 940 } }),
+  L("heart", 0, -1, 64, 60, { fill: c.color }, { j: 0, hold: { type: "heartbeat", period: 940 } }),
+  L("ellipse", -14, -15, 20, 10, { fill: PURE, op: 0.28, rot: -25 }, { j: 1, hold: { type: "heartbeat", period: 940 } }),
+  L("cross", 20, -18, 8, 8, { fill: PURE }, { j: 2, hold: { type: "blink", period: 1450 } }),
+];
+const specThumbsUp = (c) => [
+  L("rect", -25, 12, 13, 30, { fill: BLUE, cr: 25 }, { j: 0 }),
+  L("rect", -24, 14, 13, 30, { fill: tone(BLUE, -0.22), cr: 25, op: 0.55 }, { j: 0 }),
+  L("rect", 4, 10, 34, 30, { fill: tone(c.color, -0.16), cr: 30 }, { j: 1 }),
+  L("rect", 4, 8, 34, 30, { fill: c.color, cr: 30 }, { j: 1 }),
+  L("rect", -12, -12, 13, 25, { fill: c.color, cr: 49, rot: -38 }, { j: 2, hold: { type: "bob", amp: 2.5, period: 800 } }),
+  L("rect", 13, 2, 14, 3.4, { fill: tone(c.color, -0.3), cr: 49 }, { j: 3 }),
+  L("rect", 13, 10, 14, 3.4, { fill: tone(c.color, -0.3), cr: 49 }, { j: 3 }),
+  L("rect", 13, 18, 14, 3.4, { fill: tone(c.color, -0.3), cr: 49 }, { j: 3 }),
+  L("rect", -8, -30, 3.5, 9, { fill: GOLD, cr: 49, rot: -20 }, { j: 4, hold: { type: "blink", period: 900 } }),
+  L("rect", 2, -34, 3.5, 10, { fill: GOLD, cr: 49 }, { j: 5, hold: { type: "blink", period: 1100 } }),
+  L("rect", 12, -30, 3.5, 9, { fill: GOLD, cr: 49, rot: 20 }, { j: 6, hold: { type: "blink", period: 1300 } }),
+];
+const specClap = (c) => {
+  const t0 = 720, t1 = c.D - EXIT0, per = 720;
+  const clap = (side) => {
+    const rot = [], xs = [];
+    for (let t = t0; t + per <= t1 + 1; t += per) {
+      rot.push(kf(t, 18 * side, "easeOutQuad"), kf(t + per * 0.35, 7 * side, "easeInOutSine"), kf(t + per * 0.7, 18 * side, "linear"));
+      xs.push(kf(t, bx(17 * side, c.u), "easeOutQuad"), kf(t + per * 0.35, bx(8 * side, c.u), "easeInOutSine"), kf(t + per * 0.7, bx(17 * side, c.u), "linear"));
+    }
+    rot.push(kf(t1, 18 * side, "linear")); xs.push(kf(t1, bx(17 * side, c.u), "linear"));
+    return { rotation: rot, x: xs };
+  };
+  const hand = (side, j) => [
+    L("rect", 17 * side, 2, 20, 28, { fill: c.color, cr: 40, rot: 18 * side }, { j, tr: clap(side) }),
+    L("ellipse", 8 * side, -8, 9, 11, { fill: c.color, rot: 18 * side }, { j, tr: clap(side) }),
+    L("rect", 18 * side, 9, 12, 3, { fill: tone(c.color, -0.25), cr: 49, rot: 18 * side }, { j: j + 1, tr: clap(side) }),
+  ];
+  return [
+    ...hand(-1, 0),
+    ...hand(1, 2),
+    L("rect", -6, -26, 3.5, 9, { fill: GOLD, cr: 49, rot: -24 }, { j: 4, hold: { type: "blink", period: 720 } }),
+    L("rect", 0, -29, 3.5, 10, { fill: GOLD, cr: 49 }, { j: 5, hold: { type: "blink", period: 720 } }),
+    L("rect", 6, -26, 3.5, 9, { fill: GOLD, cr: 49, rot: 24 }, { j: 6, hold: { type: "blink", period: 720 } }),
+  ];
+};
+const specFire = () => {
+  const sway = { type: "sway", amp: 2, period: 900 };
+  return [
+    L("ellipse", 0, 6, 44, 44, { fill: ORANGE }, { j: 0, hold: sway }),
+    L("triangle", 0, -16, 30, 38, { fill: ORANGE }, { j: 0, hold: sway }),
+    L("ellipse", 0, 9, 29, 29, { fill: "#FFB64A" }, { j: 0, hold: { type: "flicker", seed: 5 } }),
+    L("triangle", 0, -6, 19, 26, { fill: "#FFB64A" }, { j: 0, hold: { type: "flicker", seed: 5 } }),
+    L("ellipse", 0, 12, 15, 15, { fill: GOLD }, { j: 0, hold: { type: "flicker", seed: 9 } }),
+    L("triangle", 0, 4, 9, 15, { fill: GOLD }, { j: 0, hold: { type: "flicker", seed: 9 } }),
+  ];
+};
+const specStarBadge = (c) => [
+  L("star", 0, 2, 62, 62, { fill: tone(c.color, -0.25) }, { j: 0, hold: { type: "pulse", amp: 1.06, period: 820 } }),
+  L("star", 0, -1, 62, 62, { fill: c.color }, { j: 0, hold: { type: "pulse", amp: 1.06, period: 820 } }),
+  L("ellipse", -11, -14, 16, 9, { fill: PURE, op: 0.3, rot: -25 }, { j: 1, hold: { type: "pulse", amp: 1.06, period: 820 } }),
+  L("cross", 25, -20, 8, 8, { fill: PURE }, { j: 2, hold: { type: "blink", period: 1100 } }),
+  L("cross", -26, 12, 6, 6, { fill: PURE, op: 0.8 }, { j: 3, hold: { type: "blink", period: 1400 } }),
+];
+const specHundred = (c) => [
+  LT("100", 0, -8, 36, { fill: c.color, fw: 800, ff: "Archivo Black" }, { j: 0, hold: { type: "bob", amp: 3.5, period: 1000 } }),
+  L("rect", 0, 17, 46, 5.5, { fill: c.color, cr: 49 }, { j: 1, hold: { type: "bob", amp: 3.5, period: 1000 } }),
+  L("rect", 0, 25, 46, 5.5, { fill: tone(c.color, -0.25), cr: 49 }, { j: 2, hold: { type: "bob", amp: 3.5, period: 1000 } }),
+];
+const specMuscles = (c) => [
+  /* flexed arm 💪: upper arm horizontal, forearm + fist rise on the right */
+  L("rect", 0, 15, 48, 18, { fill: tone(c.color, -0.18), cr: 45 }, { j: 0 }),
+  L("rect", 0, 13, 48, 18, { fill: c.color, cr: 45 }, { j: 0 }),
+  L("ellipse", 8, 2, 17, 15, { fill: c.color }, { j: 1, hold: { type: "pulse", amp: 1.08, period: 900 } }),
+  L("rect", 19, -10, 17, 30, { fill: c.color, cr: 45 }, { j: 2, hold: { type: "rock", amp: 3, period: 900 } }),
+  L("ellipse", 19, -27, 16, 15, { fill: c.color }, { j: 3, hold: { type: "rock", amp: 3, period: 900 } }),
+  L("rect", 19, -28, 9, 2.6, { fill: tone(c.color, -0.28), cr: 49 }, { j: 4, hold: { type: "rock", amp: 3, period: 900 } }),
+  L("rect", 19, -23.5, 9, 2.6, { fill: tone(c.color, -0.28), cr: 49 }, { j: 4, hold: { type: "rock", amp: 3, period: 900 } }),
+  L("ellipse", 12, 9, 7, 10, { fill: tone(c.color, -0.24), op: 0.55, rot: -15 }, { j: 5 }),
+  L("ellipse", 6, -2, 9, 5, { fill: PURE, op: 0.3, rot: -18 }, { j: 6 }),
+];
+const specBrokenHeart = (c) => [
+  L("heart", 0, 2.5, 62, 58, { fill: tone(c.color, -0.32) }, { j: 0, hold: { type: "rock", amp: 3, period: 1300 } }),
+  L("heart", 0, -1, 62, 58, { fill: c.color }, { j: 0, hold: { type: "rock", amp: 3, period: 1300 } }),
+  L("bolt", 1, -1, 18, 34, { fill: tone(c.color, -0.55), rot: 6 }, { j: 1, hold: { type: "blink", period: 1600 } }),
+  L("heart", -25, -18, 10, 9, { fill: c.color, rot: -18 }, { j: 2, in: "none", out: false, tr: driftTr(c, -25, -18, -7, -9, 1250, { ro: 0.85 }) }),
+  L("heart", 25, -22, 8, 7.5, { fill: tone(c.color, -0.2), rot: 16 }, { j: 3, in: "none", out: false, tr: driftTr(c, 25, -22, 7, -9, 1100, { phase: 500, ro: 0.85 }) }),
+];
+const specPartyPopper = (c) => [
+  L("triangle", -8, 16, 30, 36, { fill: c.color, rot: -38 }, { j: 0, hold: { type: "rock", amp: 4, period: 900 } }),
+  L("rect", -8, 12, 20, 4.5, { fill: GOLD, cr: 49, rot: -38 }, { j: 1, hold: { type: "rock", amp: 4, period: 900 } }),
+  L("rect", -11, 22, 14, 4.5, { fill: PURE, cr: 49, rot: -38 }, { j: 1, hold: { type: "rock", amp: 4, period: 900 } }),
+  L("star", 12, -14, 13, 13, { fill: GOLD }, { j: 2, in: "none", out: false, tr: driftTr(c, 12, -14, 10, -10, 1150) }),
+  L("rect", 20, -2, 6, 6, { fill: BLUE, rot: 20 }, { j: 3, in: "none", out: false, tr: driftTr(c, 20, -2, 13, -7, 950, { phase: 300 }) }),
+  L("ellipse", 4, -22, 6, 6, { fill: PINK }, { j: 4, in: "none", out: false, tr: driftTr(c, 4, -22, 4, -13, 1050, { phase: 620 }) }),
+  L("rect", 28, -16, 5, 5, { fill: MINT, rot: -20 }, { j: 5, in: "none", out: false, tr: driftTr(c, 28, -16, 11, -9, 1250, { phase: 850 }) }),
+  L("ellipse", 14, 2, 5, 5, { fill: GOLD }, { j: 6, in: "none", out: false, tr: driftTr(c, 14, 2, 15, -4, 880, { phase: 150 }) }),
+];
 
-/* ---------- DEVICES ---------- */
-function buildPhone(opts) {
-  const { color, D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Phone", [
-    S("Body", g("rect", 0, 0, 42, 70, { ...stroke, cornerR: 18 }), 0),
-    S("Speaker", g("rect", 0, -24, 15, 4, { fill: color, cornerR: 49, opacity: 0.8 }), 1),
-    S("Home dot", g("ellipse", 0, 26, 8, 8, { fill: color }), 2, { hold: { type: "pulse", amp: 1.18, period: 820 } }),
-  ], D);
-}
-function buildLaptop(opts) {
-  const { color, D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Laptop", [
-    S("Screen", g("rect", 0, -9, 64, 40, { ...stroke, cornerR: 8 }), 0, { enter: "rise" }),
-    S("Base", g("rect", 0, 17, 78, 6, { fill: color, cornerR: 49 }), 1, { enter: "rise" }),
-  ], D);
-}
-function buildMonitor(opts) {
-  const { color, D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Monitor", [
-    S("Screen", g("rect", 0, -11, 68, 44, { ...stroke, cornerR: 8 }), 0),
-    S("Stand", g("rect", 0, 20, 6, 15, { fill: color }), 1),
-    S("Foot", g("rect", 0, 29, 30, 5, { fill: color, cornerR: 49 }), 2),
-  ], D);
-}
-function buildTablet(opts) {
-  const { color, D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Tablet", [
-    S("Body", g("rect", 0, 0, 52, 68, { ...stroke, cornerR: 12 }), 0),
-    S("Dot", g("ellipse", 0, 26, 6.5, 6.5, { fill: color }), 1, { hold: { type: "blink", period: 1400 } }),
-  ], D);
-}
-function buildWatch(opts) {
-  const { color, D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Watch", [
-    S("Strap top", g("rect", 0, -27, 17, 13, { fill: color, cornerR: 24, opacity: 0.75 }), 0, { enter: "rise" }),
-    S("Face", g("rect", 0, 0, 36, 42, { ...stroke, cornerR: 26 }), 1),
-    S("Hand hour", g("rect", 4, 0, 3.4, 12, { fill: color, cornerR: 49, rotation: 62 }), 2),
-    S("Hand minute", g("rect", 0, -4, 3.4, 15, { fill: color, cornerR: 49 }), 3, { hold: { type: "spin", turns: 2 } }),
-    S("Strap bottom", g("rect", 0, 27, 17, 13, { fill: color, cornerR: 24, opacity: 0.75 }), 4, { enter: "rise" }),
-  ], D);
-}
-function buildCamera(opts) {
-  const { color, D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Camera", [
-    S("Bump", g("rect", -14, -26, 20, 10, { fill: color, cornerR: 24 }), 1, { enter: "rise" }),
-    S("Body", g("rect", 0, 0, 66, 46, { ...stroke, cornerR: 16 }), 0),
-    S("Lens", g("ellipse", 2, 0, 22, 22, stroke), 2, { hold: { type: "pulse", amp: 1.12, period: 900 } }),
-    S("Flash", g("ellipse", 24, -14, 5.5, 5.5, { fill: color }), 3),
-  ], D);
-}
+/* ---------- OBJECTS (8) ---------- */
+const specBell = (c) => [
+  LG("Bell swing", [
+    L("ellipse", 0, -27, 9, 8, { fill: tone(c.color, -0.2) }, { j: 0 }),
+    L("ellipse", 0, -4, 38, 36, { fill: tone(c.color, -0.22) }, { j: 0 }),
+    L("ellipse", 0, -6, 38, 36, { fill: c.color }, { j: 0 }),
+    L("rect", 0, 14, 48, 17, { fill: tone(c.color, -0.22), cr: 40 }, { j: 1 }),
+    L("rect", 0, 12, 48, 17, { fill: c.color, cr: 40 }, { j: 1 }),
+    L("ellipse", -9, -14, 12, 16, { fill: PURE, op: 0.25, rot: -18 }, { j: 2 }),
+    L("ellipse", 0, 26, 12, 12, { fill: "#E8890C" }, { j: 3, hold: { type: "sway", amp: 3, period: 760 } }),
+  ], { hold: { type: "rock", amp: 6, period: 760 } }),
+  L("rect", -33, -12, 3.6, 10, { fill: GOLD, cr: 49, rot: -32 }, { j: 4, hold: { type: "blink", period: 780 } }),
+  L("rect", -36, 2, 3.6, 10, { fill: GOLD, cr: 49, rot: -68 }, { j: 5, hold: { type: "blink", period: 920 } }),
+  L("rect", 33, -12, 3.6, 10, { fill: GOLD, cr: 49, rot: 32 }, { j: 6, hold: { type: "blink", period: 780 } }),
+  L("rect", 36, 2, 3.6, 10, { fill: GOLD, cr: 49, rot: 68 }, { j: 7, hold: { type: "blink", period: 920 } }),
+];
+const specGift = (c) => [
+  L("rect", 0, 13, 46, 32, { fill: tone(c.color, -0.24), cr: 14 }, { j: 0 }),
+  L("rect", 0, 11, 46, 32, { fill: c.color, cr: 14 }, { j: 0 }),
+  L("rect", 0, 11, 10, 32, { fill: GOLD }, { j: 1 }),
+  LG("Lid pop", [
+    L("rect", 0, -9, 54, 15, { fill: tone(c.color, -0.24), cr: 18 }, { j: 2 }),
+    L("rect", 0, -11, 54, 15, { fill: c.color, cr: 18 }, { j: 2 }),
+    L("rect", 0, -11, 10, 15, { fill: GOLD }, { j: 3 }),
+    L("ellipse", -8, -24, 14, 9, { fill: GOLD, rot: -28 }, { j: 4, hold: { type: "pulse", amp: 1.1, period: 720 } }),
+    L("ellipse", 8, -24, 14, 9, { fill: GOLD, rot: 28 }, { j: 4, hold: { type: "pulse", amp: 1.1, period: 720 } }),
+    L("ellipse", 0, -21, 7, 6, { fill: tone(GOLD, -0.25) }, { j: 5 }),
+  ], { tr: hopTr(c, by(0, c.u), -7, Math.round(c.D * 0.55)) }),
+];
+const specTrophy = (c) => [
+  L("ellipse", -25, -10, 17, 19, { fill: "none", fm: "stroke", sC: tone(c.color, -0.15), sW: 5.5 }, { j: 0 }),
+  L("ellipse", 25, -10, 17, 19, { fill: "none", fm: "stroke", sC: tone(c.color, -0.15), sW: 5.5 }, { j: 0 }),
+  L("rect", 0, -6, 40, 32, { fill: tone(c.color, -0.22), cr: 28 }, { j: 1 }),
+  L("rect", 0, -8, 40, 32, { fill: c.color, cr: 28 }, { j: 1 }),
+  L("star", 0, -9, 14, 14, { fill: PURE, op: 0.92 }, { j: 2 }),
+  L("rect", 0, 14, 10, 13, { fill: tone(c.color, -0.15) }, { j: 3 }),
+  L("rect", 0, 25, 32, 9, { fill: tone(c.color, -0.28), cr: 25 }, { j: 4 }),
+  L("rect", -4, -8, 3.6, 22, { fill: PURE, op: 0.55, rot: 18 }, { j: 5, in: "none", out: false, tr: driftTr(c, -10, -8, 18, 0, 1600, { ro: 0.55 }) }),
+];
+const specRocket = (c) => {
+  const hover = { type: "bob", amp: 4, period: 1100 };
+  return [
+    L("ellipse", 0, 36, 19, 19, { fill: ORANGE }, { j: 0, hold: { type: "flicker", seed: 6 } }),
+    L("triangle", 0, 33, 13, 17, { fill: ORANGE, rot: 180 }, { j: 0, hold: { type: "flicker", seed: 6 } }),
+    L("ellipse", 0, 37, 10, 10, { fill: GOLD }, { j: 0, hold: { type: "flicker", seed: 12 } }),
+    L("triangle", 0, 34, 7, 10, { fill: GOLD, rot: 180 }, { j: 0, hold: { type: "flicker", seed: 12 } }),
+    L("triangle", -17, 18, 15, 19, { fill: RED, rot: -90 }, { j: 1 }),
+    L("triangle", 17, 18, 15, 19, { fill: RED, rot: 90 }, { j: 2 }),
+    L("rect", 0, 0, 26, 52, { fill: tone(c.color, -0.32), cr: 45 }, { j: 3, hold: hover }),
+    L("rect", 0, -2, 26, 52, { fill: c.color, cr: 45 }, { j: 3, hold: hover }),
+    L("triangle", 0, -31, 26, 17, { fill: RED }, { j: 4, hold: hover }),
+    L("ellipse", 0, -10, 14, 14, { fill: tone(c.color, -0.35) }, { j: 5, hold: hover }),
+    L("ellipse", 0, -10, 9.5, 9.5, { fill: BLUE }, { j: 6, hold: hover }),
+    L("ellipse", -2, -12, 3, 3, { fill: PURE, op: 0.85 }, { j: 7, hold: hover }),
+  ];
+};
+const specLightning = (c) => [
+  L("bolt", 1.5, 2, 46, 64, { fill: tone(c.color, -0.3) }, { j: 0, hold: { type: "pulse", amp: 1.05, period: 700 } }),
+  L("bolt", 0, -1, 46, 64, { fill: c.color }, { j: 0, hold: { type: "flicker", seed: 11 } }),
+  L("ellipse", -7, -17, 8, 15, { fill: PURE, op: 0.4, rot: 14 }, { j: 1 }),
+];
+const specCoffee = (c) => [
+  L("rect", 0, 27, 54, 8, { fill: tone(c.color, -0.3), cr: 49 }, { j: 0 }),
+  L("ellipse", 24, 5, 14, 17, { fill: "none", fm: "stroke", sC: tone(c.color, -0.38), sW: 5 }, { j: 1 }),
+  L("rect", 0, 7, 42, 34, { fill: tone(c.color, -0.34), cr: 18 }, { j: 2 }),
+  L("rect", 0, 5, 42, 34, { fill: c.color, cr: 18 }, { j: 2 }),
+  L("ellipse", 0, -9, 34, 11, { fill: "#8A5A3B" }, { j: 3 }),
+  L("ellipse", 0, -10, 34, 10, { fill: "#A06A42" }, { j: 3 }),
+  L("rect", -6, -24, 4.5, 13, { fill: PURE, cr: 49, rot: -8 }, { j: 4, in: "none", out: false, tr: driftTr(c, -6, -24, -2, -13, 1500, { ro: 0.75 }) }),
+  L("rect", 7, -27, 4.5, 13, { fill: PURE, cr: 49, rot: 8 }, { j: 5, in: "none", out: false, tr: driftTr(c, 7, -27, 2, -13, 1500, { phase: 700, ro: 0.75 }) }),
+];
+const specGem = (c) => {
+  const rock = { type: "rock", amp: 3, period: 1400 };
+  return [
+    L("diamond", 0, 4, 56, 48, { fill: tone(c.color, -0.25) }, { j: 0, hold: rock }),
+    L("diamond", 0, 1, 56, 48, { fill: c.color }, { j: 0, hold: rock }),
+    L("diamond", 0, -10, 30, 20, { fill: tone(c.color, 0.32), op: 0.85 }, { j: 1, hold: rock }),
+    L("rect", -9, 2, 3, 26, { fill: PURE, op: 0.4, cr: 49, rot: 28 }, { j: 2, hold: rock }),
+    L("rect", 11, 0, 3, 30, { fill: PURE, op: 0.28, cr: 49, rot: -32 }, { j: 2, hold: rock }),
+    L("cross", 25, -18, 9, 9, { fill: PURE }, { j: 3, hold: { type: "blink", period: 1200 } }),
+    L("cross", -24, 16, 6.5, 6.5, { fill: PURE, op: 0.85 }, { j: 4, hold: { type: "blink", period: 1500 } }),
+  ];
+};
+const specBalloon = (c) => {
+  const bob = { type: "bob", amp: 6, period: 1400 };
+  return [
+    L("rect", 0, 36, 2.6, 22, { fill: tone(c.color, -0.45), cr: 49 }, { j: 0, hold: { type: "rock", amp: 8, period: 1300 } }),
+    L("triangle", 0, 22, 10, 8, { fill: tone(c.color, -0.3), rot: 180 }, { j: 1, hold: bob }),
+    L("ellipse", 0, -6, 45, 53, { fill: tone(c.color, -0.26) }, { j: 2, hold: bob }),
+    L("ellipse", 0, -8, 45, 53, { fill: c.color }, { j: 2, hold: bob }),
+    L("ellipse", -11, -22, 13, 19, { fill: PURE, op: 0.3, rot: -18 }, { j: 3, hold: bob }),
+  ];
+};
 
-/* ---------- WEATHER ---------- */
-function buildSun(opts) {
-  const { color, D, g, stroke } = iconCtx(opts);
-  const kids = [gpart("shape", "Core", g("ellipse", 0, 0, 30, 30, stroke), 0)];
+/* ---------- WEATHER / NATURE (6) ---------- */
+const specSun = (c) => {
+  const kids = [
+    L("ellipse", 0, 1.5, 34, 34, { fill: tone(c.color, -0.2) }, { j: 0 }),
+    L("ellipse", 0, 0, 34, 34, { fill: c.color }, { j: 0 }),
+    L("ellipse", -6, -7, 10, 6, { fill: PURE, op: 0.35, rot: -20 }, { j: 1 }),
+  ];
   for (let i = 0; i < 8; i++) {
     const a = (i * Math.PI) / 4;
-    kids.push(gpart("shape", `Ray ${i + 1}`, g("rect", Math.cos(a) * 32, Math.sin(a) * 32, 13, 5.5, { fill: color, cornerR: 49, rotation: i * 45 }), i + 1, { stag: 60 }));
+    kids.push(L("rect", Math.cos(a) * 28, Math.sin(a) * 28, 12, 5.5, { fill: c.color, cr: 49, rot: i * 45 }, { j: i + 2, stag: 60 }));
   }
-  return kitClip("Sun", [groupClip("Sun spin", kids, D, { spin: 0.5 })], D);
-}
-function buildCloud(opts) {
-  const { color, D, g, S } = iconCtx(opts);
-  return kitClip("Cloud", [
-    S("Puff left", g("ellipse", -18, 8, 36, 26, { fill: color }), 0, { enter: "rise" }),
-    S("Puff mid", g("ellipse", 4, -2, 44, 36, { fill: color }), 1, { enter: "rise" }),
-    S("Puff right", g("ellipse", 22, 10, 30, 22, { fill: color }), 2, { enter: "rise" }),
-    S("Base", g("rect", 2, 16, 62, 16, { fill: color, cornerR: 49 }), 3, { enter: "rise", hold: { type: "sway", amp: 5 } }),
-  ], D);
-}
-function buildRain(opts) {
-  const { color, D, g, S } = iconCtx(opts);
-  const drops = [-16, 0, 16].map((dx, i) =>
-    S(`Drop ${i + 1}`, g("rect", dx, 26, 4.5, 12, { fill: color, cornerR: 49, rotation: 12 }), i + 3, {
-      stag: 150, hold: { type: "fall", amp: 15, period: 700 },
-    }));
-  return kitClip("Rain", [
-    S("Puff", g("ellipse", -4, -8, 46, 32, { fill: color }), 0, { enter: "rise" }),
-    S("Puff right", g("ellipse", 16, -2, 30, 24, { fill: color }), 1, { enter: "rise" }),
-    S("Base", g("rect", 2, 8, 58, 14, { fill: color, cornerR: 49 }), 2, { enter: "rise" }),
-    ...drops,
-  ], D);
-}
-function buildBolt(opts) {
-  const { D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Lightning", [
-    S("Bolt", g("bolt", 0, 0, 48, 64, stroke), 0, { hold: { type: "flicker", seed: 11 } }),
-  ], D);
-}
-function buildSnow(opts) {
-  const { color, D, g, stroke } = iconCtx(opts);
-  const kids = [0, 60, 120].map((rot, i) =>
-    gpart("shape", `Arm ${i + 1}`, g("rect", 0, 0, 52, 6, { fill: color, cornerR: 49, rotation: rot }), i, { stag: 90 }));
-  kids.push(gpart("shape", "Core", g("ellipse", 0, 0, 11, 11, stroke), 3));
-  return kitClip("Snowflake", [groupClip("Snow spin", kids, D, { spin: 0.5 })], D);
-}
-function buildWind(opts) {
-  const { color, D, g, S } = iconCtx(opts);
-  return kitClip("Wind", [
-    S("Gust 1", g("rect", -4, -14, 42, 5.5, { fill: color, cornerR: 49 }), 0, { enter: "rise", stag: 110, hold: { type: "sway", amp: 9, period: 900 } }),
-    S("Gust 2", g("rect", 6, 2, 34, 5.5, { fill: color, cornerR: 49, opacity: 0.8 }), 1, { enter: "rise", stag: 110, hold: { type: "sway", amp: 12, period: 760 } }),
-    S("Gust 3", g("rect", -8, 18, 38, 5.5, { fill: color, cornerR: 49, opacity: 0.6 }), 2, { enter: "rise", stag: 110, hold: { type: "sway", amp: 7, period: 1040 } }),
-  ], D);
+  return [LG("Sun rays", kids, { spin: 0.5 })];
+};
+/* cloud: shade puffs offset down + main puffs (8 layers, one j → one motion) */
+const cloudPuffs = (c, j, o = {}) => [
+  L("ellipse", -18, 10, 34, 24, { fill: lerpColor(c.color, "#8FA3C8", 0.62) }, { j, hold: o.hold }),
+  L("ellipse", 3, 0, 42, 32, { fill: lerpColor(c.color, "#8FA3C8", 0.62) }, { j, hold: o.hold }),
+  L("ellipse", 21, 12, 28, 20, { fill: lerpColor(c.color, "#8FA3C8", 0.62) }, { j, hold: o.hold }),
+  L("rect", 2, 17, 60, 15, { fill: tone(c.color, -0.3), cr: 49 }, { j, hold: o.hold }),
+  L("ellipse", -18, 7, 34, 24, { fill: c.color }, { j, hold: o.hold }),
+  L("ellipse", 3, -3, 42, 32, { fill: c.color }, { j, hold: o.hold }),
+  L("ellipse", 21, 9, 28, 20, { fill: c.color }, { j, hold: o.hold }),
+  L("rect", 2, 14, 60, 15, { fill: c.color, cr: 49 }, { j, hold: o.hold }),
+];
+const specCloud = (c) => cloudPuffs(c, 0, { hold: { type: "sway", amp: 4, period: 1500 } });
+const specRain = (c) => [
+  ...cloudPuffs(c, 0),
+  ...dropS(1, -15, 27, 1.1, BLUE, { in: "none", out: false, tr: driftTr(c, -15, 27, 0, 17, 850) }),
+  ...dropS(2, 1, 29, 1.1, BLUE, { in: "none", out: false, tr: driftTr(c, 1, 29, 0, 17, 850, { phase: 280 }) }),
+  ...dropS(3, 16, 27, 1.1, BLUE, { in: "none", out: false, tr: driftTr(c, 16, 27, 0, 17, 850, { phase: 560 }) }),
+];
+const specRainbow = () => {
+  const bob = { type: "bob", amp: 2.5, period: 1300 };
+  return [
+    L("ellipse", 0, 34, 84, 84, { fill: "none", fm: "stroke", sC: RED, sW: 8 }, { j: 0, in: "rise" }),
+    L("ellipse", 0, 34, 66, 66, { fill: "none", fm: "stroke", sC: GOLD, sW: 8 }, { j: 1, in: "rise" }),
+    L("ellipse", 0, 34, 48, 48, { fill: "none", fm: "stroke", sC: BLUE, sW: 8 }, { j: 2, in: "rise" }),
+    /* cloud bank hides the lower half of the rings */
+    L("rect", 0, 40, 92, 26, { fill: "#C7D3E8", cr: 49 }, { j: 3, hold: bob }),
+    L("ellipse", -28, 30, 30, 20, { fill: PURE }, { j: 4, hold: bob }),
+    L("ellipse", 0, 27, 36, 24, { fill: PURE }, { j: 4, hold: bob }),
+    L("ellipse", 28, 30, 30, 20, { fill: PURE }, { j: 4, hold: bob }),
+    L("rect", 0, 38, 92, 26, { fill: PURE, cr: 49 }, { j: 4, hold: bob }),
+  ];
+};
+const specMoon = (c) => {
+  const bob = { type: "bob", amp: 3, period: 1500 };
+  return [
+    L("ellipse", 0, 2, 58, 58, { fill: tone(c.color, -0.16) }, { j: 0, hold: bob }),
+    L("ellipse", 0, 0, 58, 58, { fill: c.color }, { j: 0, hold: bob }),
+    L("ellipse", -12, -10, 11, 11, { fill: tone(c.color, -0.22), op: 0.8 }, { j: 1, hold: bob }),
+    L("ellipse", 10, 6, 14, 14, { fill: tone(c.color, -0.22), op: 0.8 }, { j: 1, hold: bob }),
+    L("ellipse", -5, 17, 8, 8, { fill: tone(c.color, -0.22), op: 0.8 }, { j: 1, hold: bob }),
+    L("star", 29, -23, 9, 9, { fill: GOLD }, { j: 2, hold: { type: "blink", period: 1200 } }),
+    L("star", 36, 9, 6.5, 6.5, { fill: GOLD, op: 0.85 }, { j: 3, hold: { type: "blink", period: 1600 } }),
+  ];
+};
+const specStorm = (c) => [
+  ...cloudPuffs(c, 0),
+  L("bolt", 1, 25, 17, 26, { fill: tone(GOLD, -0.3) }, { j: 1, hold: { type: "flicker", seed: 8 } }),
+  L("bolt", 0, 24, 17, 26, { fill: GOLD }, { j: 1, hold: { type: "flicker", seed: 8 } }),
+  ...dropS(2, -16, 26, 1, BLUE, { in: "none", out: false, tr: driftTr(c, -16, 26, 0, 15, 900) }),
+  ...dropS(3, 16, 26, 1, BLUE, { in: "none", out: false, tr: driftTr(c, 16, 26, 0, 15, 900, { phase: 450 }) }),
+];
+
+/* ---------- COMMUNICATION / MEDIA (8) ---------- */
+const specChat = (c) => [
+  L("triangle", -17, 20, 16, 14, { fill: tone(c.color, -0.2), rot: 180 }, { j: 0 }),
+  L("rect", 0, -3, 58, 42, { fill: tone(c.color, -0.2), cr: 30 }, { j: 0 }),
+  L("rect", 0, -5, 58, 42, { fill: c.color, cr: 30 }, { j: 0 }),
+  L("ellipse", -14, -5, 7.5, 7.5, { fill: PURE }, { j: 1, hold: { type: "bob", amp: -3.5, period: 620 } }),
+  L("ellipse", 0, -5, 7.5, 7.5, { fill: PURE }, { j: 2, hold: { type: "bob", amp: -3.5, period: 620 } }),
+  L("ellipse", 14, -5, 7.5, 7.5, { fill: PURE }, { j: 3, hold: { type: "bob", amp: -3.5, period: 620 } }),
+];
+const specMail = (c) => [
+  L("rect", 0, 2, 60, 42, { fill: tone(c.color, -0.34), cr: 10 }, { j: 0 }),
+  L("rect", 0, 0, 60, 42, { fill: c.color, cr: 10 }, { j: 0 }),
+  L("triangle", 0, -8, 58, 26, { fill: tone(c.color, -0.44), rot: 180 }, { j: 1 }),
+  L("ellipse", 27, -19, 15, 15, { fill: RED, fm: "both", sC: PURE, sW: 3 }, { j: 2, hold: { type: "pulse", amp: 1.16, period: 900 } }),
+];
+const specPhone = (c) => {
+  const ring = { type: "rock", amp: 7, period: 520 };
+  return [
+    L("rect", 0, 0, 46, 15, { fill: tone(c.color, -0.22), cr: 49, rot: -45 }, { j: 0, hold: ring }),
+    L("rect", 0, -1.5, 46, 15, { fill: c.color, cr: 49, rot: -45 }, { j: 0, hold: ring }),
+    L("ellipse", -15, 15, 18, 18, { fill: c.color }, { j: 1, hold: ring }),
+    L("ellipse", 15, -15, 18, 18, { fill: c.color }, { j: 2, hold: ring }),
+    L("rect", 25, -25, 3.6, 10, { fill: tone(c.color, -0.35), cr: 49, rot: 45 }, { j: 3, hold: { type: "blink", period: 700 } }),
+    L("rect", 31, -31, 3.6, 10, { fill: tone(c.color, -0.35), cr: 49, rot: 45, op: 0.7 }, { j: 4, hold: { type: "blink", period: 950 } }),
+  ];
+};
+const specCamera = (c) => {
+  const lens = { type: "pulse", amp: 1.07, period: 1100 };
+  return [
+    L("rect", -13, -21, 18, 10, { fill: tone(c.color, -0.2), cr: 24 }, { j: 0 }),
+    L("rect", 0, 3, 60, 42, { fill: tone(c.color, -0.22), cr: 14 }, { j: 0 }),
+    L("rect", 0, 1, 60, 42, { fill: c.color, cr: 14 }, { j: 0 }),
+    L("ellipse", 2, 1, 30, 30, { fill: PURE }, { j: 1, hold: lens }),
+    L("ellipse", 2, 1, 20, 20, { fill: NAVY }, { j: 2, hold: lens }),
+    L("ellipse", -3, -4, 6, 6, { fill: PURE, op: 0.85 }, { j: 3, hold: lens }),
+    L("ellipse", 21, -13, 6, 6, { fill: tone(c.color, -0.35) }, { j: 4 }),
+    L("star", 21, -13, 13, 13, { fill: PURE }, { j: 5, hold: { type: "blink", period: 1700 } }),
+  ];
+};
+const specMusic = (c) => [
+  LG("Note groove", [
+    L("ellipse", -13, 16, 13, 10, { fill: tone(c.color, -0.22), rot: -18 }, { j: 0 }),
+    L("ellipse", -13, 14.5, 13, 10, { fill: c.color, rot: -18 }, { j: 0 }),
+    L("rect", -6, -3, 3.6, 36, { fill: c.color }, { j: 1 }),
+    L("ellipse", 13, 12, 13, 10, { fill: tone(c.color, -0.22), rot: -18 }, { j: 2 }),
+    L("ellipse", 13, 10.5, 13, 10, { fill: c.color, rot: -18 }, { j: 2 }),
+    L("rect", 20, -7, 3.6, 36, { fill: c.color }, { j: 3 }),
+    L("rect", 7, -25, 29, 6.5, { fill: c.color, cr: 49, rot: -9 }, { j: 4 }),
+  ], { hold: { type: "rock", amp: 4, period: 900 } }),
+  L("rect", -26, -14, 3.2, 8, { fill: tone(c.color, -0.3), cr: 49, rot: -28 }, { j: 5, hold: { type: "blink", period: 900 } }),
+  L("rect", 30, 14, 3.2, 8, { fill: tone(c.color, -0.3), cr: 49, rot: 28 }, { j: 6, hold: { type: "blink", period: 1150 } }),
+];
+const specPlay = (c) => [
+  L("ellipse", 0, 0, 64, 64, { fill: "none", fm: "stroke", sC: c.color, sW: 4 }, { j: 0, in: "none", out: false, tr: rippleTr(c, 0.9, 1.35, 1500, { ro: 0.6 }) }),
+  L("ellipse", 0, 2, 64, 64, { fill: tone(c.color, -0.24) }, { j: 1 }),
+  L("ellipse", 0, 0, 64, 64, { fill: c.color }, { j: 1 }),
+  L("ellipse", -12, -18, 18, 10, { fill: PURE, op: 0.25, rot: -22 }, { j: 2 }),
+  L("triangle", 6, 0, 22, 26, { fill: PURE, rot: 90 }, { j: 3, hold: { type: "pulse", amp: 1.09, period: 900 } }),
+];
+const specMic = (c) => {
+  const bob = { type: "bob", amp: 3, period: 1200 };
+  return [
+    L("rect", 0, 20, 5, 14, { fill: tone(c.color, -0.35) }, { j: 0 }),
+    L("rect", 0, 30, 26, 6, { fill: tone(c.color, -0.35), cr: 49 }, { j: 0 }),
+    L("rect", -13, 8, 4, 14, { fill: tone(c.color, -0.35), cr: 49, rot: -28 }, { j: 1 }),
+    L("rect", 13, 8, 4, 14, { fill: tone(c.color, -0.35), cr: 49, rot: 28 }, { j: 1 }),
+    L("rect", 0, -6, 24, 40, { fill: tone(c.color, -0.25), cr: 49 }, { j: 2, hold: bob }),
+    L("rect", 0, -8, 24, 40, { fill: c.color, cr: 49 }, { j: 2, hold: bob }),
+    L("rect", 0, -16, 14, 3, { fill: PURE, op: 0.45, cr: 49 }, { j: 3, hold: bob }),
+    L("rect", 0, -8, 14, 3, { fill: PURE, op: 0.45, cr: 49 }, { j: 3, hold: bob }),
+  ];
+};
+const specVolume = (c) => [
+  L("rect", -23, 0, 16, 26, { fill: c.color, cr: 20 }, { j: 0 }),
+  L("triangle", -3, 0, 26, 42, { fill: tone(c.color, -0.16), rot: 90 }, { j: 1 }),
+  L("rect", 14, 0, 6, 22, { fill: tone(c.color, -0.35), cr: 49 }, { j: 2, hold: { type: "pulse", amp: 1.28, period: 520 } }),
+  L("rect", 26, 0, 6, 34, { fill: tone(c.color, -0.35), cr: 49, op: 0.75 }, { j: 3, hold: { type: "pulse", amp: 1.16, period: 760 } }),
+];
+
+/* ---------- COMMERCE / MISC (6) ---------- */
+const specCart = (c) => {
+  const roll = { type: "sway", amp: 4, period: 900 };
+  return [
+    L("rect", -26, -15, 15, 5, { fill: tone(c.color, -0.3), cr: 49, rot: 24 }, { j: 0 }),
+    L("rect", 6, -18, 15, 13, { fill: GOLD, cr: 12 }, { j: 1, hold: { type: "bob", amp: 2.5, period: 800 } }),
+    L("rect", 2, -3, 48, 28, { fill: tone(c.color, -0.22), cr: 12 }, { j: 2, hold: roll }),
+    L("rect", 2, -5, 48, 28, { fill: c.color, cr: 12 }, { j: 2, hold: roll }),
+    L("rect", -6, -5, 3.4, 19, { fill: PURE, op: 0.35, cr: 49 }, { j: 3, hold: roll }),
+    L("rect", 10, -5, 3.4, 19, { fill: PURE, op: 0.35, cr: 49 }, { j: 3, hold: roll }),
+    L("ellipse", -10, 19, 11, 11, { fill: NAVY }, { j: 4 }),
+    L("ellipse", -10, 19, 4.5, 4.5, { fill: PURE, op: 0.85 }, { j: 4 }),
+    L("ellipse", 14, 19, 11, 11, { fill: NAVY }, { j: 5 }),
+    L("ellipse", 14, 19, 4.5, 4.5, { fill: PURE, op: 0.85 }, { j: 5 }),
+  ];
+};
+const specTag = (c) => [
+  LG("Tag dangle", [
+    L("diamond", 1.5, 4, 50, 50, { fill: tone(c.color, -0.24) }, { j: 0 }),
+    L("diamond", 0, 1, 50, 50, { fill: c.color }, { j: 0 }),
+    L("ellipse", -9, -9, 8.5, 8.5, { fill: PURE }, { j: 1 }),
+    L("rect", -18, -18, 12, 3, { fill: tone(c.color, -0.4), cr: 49, rot: -45 }, { j: 2 }),
+    LT("%", 3, 5, 19, { fill: PURE, fw: 800 }, { j: 3 }),
+  ], { hold: { type: "rock", amp: 6, period: 1100 } }),
+];
+const specPin = (c) => {
+  const bounce = { type: "bounce", amp: 9, period: 1100 };
+  return [
+    L("ellipse", 0, 38, 30, 7, { fill: NAVY, op: 0.18 }, { j: 0, hold: { type: "pulse", amp: 1.15, period: 1100 } }),
+    L("triangle", 0, 15, 27, 30, { fill: tone(c.color, -0.22), rot: 180 }, { j: 1, hold: bounce }),
+    L("ellipse", 0, -8, 40, 40, { fill: tone(c.color, -0.22) }, { j: 1, hold: bounce }),
+    L("triangle", 0, 13, 27, 30, { fill: c.color, rot: 180 }, { j: 1, hold: bounce }),
+    L("ellipse", 0, -10, 40, 40, { fill: c.color }, { j: 1, hold: bounce }),
+    L("ellipse", 0, -10, 14, 14, { fill: PURE }, { j: 2, hold: bounce }),
+  ];
+};
+const specCalendar = (c) => [
+  L("rect", -14, -27, 5, 11, { fill: tone(c.color, -0.4), cr: 49 }, { j: 0 }),
+  L("rect", 14, -27, 5, 11, { fill: tone(c.color, -0.4), cr: 49 }, { j: 0 }),
+  L("rect", 0, 2, 52, 46, { fill: tone(c.color, -0.18), cr: 10 }, { j: 1 }),
+  L("rect", 0, 0, 52, 46, { fill: c.color, cr: 10 }, { j: 1 }),
+  L("rect", 0, -16, 52, 13, { fill: RED, cr: 10 }, { j: 2 }),
+  ...[-13, 0, 13].flatMap((dx) => [0, 12].map((dy, i) =>
+    L("rect", dx, dy, 7.5, 7.5, { fill: tone(c.color, -0.25), cr: 20 }, { j: 3 + i }))),
+  L("rect", 0, 0, 7.5, 7.5, { fill: CORAL, cr: 20 }, { j: 4, hold: { type: "pulse", amp: 1.25, period: 900 } }),
+];
+const specLock = (c) => {
+  const tm = Math.round(c.D * 0.5);
+  return [
+    L("ellipse", 0, -15, 24, 28, { fill: "none", fm: "stroke", sC: tone(c.color, -0.4), sW: 6.5 }, { j: 0, tr: hopTr(c, by(-15, c.u), -4, tm) }),
+    L("rect", 0, 10, 44, 34, { fill: tone(c.color, -0.25), cr: 16 }, { j: 1 }),
+    L("rect", 0, 8, 44, 34, { fill: c.color, cr: 16 }, { j: 1 }),
+    L("ellipse", 0, 4, 9.5, 9.5, { fill: NAVY }, { j: 2 }),
+    L("rect", 0, 13, 4.6, 11, { fill: NAVY, cr: 49 }, { j: 2 }),
+    L("ellipse", -10, -1, 12, 6, { fill: PURE, op: 0.22, rot: -20 }, { j: 3 }),
+  ];
+};
+const specArrowUpRight = (c) => [
+  L("arrow", 1.5, 2.5, 58, 42, { fill: tone(c.color, -0.25), rot: -45 }, { j: 0, hold: { type: "sway", amp: 5, period: 800 } }),
+  L("arrow", 0, 0, 58, 42, { fill: c.color, rot: -45 }, { j: 0, hold: { type: "bob", amp: -5, period: 800 } }),
+  L("ellipse", 8, -8, 9, 15, { fill: PURE, op: 0.32, rot: -45 }, { j: 1, hold: { type: "bob", amp: -5, period: 800 } }),
+];
+
+/* ============================================================
+   BUILDER — interpret a spec list into a kit clip (either variant)
+   ============================================================ */
+function buildFlat(name, natural, specFn, opts) {
+  const o = iconOpts(opts);
+  const color = o.color || natural;
+  const D = o.dur, u = o.size / 100, animated = o.animated;
+  const c = { color, shade: tone(color, -0.26), light: tone(color, 0.3), dark: tone(color, -0.45), D, u, g: spec(u) };
+  const specs = specFn(c);
+
+  const animOpts = (a) => {
+    const oo = {};
+    if (a.in !== undefined) oo.enter = a.in;
+    if (a.stag != null) oo.stag = a.stag;
+    if (a.hold) oo.hold = a.hold;
+    if (a.tr) oo.tracks = a.tr;
+    if (a.out !== undefined) oo.exit = a.out;
+    if (a.es != null) oo.exitStart = a.es;
+    if (a.inT != null) oo.inT = a.inT;
+    if (a.outT != null) oo.outT = a.outT;
+    return oo;
+  };
+  const shapeProps = (x) => {
+    const p = { fill: x.fill === "none" ? (x.sC || color) : x.fill || color };
+    if (x.cr != null) p.cornerR = x.cr;
+    if (x.rot) p.rotation = x.rot;
+    if (x.op != null) p.opacity = x.op;
+    if (x.fm) { p.fillMode = x.fm; p.sC = x.sC || color; p.sW = x.sW || 3; }
+    if (x.blur) p.blur = x.blur;
+    return p;
+  };
+  const toShape = (s, i, j) => {
+    const p = c.g(s.shape, s.dx, s.dy, s.w, s.h, shapeProps(s.x));
+    if (animated) return part("shape", `Part ${i + 1}`, p, j, D, animOpts(s.a));
+    return layer("shape", `Part ${i + 1}`, { ...p, inT: 0, outT: null }, {});
+  };
+  const toText = (s, i, j) => {
+    const p = {
+      text: s.text, fontSize: Math.max(8, Math.round(s.fs * u)), fontWeight: s.x.fw || 800,
+      fontFamily: s.x.ff || "Inter", fill: s.x.fill || color, ls: s.x.ls || 0,
+      x: bx(s.dx, u), y: by(s.dy, u),
+    };
+    if (animated) return part("text", `Text ${i + 1}`, p, j, D, animOpts(s.a));
+    return layer("text", `Text ${i + 1}`, { ...p, inT: 0, outT: null }, {});
+  };
+  const toLayer = (s, i) => {
+    const j = s.a && s.a.j != null ? s.a.j : i;
+    if (s.k === "t") return toText(s, i, j);
+    if (s.k === "g") {
+      const kids = s.kids.map((ks, ki) => {
+        const kj = ks.a && ks.a.j != null ? ks.a.j : ki;
+        if (ks.k === "t") return toText(ks, ki, kj);
+        return toShape(ks, ki, kj);
+      });
+      if (!animated) return kids; /* static: groups flatten (no spin/hold) */
+      return [groupClip(s.n || `Group ${i + 1}`, kids, D, { spin: s.a.spin, hold: s.a.hold, tr: s.a.tr })];
+    }
+    return toShape(s, i, j);
+  };
+  const children = specs.flatMap((s, i) => {
+    const r = toLayer(s, i);
+    return Array.isArray(r) ? r : [r];
+  });
+  return kitClip(name, children, D);
 }
 
-/* ---------- COMMERCE ---------- */
-function buildTag(opts) {
-  const { color, D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Price Tag", [
-    S("Tag", g("diamond", 0, 0, 52, 52, stroke), 0, { hold: { type: "bob", amp: 5 } }),
-    S("Hole", g("ellipse", -7, -7, 9, 9, { fill: color }), 1),
-  ], D);
-}
-function buildCart(opts) {
-  const { color, D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Cart", [
-    S("Handle", g("rect", -27, -15, 15, 5.5, { fill: color, cornerR: 49, rotation: 28 }), 0, { enter: "rise" }),
-    S("Basket", g("rect", 2, -2, 46, 26, { ...stroke, cornerR: 10 }), 1, { hold: { type: "sway", amp: 7 } }),
-    S("Wheel left", g("ellipse", -11, 21, 9.5, 9.5, { fill: color }), 2),
-    S("Wheel right", g("ellipse", 15, 21, 9.5, 9.5, { fill: color }), 3),
-  ], D);
-}
-function buildCreditCard(opts) {
-  const { color, D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Credit Card", [
-    S("Card", g("rect", 0, 0, 66, 42, { ...stroke, cornerR: 12 }), 0),
-    S("Stripe", g("rect", 0, -9, 66, 8, { fill: color, opacity: 0.55 }), 1, { enter: "rise" }),
-    S("Chip", g("rect", -18, 9, 13, 10, { fill: color, cornerR: 18 }), 2, { enter: "rise" }),
-  ], D);
-}
-function buildGift(opts) {
-  const { color, D, g, stroke, S } = iconCtx(opts);
-  return kitClip("Gift", [
-    S("Box", g("rect", 0, 10, 50, 36, stroke), 0),
-    S("Lid", g("rect", 0, -12, 58, 11, { ...stroke, cornerR: 16 }), 1, { enter: "rise" }),
-    S("Ribbon", g("rect", 0, 8, 9, 52, { fill: color, opacity: 0.85 }), 2, { enter: "rise" }),
-    S("Bow left", g("ellipse", -9, -24, 14, 9, { fill: color, rotation: -28 }), 3, { hold: { type: "pulse", amp: 1.12, period: 700 } }),
-    S("Bow right", g("ellipse", 9, -24, 14, 9, { fill: color, rotation: 28 }), 4, { hold: { type: "pulse", amp: 1.12, period: 820 } }),
-  ], D);
-}
-function buildCoins(opts) {
-  const { color, D, u, g, stroke, S } = iconCtx(opts);
-  const dollar = part("text", "Dollar", {
-    text: "$", fontSize: Math.round(30 * u), fontWeight: 800, fill: color, fontFamily: "Inter",
-    x: bx(12, u), y: by(-6, u),
-  }, 2, D, { hold: { type: "bob", amp: 3 } });
-  return kitClip("Coins", [
-    S("Coin back", g("ellipse", -14, 8, 34, 34, { ...stroke, opacity: 0.75 }), 0),
-    S("Coin front", g("ellipse", 12, -6, 38, 38, stroke), 1),
-    dollar,
-  ], D);
-}
+/* one registry row per icon */
+const ICON = (id, name, category, tags, recipe, natural, specFn) =>
+  ({ id, name, category, tags, recipe, build: (opts) => buildFlat(name, natural, specFn, opts) });
 
 export const ICONS = [
-  { id: "arrow-right", name: "Arrow Right", category: "Arrows", tags: ["arrow", "next", "forward", "go"], recipe: "pop + sway", build: buildArrowRight },
-  { id: "arrow-up-right", name: "Arrow Up Right", category: "Arrows", tags: ["arrow", "diagonal", "external", "link"], recipe: "pop + sway", build: buildArrowUpRight },
-  { id: "expand", name: "Expand Arrows", category: "Arrows", tags: ["arrows", "expand", "fullscreen", "directions"], recipe: "stagger pop", build: buildExpand },
-  { id: "trend-up", name: "Trend Up", category: "Arrows", tags: ["chart", "growth", "arrow", "stonks", "up"], recipe: "rise + prog travel", build: buildTrendUp },
-  { id: "refresh", name: "Refresh", category: "Arrows", tags: ["reload", "sync", "rotate", "loop"], recipe: "pop + spin", build: buildRefresh },
-  { id: "swap", name: "Swap Horizontal", category: "Arrows", tags: ["swap", "exchange", "arrows", "transfer"], recipe: "stagger + counter-sway", build: buildSwap },
-  { id: "play", name: "Play", category: "Media", tags: ["play", "video", "start", "media"], recipe: "pop + pulse", build: buildPlay },
-  { id: "pause", name: "Pause", category: "Media", tags: ["pause", "hold", "stop", "media"], recipe: "stagger pop", build: buildPause },
-  { id: "stop", name: "Stop", category: "Media", tags: ["stop", "square", "record", "media"], recipe: "pop + pulse", build: buildStop },
-  { id: "rewind", name: "Rewind", category: "Media", tags: ["rewind", "back", "previous", "media"], recipe: "stagger + sway", build: buildRewind },
-  { id: "fast-forward", name: "Fast Forward", category: "Media", tags: ["forward", "next", "skip", "media"], recipe: "stagger + sway", build: buildForward },
-  { id: "volume", name: "Volume", category: "Media", tags: ["sound", "audio", "speaker", "eq"], recipe: "stagger + EQ pulse", build: buildVolume },
-  { id: "search", name: "Search", category: "Interface", tags: ["search", "find", "magnifier", "lens"], recipe: "draw-on rise", build: buildSearch },
-  { id: "menu", name: "Menu", category: "Interface", tags: ["menu", "hamburger", "lines", "nav"], recipe: "stagger rise", build: buildMenu },
-  { id: "plus", name: "Plus", category: "Interface", tags: ["plus", "add", "new", "create"], recipe: "pop + spin", build: buildPlus },
-  { id: "close", name: "Close", category: "Interface", tags: ["close", "x", "dismiss", "remove"], recipe: "pop + pulse", build: buildClose },
-  { id: "check", name: "Check", category: "Interface", tags: ["check", "done", "tick", "ok"], recipe: "draw-on rise", build: buildCheck },
-  { id: "sliders", name: "Sliders", category: "Interface", tags: ["settings", "sliders", "adjust", "controls", "eq"], recipe: "stagger + knob sway", build: buildSliders },
-  { id: "home", name: "Home", category: "Interface", tags: ["home", "house", "main", "start"], recipe: "draw-on rise", build: buildHome },
-  { id: "chat", name: "Chat Bubble", category: "Communication", tags: ["chat", "message", "talk", "comment", "typing"], recipe: "pop + typing dots", build: buildChat },
-  { id: "mail", name: "Mail", category: "Communication", tags: ["mail", "email", "envelope", "send"], recipe: "pop + flap rise", build: buildMail },
-  { id: "megaphone", name: "Megaphone", category: "Communication", tags: ["megaphone", "announce", "shout", "promo"], recipe: "pop + sway", build: buildMegaphone },
-  { id: "heart", name: "Heart", category: "Communication", tags: ["heart", "like", "love", "favorite"], recipe: "pop + heartbeat", build: buildHeart },
-  { id: "star", name: "Star", category: "Communication", tags: ["star", "rate", "favorite", "bookmark"], recipe: "pop + pulse", build: buildStar },
-  { id: "share", name: "Share Nodes", category: "Communication", tags: ["share", "nodes", "network", "social"], recipe: "stagger + bob", build: buildShare },
-  { id: "phone", name: "Phone", category: "Devices", tags: ["phone", "mobile", "cell", "device"], recipe: "pop + dot pulse", build: buildPhone },
-  { id: "laptop", name: "Laptop", category: "Devices", tags: ["laptop", "computer", "macbook", "device"], recipe: "draw-on rise", build: buildLaptop },
-  { id: "monitor", name: "Monitor", category: "Devices", tags: ["monitor", "screen", "display", "desktop"], recipe: "stagger pop", build: buildMonitor },
-  { id: "tablet", name: "Tablet", category: "Devices", tags: ["tablet", "ipad", "device", "screen"], recipe: "pop + blink", build: buildTablet },
-  { id: "watch", name: "Watch", category: "Devices", tags: ["watch", "time", "clock", "wearable"], recipe: "stagger + hand spin", build: buildWatch },
-  { id: "camera", name: "Camera", category: "Devices", tags: ["camera", "photo", "lens", "shoot"], recipe: "stagger + lens pulse", build: buildCamera },
-  { id: "sun", name: "Sun", category: "Weather", tags: ["sun", "sunny", "day", "bright", "weather"], recipe: "ray stagger + spin", build: buildSun },
-  { id: "cloud", name: "Cloud", category: "Weather", tags: ["cloud", "sky", "weather", "drift"], recipe: "rise + sway", build: buildCloud },
-  { id: "rain", name: "Rain", category: "Weather", tags: ["rain", "drops", "weather", "storm"], recipe: "rise + falling drops", build: buildRain },
-  { id: "bolt", name: "Lightning", category: "Weather", tags: ["bolt", "lightning", "flash", "energy", "storm"], recipe: "pop + seeded flicker", build: buildBolt },
-  { id: "snow", name: "Snowflake", category: "Weather", tags: ["snow", "winter", "cold", "flake"], recipe: "stagger + spin", build: buildSnow },
-  { id: "wind", name: "Wind", category: "Weather", tags: ["wind", "gust", "air", "breeze"], recipe: "rise + gust sway", build: buildWind },
-  { id: "tag", name: "Price Tag", category: "Commerce", tags: ["tag", "price", "label", "sale"], recipe: "pop + bob", build: buildTag },
-  { id: "cart", name: "Cart", category: "Commerce", tags: ["cart", "shop", "buy", "ecommerce"], recipe: "stagger + roll sway", build: buildCart },
-  { id: "credit-card", name: "Credit Card", category: "Commerce", tags: ["card", "payment", "credit", "pay"], recipe: "stagger rise", build: buildCreditCard },
-  { id: "gift", name: "Gift", category: "Commerce", tags: ["gift", "present", "reward", "box"], recipe: "stagger + bow pulse", build: buildGift },
-  { id: "coins", name: "Coins", category: "Commerce", tags: ["coins", "money", "dollar", "finance"], recipe: "stagger + bob", build: buildCoins },
+  /* ---------- EMOJI ---------- */
+  ICON("smile", "Smile", "Emoji", ["smile", "happy", "face", "emoji", "cheerful"], "pop + blink", FACE_Y, specSmile),
+  ICON("laugh", "Laugh", "Emoji", ["laugh", "grin", "lol", "emoji", "teeth"], "rock + grin", FACE_Y, specLaugh),
+  ICON("laugh-tears", "Laugh Tears", "Emoji", ["joy", "tears", "laugh", "cry-laugh", "emoji"], "flying tears", FACE_Y, specLaughTears),
+  ICON("love-eyes", "Heart Eyes", "Emoji", ["love", "hearts", "crush", "emoji", "adore"], "heartbeat eyes", FACE_Y, specLoveEyes),
+  ICON("star-struck", "Star Struck", "Emoji", ["star", "wow", "fame", "emoji", "excited"], "spinning star eyes", FACE_Y, specStarStruck),
+  ICON("wink", "Wink", "Emoji", ["wink", "flirt", "joke", "emoji", "smirk"], "blink + smirk", FACE_Y, specWink),
+  ICON("party", "Party Face", "Emoji", ["party", "celebrate", "hat", "confetti", "emoji", "birthday"], "confetti drift + hat bob", FACE_Y, specParty),
+  ICON("cry", "Cry", "Emoji", ["cry", "tears", "sad", "emoji", "sob"], "falling tears", FACE_Y, specCry),
+  ICON("sad", "Sad", "Emoji", ["sad", "frown", "down", "emoji", "unhappy"], "slow droop", FACE_Y, specSad),
+  ICON("angry", "Angry", "Emoji", ["angry", "mad", "rage", "emoji", "grr"], "flush + anger mark", FACE_Y, specAngry),
+  ICON("surprised", "Surprised", "Emoji", ["surprised", "wow", "gasp", "emoji", "shock"], "gasp pulse", FACE_Y, specSurprised),
+  ICON("neutral", "Neutral", "Emoji", ["neutral", "meh", "flat", "emoji", "straight"], "blink", FACE_Y, specNeutral),
+  ICON("sleepy", "Sleepy", "Emoji", ["sleep", "tired", "zzz", "emoji", "drowsy"], "bubble + floating Zs", FACE_Y, specSleepy),
+  ICON("cool", "Cool", "Emoji", ["cool", "sunglasses", "chill", "emoji", "shade"], "lens glint sweep", FACE_Y, specCool),
+  ICON("angel", "Angel", "Emoji", ["angel", "halo", "innocent", "emoji", "blessed"], "floating halo", FACE_Y, specAngel),
+  ICON("devil", "Devil", "Emoji", ["devil", "horns", "mischief", "emoji", "evil"], "horns + smirk", "#B07FE8", specDevil),
+  ICON("tongue-out", "Tongue Out", "Emoji", ["tongue", "silly", "playful", "emoji", "tease"], "wagging tongue", FACE_Y, specTongueOut),
+  ICON("sick", "Sick", "Emoji", ["sick", "ill", "queasy", "emoji", "nausea"], "sweat drop", "#A6D96E", specSick),
+  ICON("worried", "Worried", "Emoji", ["worried", "anxious", "nervous", "emoji", "sweat"], "darting eyes + sweat", FACE_Y, specWorried),
+  ICON("mind-blown", "Mind Blown", "Emoji", ["mind", "blown", "explosion", "emoji", "wow"], "crown blast pulse", FACE_Y, specMindBlown),
+  /* ---------- REACTIONS ---------- */
+  ICON("heart", "Heart", "Reactions", ["heart", "like", "love", "favorite", "react"], "heartbeat + sparkle", RED, specHeart),
+  ICON("thumbs-up", "Thumbs Up", "Reactions", ["thumbs", "like", "approve", "yes", "good"], "thumb bounce + ticks", GOLD, specThumbsUp),
+  ICON("clap", "Clap", "Reactions", ["clap", "applause", "bravo", "hands", "congrats"], "mirrored clap beat", GOLD, specClap),
+  ICON("fire", "Fire", "Reactions", ["fire", "hot", "lit", "flame", "trending"], "seeded flame flicker", ORANGE, specFire),
+  ICON("star", "Star", "Reactions", ["star", "rate", "favorite", "bookmark", "gold"], "pulse + sparkles", GOLD, specStarBadge),
+  ICON("hundred", "Hundred", "Reactions", ["100", "hundred", "perfect", "score", "keep-it"], "bounce", RED, specHundred),
+  ICON("muscles", "Muscles", "Reactions", ["muscle", "strong", "flex", "bicep", "power"], "flex pulse", "#F2B25C", specMuscles),
+  ICON("broken-heart", "Broken Heart", "Reactions", ["broken", "heart", "heartbreak", "sad", "crack"], "droop + drifting shards", "#E5566B", specBrokenHeart),
+  ICON("party-popper", "Party Popper", "Reactions", ["party", "popper", "confetti", "celebrate", "tada"], "continuous burst", CORAL, specPartyPopper),
+  /* ---------- OBJECTS ---------- */
+  ICON("bell", "Bell", "Objects", ["bell", "notification", "ring", "alert", "ding"], "swing + clapper + ticks", GOLD, specBell),
+  ICON("gift", "Gift", "Objects", ["gift", "present", "reward", "box", "surprise"], "lid pop + bow pulse", CORAL, specGift),
+  ICON("trophy", "Trophy", "Objects", ["trophy", "win", "award", "champion", "cup"], "shine sweep + bob", GOLD, specTrophy),
+  ICON("rocket", "Rocket", "Objects", ["rocket", "launch", "space", "startup", "ship"], "hover + flame flicker", "#F4F6FA", specRocket),
+  ICON("lightning", "Lightning", "Objects", ["bolt", "lightning", "flash", "energy", "zap"], "seeded flicker", GOLD, specLightning),
+  ICON("coffee", "Coffee", "Objects", ["coffee", "cup", "espresso", "break", "cafe"], "rising steam", "#F4F6FA", specCoffee),
+  ICON("gem", "Gem", "Objects", ["gem", "diamond", "jewel", "premium", "crystal"], "slow rock + sparkles", BLUE, specGem),
+  ICON("balloon", "Balloon", "Objects", ["balloon", "party", "float", "birthday", "air"], "float + string wag", RED, specBalloon),
+  /* ---------- WEATHER / NATURE ---------- */
+  ICON("sun", "Sun", "Weather", ["sun", "sunny", "day", "bright", "weather"], "rays spin slow", GOLD, specSun),
+  ICON("cloud", "Cloud", "Weather", ["cloud", "sky", "weather", "drift"], "drift sway", "#F4F7FB", specCloud),
+  ICON("rain", "Rain Cloud", "Weather", ["rain", "drops", "weather", "storm", "drizzle"], "staggered falling drops", "#C9D6E8", specRain),
+  ICON("rainbow", "Rainbow", "Weather", ["rainbow", "arc", "pride", "weather", "colors"], "rise + cloud bob", RED, specRainbow),
+  ICON("moon", "Moon", "Weather", ["moon", "night", "lunar", "weather", "sleep"], "bob + blinking stars", "#FFE9A8", specMoon),
+  ICON("storm", "Storm Cloud", "Weather", ["storm", "thunder", "bolt", "weather", "rain"], "bolt flicker + rain", "#9FB2CC", specStorm),
+  /* ---------- COMMUNICATION / MEDIA ---------- */
+  ICON("chat", "Chat Bubble", "Media", ["chat", "message", "talk", "comment", "typing"], "typing dots bob", BLUE, specChat),
+  ICON("mail", "Mail", "Media", ["mail", "email", "envelope", "send", "inbox"], "notification dot pulse", "#F4F6FA", specMail),
+  ICON("phone", "Phone", "Media", ["phone", "call", "ring", "contact", "handset"], "ring shake + ticks", GREEN, specPhone),
+  ICON("camera", "Camera", "Media", ["camera", "photo", "lens", "shoot", "picture"], "lens pulse + flash", CORAL, specCamera),
+  ICON("music-note", "Music Note", "Media", ["music", "note", "song", "melody", "tune"], "groove rock", BLUE, specMusic),
+  ICON("play", "Play Button", "Media", ["play", "video", "start", "media", "watch"], "ripple ping + pulse", CORAL, specPlay),
+  ICON("mic", "Microphone", "Media", ["mic", "microphone", "record", "voice", "podcast"], "bob", VIOLET, specMic),
+  ICON("volume", "Volume", "Media", ["volume", "sound", "audio", "speaker", "loud"], "EQ pulse", CORAL, specVolume),
+  /* ---------- COMMERCE / MISC ---------- */
+  ICON("cart", "Cart", "Commerce", ["cart", "shop", "buy", "ecommerce", "basket"], "rolling sway + item bob", BLUE, specCart),
+  ICON("tag", "Price Tag", "Commerce", ["tag", "price", "label", "sale", "discount"], "dangle rock", CORAL, specTag),
+  ICON("pin", "Location Pin", "Commerce", ["pin", "location", "map", "place", "marker"], "drop bounce + shadow", RED, specPin),
+  ICON("calendar", "Calendar", "Commerce", ["calendar", "date", "schedule", "event", "plan"], "today pulse", "#F4F6FA", specCalendar),
+  ICON("lock", "Lock", "Commerce", ["lock", "secure", "private", "password", "safe"], "shackle hop", GOLD, specLock),
+  ICON("arrow-up-right", "Arrow Up Right", "Commerce", ["arrow", "diagonal", "external", "link", "open"], "diagonal nudge", CORAL, specArrowUpRight),
 ];
 
 /* ============================================================
