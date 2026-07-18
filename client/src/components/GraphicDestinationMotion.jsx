@@ -19,6 +19,8 @@ import MapsPanel from "./editor/panels/MapsPanel";
 import ImagePanel from "./editor/panels/ImagePanel";
 import AudioPanel from "./editor/panels/AudioPanel";
 import TemplatesPanel from "./editor/panels/TemplatesPanel";
+import IconsPanel from "./editor/panels/IconsPanel";
+import UIElementsPanel from "./editor/panels/UIElementsPanel";
 import ConfettiPanel from "./editor/panels/ConfettiPanel";
 import ChartsPanel from "./editor/panels/ChartsPanel";
 import BackgroundsPanel from "./editor/panels/BackgroundsPanel";
@@ -281,6 +283,12 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   const [bgOpen, setBgOpen] = useState(false);
   const [tplQ, setTplQ] = useState(""); /* templates panel search (persists across open/close, like shapeQ) */
   const [tplCat, setTplCat] = useState("All");
+  const [iconsOpen, setIconsOpen] = useState(false); /* icons drawer (engine/kits.js) */
+  const [uiOpen, setUiOpen] = useState(false); /* UI elements drawer (engine/kits.js) */
+  const [iconQ, setIconQ] = useState("");
+  const [iconCat, setIconCat] = useState("All");
+  const [uiQ, setUiQ] = useState("");
+  const [uiCat, setUiCat] = useState("All");
   const [assets, setAssets] = useState(null); /* null = not fetched yet; [] = fetched, empty */
   const [assetsBusy, setAssetsBusy] = useState(false);
   const [assetErr, setAssetErr] = useState("");
@@ -670,6 +678,18 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     setLayers((ls) => [...ls, clip]);
     setSelIds([clip.id]);
     setTemplatesOpen(false);
+  };
+  /* insert an icon / UI-element kit as ONE editable, seamlessly-looping clip
+     at the playhead — same insert path as insertTemplateClip (engine/kits.js
+     builders ship fresh ob<n> ids, cloneLayer re-issues editor ids). */
+  const insertKitClip = (kit, opts = {}) => {
+    const clip = cloneLayer(kit.build(opts));
+    clip.locked = false;
+    clip.props.start = Math.max(0, Math.min(Math.max(0, ctxDur - 400), Math.round(timeRef.current / 10) * 10));
+    setLayers((ls) => [...ls, clip]);
+    setSelIds([clip.id]);
+    setIconsOpen(false);
+    setUiOpen(false);
   };
   const copySelection = () => { if (!selMany.length) return; clipboardRef.current = selMany.map((o) => JSON.parse(JSON.stringify(o))); setClipCount(clipboardRef.current.length); };
   const pasteClipboard = () => {
@@ -1594,10 +1614,17 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
           confettiOpen={confettiOpen} setConfettiOpen={setConfettiOpen}
           numbersOpen={numbersOpen} setNumbersOpen={setNumbersOpen}
           bgOpen={bgOpen} setBgOpen={setBgOpen}
+          iconsOpen={iconsOpen} setIconsOpen={setIconsOpen} uiOpen={uiOpen} setUiOpen={setUiOpen}
           audioTrack={audioTrack} addObject={addObject} />
 
         {/* templates drawer: search + categories, inserts as one editable clip at the playhead */}
         {templatesOpen && <TemplatesPanel tplQ={tplQ} setTplQ={setTplQ} tplCat={tplCat} setTplCat={setTplCat} insertTemplateClip={insertTemplateClip} />}
+
+        {/* icons drawer: 42 animated stroke icons, insert as looping clips */}
+        {iconsOpen && <IconsPanel iconQ={iconQ} setIconQ={setIconQ} iconCat={iconCat} setIconCat={setIconCat} insertKitClip={insertKitClip} />}
+
+        {/* UI elements drawer: 13 animated interface pieces, insert as looping clips */}
+        {uiOpen && <UIElementsPanel uiQ={uiQ} setUiQ={setUiQ} uiCat={uiCat} setUiCat={setUiCat} insertKitClip={insertKitClip} />}
 
         {/* shapes folder with search */}
         {shapesOpen && <ShapesPanel shapeQ={shapeQ} setShapeQ={setShapeQ} addObject={addObject} />}
