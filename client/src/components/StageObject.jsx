@@ -7,13 +7,13 @@ import { useMemo } from "react";
 import { C, bboxOfLayers } from "./editor/model";
 import { LockIcon } from "./editor/ui";
 import { kitRenderSpec } from "../engine/kits.js";
-import { EASE, clamp01 } from "../engine/easing.js";
+import { clamp01 } from "../engine/easing.js";
 import { ptsToStr, pathSamples, pointOnPath, morphPtsAt } from "../engine/shapes.js";
 import { valueAt, colorAt, lerpColor, clipLocalTime, clipTransition } from "../engine/keyframes.js";
 import { cameraTransform, camTransformCss } from "../engine/camera.js";
 import { blurCss, blendCss } from "../engine/filters.js";
-import { MAPS, WORLD_H, CONTINENTS, WORLD_EXT, ringsToPath, arcPath, mapBox, WORLD_D, normHi } from "../engine/maps.js";
-import { CONFETTI_STYLES, confettiStyleOf, confettiLife, confettiParticles, charFx, numberValue, numberColumns, formatNumber, contrastOn, chartModel, highlightFlick, worldCameraAt, cdStyleOf, countdownFraction, counterStyleOf, counterModel } from "../engine/fx.js";
+import { MAPS, WORLD, WORLD_H, CONTINENTS, ringsToPath, arcPath, mapBox, WORLD_D, normHi, continentBox, countryCenter, hiColors, hiState, traceState } from "../engine/maps.js";
+import { CONFETTI_STYLES, confettiStyleOf, confettiLife, confettiParticles, charFx, numberValue, numberColumns, formatNumber, contrastOn, chartModel, cdStyleOf, countdownFraction, counterStyleOf, counterModel } from "../engine/fx.js";
 import { backdropModel } from "../engine/backdrops.js";
 
 /* ---------- on-canvas selection handles (direct manipulation) ----------
@@ -51,68 +51,89 @@ function boxStyleOf(P, time) {
   return { background: P.bg || "transparent", border: P.borderW ? `${P.borderW}px solid ${P.borderC}` : "none", borderRadius: P.radius, padding: `${Math.round(P.pad * 0.45)}px ${P.pad}px`, boxShadow: glow };
 }
 
-/* Shared border-effect renderer for both single-country maps and
-   multi-country continent maps — same styles (plain/draw/comet/neon/
-   reveal/pulse), driven by a precomputed path `d` and its bbox. */
-function MapEffectPaths({ id, d, P, time }) {
-  const S = P.mapStyle === "march" ? "pulse" : P.mapStyle;
-  const u = clamp01((time - P.start) / P.dur);
-  const eu = EASE.easeInOutCubic(u);
-  const gid = "g" + id, cid = "c" + id;
-  const hot = lerpColor(P.stroke, "#ffffff", 0.75);
-  const animDraw = S === "draw" || S === "reveal";
-  const fillNow = animDraw ? P.fillOp * clamp01(u * 1.15) : P.fillOp;
-  const drawDash = animDraw ? { strokeDasharray: 100, strokeDashoffset: 100 * (1 - eu) } : {};
-  const gw = Math.min(P.strokeW, 2);
-  let g = 0;
-  if (S === "neon") g = 1;
-  if (S === "reveal") g = clamp01((time - P.start - P.dur) / 550);
-  if (S === "pulse") g = 0.55 + 0.45 * Math.sin(time / 430);
-  if (S === "comet") g = 0.2;
-  const tipOn = animDraw && u > 0.005 && u < 0.995;
-  const lead = eu * 100;
-  const off = -((time / 26) % 100);
+/* ============================================================
+   MAP GRAMMAR — simple · electric · pop (real 50m geography)
+   · CountryTracePaths: the outline draws from ONE point around the border,
+     CLOSES and STAYS (stroke remains solid); a soft flat fill fades in.
+   · MapHighlight: timed country highlight for continent/world maps — pops in
+     at t (easeOutBack from the country's own centre), holds, pops out at out.
+   · MapLegend: color-coded swatch + name chips, synced with visibility.
+   All pure f(time) — export renders these exact frames.
+   ============================================================ */
+function CountryTracePaths({ d, P, time }) {
+  const tr = traceState(P, time);
+  const sw = P.strokeW || 1.6;
+  const stroke = P.stroke || "#00E5FF";
+  const hot = lerpColor(stroke, "#ffffff", 0.7);
+  const started = tr.u > 0.002;
+  const tracing = started && tr.u < 0.998;
+  const lead = tr.e * 100;
   return (
     <>
-      <defs>
-        <linearGradient id={gid} x1="0" y1="0" x2="0.3" y2="1">
-          <stop offset="0" stopColor={lerpColor(P.fillC, "#ffffff", 0.14)} />
-          <stop offset="1" stopColor={lerpColor(P.fillC, "#000000", 0.34)} />
-        </linearGradient>
-        <clipPath id={cid}><path d={d} /></clipPath>
-      </defs>
-      <path d={d} fill={`url(#${gid})`} fillOpacity={fillNow} stroke="none" style={{ filter: "drop-shadow(0 3px 10px rgba(0,0,0,.35))" }} />
-      {fillNow > 0.2 && (
-        <g clipPath={`url(#${cid})`}>
-          <path d={d} fill="none" stroke={P.stroke} strokeOpacity={0.22 * (animDraw ? eu : 1)} strokeWidth={gw * 3.2} pathLength={100} style={{ filter: "blur(2.5px)" }} {...drawDash} />
-        </g>
-      )}
-      {g > 0.02 && <path d={d} fill="none" stroke={P.stroke} strokeOpacity={0.12 * g} strokeWidth={gw * 5.5} pathLength={100} strokeLinejoin="round" style={{ filter: "blur(4.5px)" }} {...drawDash} />}
-      {g > 0.02 && <path d={d} fill="none" stroke={P.stroke} strokeOpacity={0.32 * g} strokeWidth={gw * 2.4} pathLength={100} strokeLinejoin="round" style={{ filter: "blur(1.8px)" }} {...drawDash} />}
-      <path d={d} fill="none" stroke={S === "neon" ? hot : P.stroke} strokeWidth={P.strokeW * (S === "neon" ? 1.15 : 1)} vectorEffect="non-scaling-stroke" pathLength={100} strokeLinejoin="round"
-        style={g > 0.25 ? { filter: `drop-shadow(0 0 3px ${P.stroke})` } : {}} {...drawDash} />
-      {tipOn && <>
-        <path d={d} fill="none" stroke={P.stroke} strokeOpacity={0.75} strokeWidth={P.strokeW * 2.6} pathLength={100} strokeDasharray="5 95" strokeDashoffset={-(lead - 5)} strokeLinecap="round" style={{ filter: "blur(2px)" }} />
-        <path d={d} fill="none" stroke={hot} strokeWidth={P.strokeW * 1.3} pathLength={100} strokeDasharray="2 98" strokeDashoffset={-(lead - 2)} strokeLinecap="round" style={{ filter: `drop-shadow(0 0 4px ${P.stroke})` }} />
-      </>}
-      {S === "comet" && <>
-        <path d={d} fill="none" stroke={P.stroke} strokeOpacity={0.45} strokeWidth={P.strokeW * 3} pathLength={100} strokeDasharray="11 89" strokeDashoffset={off + 8} strokeLinecap="round" style={{ filter: "blur(3px)" }} />
-        <path d={d} fill="none" stroke={P.stroke} strokeOpacity={0.9} strokeWidth={P.strokeW * 1.8} pathLength={100} strokeDasharray="6 94" strokeDashoffset={off + 3} strokeLinecap="round" style={{ filter: "blur(1px)" }} />
-        <path d={d} fill="none" stroke={hot} strokeWidth={P.strokeW * 1.1} pathLength={100} strokeDasharray="3 97" strokeDashoffset={off} strokeLinecap="round" style={{ filter: `drop-shadow(0 0 3.5px ${P.stroke}) drop-shadow(0 0 8px ${P.stroke})` }} />
+      {tr.fillK > 0.002 && <path d={d} fill={P.fillC || "#2A3350"} fillOpacity={((P.fillOp != null ? P.fillOp : 0.55) * tr.fillK).toFixed(3)} stroke="none" />}
+      {/* the trace — nothing before start; dasharray while drawing; once the
+          loop CLOSES the dash comes off and the solid stroke STAYS forever */}
+      {started && <path d={d} fill="none" stroke={stroke} strokeWidth={sw} vectorEffect="non-scaling-stroke" pathLength={100}
+        strokeDasharray={tracing ? 100 : "none"} strokeDashoffset={tracing ? tr.dash : 0} strokeLinejoin="round" strokeLinecap="round" />}
+      {tracing && <>
+        <path d={d} fill="none" stroke={stroke} strokeOpacity={0.5} strokeWidth={sw * 2.2} vectorEffect="non-scaling-stroke" pathLength={100} strokeDasharray="4 96" strokeDashoffset={-(lead - 4)} strokeLinecap="round" style={{ filter: "blur(1.6px)" }} />
+        <path d={d} fill="none" stroke={hot} strokeWidth={sw * 1.15} vectorEffect="non-scaling-stroke" pathLength={100} strokeDasharray="1.6 98.4" strokeDashoffset={-(lead - 1.6)} strokeLinecap="round" style={{ filter: `drop-shadow(0 0 3px ${stroke})` }} />
       </>}
     </>
   );
 }
-function MapEffectShape({ id, d, box, P, time, down, common, handles }) {
-  const h = (P.w * box.h) / box.w;
-  const ox = box.ox || 0, oy = box.oy || 0;
+function MapHighlight({ cc, color, stroke, st, sw }) {
+  if (!st.on || !WORLD_D[cc]) return null;
+  const { cx, cy } = countryCenter(cc);
   return (
-    <div onPointerDown={down} style={common}>
-      <svg width={P.w} height={h} viewBox={`${ox - 7} ${oy - 7} ${box.w + 14} ${box.h + 14}`} style={{ display: "block", overflow: "visible" }}>
-        <MapEffectPaths id={id} d={d} P={P} time={time} />
-      </svg>
-      {handles}
-    </div>
+    <g transform={`translate(${cx.toFixed(2)} ${cy.toFixed(2)}) scale(${st.scale.toFixed(4)}) translate(${(-cx).toFixed(2)} ${(-cy).toFixed(2)})`} opacity={st.aMul.toFixed(3)}>
+      <path d={WORLD_D[cc]} fill={color} stroke={stroke} strokeWidth={sw} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+    </g>
+  );
+}
+/* color-coded legend: swatch + country name, one row per highlight, rows fade
+   in/out WITH their country. Anchored bottom-left inside the map viewport. */
+function MapLegend({ rows, box, pad }) {
+  const vis = rows.filter((r) => r.aMul > 0.01);
+  if (!vis.length) return null;
+  const rowH = Math.max(2.6, box.h * 0.052);
+  const fs = rowH * 0.62, sw = rowH * 0.52;
+  const maxN = Math.max(...vis.map((r) => r.name.length));
+  const w = sw + 1.6 + maxN * fs * 0.6 + 1.6, h = vis.length * rowH + 1.2;
+  const x = box.ox - pad + Math.max(1.2, box.w * 0.02), y = box.oy + box.h + pad - Math.max(1.2, box.h * 0.02);
+  return (
+    <g fontFamily="'Space Grotesk', system-ui, sans-serif">
+      <rect x={x} y={y - h} width={w} height={h} rx={rowH * 0.32} fill="#0A0D14" fillOpacity={0.62} />
+      {vis.map((r, i) => (
+        <g key={i} transform={`translate(${(x + 1.1).toFixed(2)} ${(y - 0.6 - (vis.length - 1 - i) * rowH).toFixed(2)})`} opacity={Math.min(1, r.aMul * 1.6).toFixed(3)}>
+          <rect x={0} y={-rowH * 0.72} width={sw} height={sw} rx={sw * 0.22} fill={r.color} />
+          <text x={sw + 1.1} y={-rowH * 0.72 + sw * 0.82} fontSize={fs} fontWeight={600} fill="#F4F6FB">{r.name}</text>
+        </g>
+      ))}
+    </g>
+  );
+}
+/* shared continent/world body: neutral flat landmass + timed highlights + legend */
+function MapUnionPaths({ codes, P, time, box, pad }) {
+  const his = normHi(P.highlights || P.hi).filter((hh) => codes.includes(hh.cc));
+  const colors = hiColors(his, P);
+  const anyColor = his.some((hh) => hh.color);
+  const rd = Math.max(120, P.revealDur || 600);
+  const legendOn = P.legend === true || (P.legend !== false && anyColor && his.length > 0);
+  const baseFill = P.base || P.fillC || "#2A3350";
+  const baseOp = P.baseOp != null ? P.baseOp : (P.fillOp != null ? P.fillOp : 0.85);
+  return (
+    <>
+      {codes.map((cc) => (WORLD_D[cc] ? (
+        <path key={cc} d={WORLD_D[cc]} fill={baseFill} fillOpacity={baseOp} stroke={P.stroke || "#3D4A6E"} strokeWidth={P.strokeW || 0.8} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+      ) : null))}
+      {his.map((hh, i) => {
+        const st = hiState(hh, time, rd);
+        const stroke = anyColor ? lerpColor(colors[i], "#ffffff", 0.55) : (P.hiStroke || "#ffffff");
+        return <MapHighlight key={hh.cc} cc={hh.cc} color={colors[i]} stroke={stroke} st={st} sw={Math.max(1, (P.strokeW || 0.8) * 1.6)} />;
+      })}
+      {legendOn && <MapLegend rows={his.map((hh, i) => ({ color: colors[i], name: (WORLD[hh.cc] && WORLD[hh.cc].n) || hh.cc, aMul: hiState(hh, time, rd).aMul }))} box={box} pad={pad} />}
+    </>
   );
 }
 
@@ -829,73 +850,17 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
   }
 
   if (obj.type === "map") {
-    const m = MAPS[P.country];
+    /* single country — TRACE: outline draws from one point, closes, stays */
+    const m = MAPS[P.country] || MAPS.IND;
     const box = mapBox(m);
-    return <MapEffectShape id={obj.id} d={ringsToPath(m.rings)} box={box} P={P} time={time} down={down} common={common} handles={handles} />;
-  }
-
-  if (obj.type === "continent") {
-    const codes = CONTINENTS[P.continent] || [];
-    const d = codes.map((cc) => WORLD_D[cc]).filter(Boolean).join(" ");
-    let mnx = 1e9, mny = 1e9, mxx = -1e9, mxy = -1e9;
-    codes.forEach((cc) => { const e = WORLD_EXT[cc]; if (!e) return; mnx = Math.min(mnx, e[0]); mny = Math.min(mny, e[1]); mxx = Math.max(mxx, e[2]); mxy = Math.max(mxy, e[3]); });
-    if (mnx > mxx) return null;
-    const box = { w: mxx - mnx, h: mxy - mny, ox: mnx, oy: mny };
-    const his = normHi(P.hi).filter((hh) => codes.includes(hh.cc));
-    if (!his.length) return <MapEffectShape id={obj.id} d={d} box={box} P={P} time={time} down={down} common={common} handles={handles} />;
-    /* highlights present: same zoom-and-spotlight behavior as the World map,
-       just cropped to this continent's own bounding box instead of the globe */
-    const fallbackCenter = { cx: (mnx + mxx) / 2, cy: (mny + mxy) / 2 };
-    const zk = P.zoomK || 2.2;
-    const cam = P.autoZoom !== false ? worldCameraAt({ ...P, hi: his }, time, fallbackCenter) : { focus: 0, cx: fallbackCenter.cx, cy: fallbackCenter.cy };
-    const k = 1 + (zk - 1) * cam.focus;
-    const gT = `translate(${cam.cx.toFixed(2)} ${cam.cy.toFixed(2)}) scale(${k.toFixed(3)}) translate(${(-cam.cx).toFixed(2)} ${(-cam.cy).toFixed(2)})`;
-    const rd = Math.max(120, P.revealDur || 600);
-    const hh_ = (P.w * box.h) / box.w;
+    const d = ringsToPath(m.rings);
+    const tr = traceState(P, time);
+    const h = (P.w * box.h) / box.w;
     return (
       <div onPointerDown={down} style={common}>
-        <svg width={P.w} height={hh_} viewBox={`${box.ox - 7} ${box.oy - 7} ${box.w + 14} ${box.h + 14}`} style={{ display: "block", overflow: "visible" }}>
-          <g transform={gT}>
-            <g style={{ filter: cam.focus > 0.02 ? `blur(${(2.5 * cam.focus).toFixed(2)}px)` : "none", opacity: 1 - 0.35 * cam.focus }}>
-              <MapEffectPaths id={obj.id} d={d} P={P} time={time} />
-            </g>
-            {his.map((hh) => {
-              const { cc, t } = hh;
-              if (!WORLD_D[cc]) return null;
-              const u = clamp01((time - t) / rd);
-              if (u <= 0) return null;
-              const ou = hh.out != null ? clamp01((time - hh.out) / Math.max(150, rd * 0.6)) : 0;
-              if (ou >= 1) return null;
-              const aMul = 1 - EASE.easeInQuad(ou);
-              const R = P.reveal || "simple";
-              const e = WORLD_EXT[cc] || [0, 0, 0, 0];
-              const ccx = (e[0] + e[2]) / 2, ccy = (e[1] + e[3]) / 2;
-              const glow = P.glow ? { filter: `drop-shadow(0 0 2.5px ${P.hiFill}) drop-shadow(0 0 ${(6 + 2.5 * Math.sin(time / 350)).toFixed(1)}px ${P.hiFill})` } : {};
-              let el = null;
-              if (R === "electric") {
-                if (!highlightFlick(u, cc.charCodeAt(0) * 7 + cc.charCodeAt(1))) return null;
-                el = <path d={WORLD_D[cc]} fill={P.hiFill} stroke={P.hiStroke} strokeWidth={P.strokeW * 2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" style={glow} />;
-              } else if (R === "pop") {
-                const sc = 0.2 + 0.8 * EASE.easeOutBack(u);
-                el = (
-                  <g transform={`translate(${ccx} ${ccy}) scale(${sc.toFixed(3)}) translate(${-ccx} ${-ccy})`} opacity={clamp01(u * 2)}>
-                    <path d={WORLD_D[cc]} fill={P.hiFill} stroke={P.hiStroke} strokeWidth={P.strokeW * 2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" style={glow} />
-                  </g>
-                );
-              } else if (R === "trace") {
-                const teu = EASE.easeInOutCubic(u);
-                el = (
-                  <g>
-                    <path d={WORLD_D[cc]} fill={P.hiFill} fillOpacity={clamp01((u - 0.6) / 0.4)} stroke="none" />
-                    <path d={WORLD_D[cc]} fill="none" stroke={P.hiStroke} strokeWidth={P.strokeW * 2.2} vectorEffect="non-scaling-stroke" pathLength={100} strokeDasharray={100} strokeDashoffset={100 * (1 - teu)} strokeLinejoin="round" style={glow} />
-                  </g>
-                );
-              } else {
-                const fillc = lerpColor(P.fillC, P.hiFill, EASE.easeOutCubic(u));
-                el = <path d={WORLD_D[cc]} fill={fillc} stroke={P.hiStroke} strokeOpacity={u} strokeWidth={P.strokeW * 2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" style={u > 0.5 ? glow : {}} />;
-              }
-              return <g key={cc} opacity={aMul}>{el}</g>;
-            })}
+        <svg width={P.w} height={h} viewBox={`-4 -4 ${box.w + 8} ${box.h + 8}`} style={{ display: "block", overflow: "visible" }}>
+          <g transform={`translate(${(box.w / 2).toFixed(2)} ${(box.h / 2).toFixed(2)}) scale(${tr.popScale.toFixed(4)}) translate(${(-box.w / 2).toFixed(2)} ${(-box.h / 2).toFixed(2)})`}>
+            <CountryTracePaths d={d} P={P} time={time} />
           </g>
         </svg>
         {handles}
@@ -903,74 +868,32 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
     );
   }
 
+  if (obj.type === "continent") {
+    /* continent union (true member countries) + timed pop highlights */
+    const name = CONTINENTS[P.continent] ? P.continent : "ASIA";
+    const codes = CONTINENTS[name];
+    const box = continentBox(name);
+    if (!box) return null;
+    const pad = 3;
+    const h = (P.w * box.h) / box.w;
+    return (
+      <div onPointerDown={down} style={common}>
+        <svg width={P.w} height={h} viewBox={`${box.ox - pad} ${box.oy - pad} ${box.w + pad * 2} ${box.h + pad * 2}`} style={{ display: "block", overflow: "hidden" }}>
+          <MapUnionPaths codes={codes} P={P} time={time} box={box} pad={pad} />
+        </svg>
+        {handles}
+      </div>
+    );
+  }
+
   if (obj.type === "world") {
+    /* the whole world — neutral landmass, timed pop highlights, color legend */
     const h = (P.w * WORLD_H) / 200;
-    const his = normHi(P.hi);
-    const zk = P.zoomK || 2.6;
-    const auto = P.autoZoom !== false;
-    const cam = auto ? worldCameraAt(P, time) : (() => {
-      const fo2 = clamp01(valueAt(obj, "focus", time));
-      let gx2 = 100, gy2 = WORLD_H / 2;
-      if (his.length) {
-        let mnx = 1e9, mny = 1e9, mxx = -1e9, mxy = -1e9;
-        his.forEach(({ cc }) => { const e = WORLD_EXT[cc]; if (!e) return; mnx = Math.min(mnx, e[0]); mny = Math.min(mny, e[1]); mxx = Math.max(mxx, e[2]); mxy = Math.max(mxy, e[3]); });
-        if (mnx < 1e9) { gx2 = (mnx + mxx) / 2; gy2 = (mny + mxy) / 2; }
-      }
-      return { focus: fo2, cx: gx2, cy: gy2 };
-    })();
-    const fo = cam.focus, gx = cam.cx, gy = cam.cy;
-    const k = 1 + (zk - 1) * fo;
-    const tx = (100 - gx) * fo, ty = (WORLD_H / 2 - gy) * fo;
-    const gT = `translate(${(gx + tx).toFixed(2)} ${(gy + ty).toFixed(2)}) scale(${k.toFixed(3)}) translate(${(-gx).toFixed(2)} ${(-gy).toFixed(2)})`;
-    const rd = Math.max(120, P.revealDur || 600);
-    const flick = highlightFlick;
+    const box = { ox: 0, oy: 0, w: 200, h: WORLD_H };
     return (
       <div onPointerDown={down} style={common}>
         <svg width={P.w} height={h} viewBox={`-2 -2 204 ${WORLD_H + 4}`} style={{ display: "block", overflow: "visible" }}>
-          <g style={{ filter: fo > 0.02 ? `blur(${(3.5 * fo).toFixed(2)}px)` : "none", opacity: 1 - 0.45 * fo }}>
-            {Object.keys(WORLD_D).map((cc) => (
-              <path key={cc} d={WORLD_D[cc]} fill={P.base} fillOpacity={P.baseOp} stroke={P.stroke} strokeWidth={P.strokeW} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
-            ))}
-          </g>
-          <g transform={gT}>
-            {his.map((hh) => {
-              const { cc, t } = hh;
-              if (!WORLD_D[cc]) return null;
-              const u = clamp01((time - t) / rd);
-              if (u <= 0) return null;
-              const ou = hh.out != null ? clamp01((time - hh.out) / Math.max(150, rd * 0.6)) : 0;
-              if (ou >= 1) return null;
-              const aMul = 1 - EASE.easeInQuad(ou);
-              const R = P.reveal || "simple";
-              const e = WORLD_EXT[cc] || [0, 0, 0, 0];
-              const ccx = (e[0] + e[2]) / 2, ccy = (e[1] + e[3]) / 2;
-              const glow = P.glow ? { filter: `drop-shadow(0 0 2.5px ${P.hiFill}) drop-shadow(0 0 ${(6 + 2.5 * Math.sin(time / 350)).toFixed(1)}px ${P.hiFill})` } : {};
-              let el = null;
-              if (R === "electric") {
-                if (!flick(u, cc.charCodeAt(0) * 7 + cc.charCodeAt(1))) return null;
-                el = <path d={WORLD_D[cc]} fill={P.hiFill} stroke={P.hiStroke} strokeWidth={P.strokeW * 2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" style={glow} />;
-              } else if (R === "pop") {
-                const sc = 0.2 + 0.8 * EASE.easeOutBack(u);
-                el = (
-                  <g transform={`translate(${ccx} ${ccy}) scale(${sc.toFixed(3)}) translate(${-ccx} ${-ccy})`} opacity={clamp01(u * 2)}>
-                    <path d={WORLD_D[cc]} fill={P.hiFill} stroke={P.hiStroke} strokeWidth={P.strokeW * 2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" style={glow} />
-                  </g>
-                );
-              } else if (R === "trace") {
-                const teu = EASE.easeInOutCubic(u);
-                el = (
-                  <g>
-                    <path d={WORLD_D[cc]} fill={P.hiFill} fillOpacity={clamp01((u - 0.6) / 0.4)} stroke="none" />
-                    <path d={WORLD_D[cc]} fill="none" stroke={P.hiStroke} strokeWidth={P.strokeW * 2.2} vectorEffect="non-scaling-stroke" pathLength={100} strokeDasharray={100} strokeDashoffset={100 * (1 - teu)} strokeLinejoin="round" style={glow} />
-                  </g>
-                );
-              } else {
-                const fillc = lerpColor(P.base, P.hiFill, EASE.easeOutCubic(u));
-                el = <path d={WORLD_D[cc]} fill={fillc} stroke={P.hiStroke} strokeOpacity={u} strokeWidth={P.strokeW * 2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" style={u > 0.5 ? glow : {}} />;
-              }
-              return <g key={cc} opacity={aMul}>{el}</g>;
-            })}
-          </g>
+          <MapUnionPaths codes={Object.keys(WORLD)} P={P} time={time} box={box} pad={2} />
         </svg>
         {handles}
       </div>
