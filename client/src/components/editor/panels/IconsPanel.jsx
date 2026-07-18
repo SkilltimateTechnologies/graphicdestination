@@ -1,20 +1,24 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { ICONS, ICON_CATS, KIT_COLORS, frameOf } from "../../../engine/kits.js";
 import { StageObject } from "../../StageObject.jsx";
 import { C, inputStyle, chipStyle, sectionLabel } from "../model.js";
+import { useHoverPlay } from "../TemplateThumb.jsx";
 
-/* live thumbnail of a kit build — animated variants tick with playTime,
-   static variants freeze on their (identical) still frame */
-const KitThumb = React.memo(function KitThumb({ kit, variant, time }) {
+/* live thumbnail of a kit build — HOVER-PLAY (R7a): a static representative
+   frame by default (no timers); the shared 120 ms ticker animates it only
+   while hovered and mouse-leave resets to the still. Static variants show
+   the identical still art (their frame never changes). */
+const KitThumb = React.memo(function KitThumb({ kit, variant }) {
   const clip = useMemo(() => kit.build({ variant }), [kit, variant]);
   const frame = useMemo(() => frameOf(clip), [clip]);
+  const hp = useHoverPlay({ dur: clip.props.dur || 3200 });
   const scale = Math.min(56 / frame.w, 56 / frame.h, 0.5);
-  const t = variant === "static" ? 0 : time;
   return (
-    <div style={{ width: 58, height: 58, borderRadius: 9, background: C.bg1, border: `1px solid ${C.line}`, overflow: "hidden", position: "relative", flex: "0 0 auto" }}>
-      <div style={{ position: "absolute", left: 29 - frame.x * scale, top: 29 - frame.y * scale, width: frame.w * scale, height: frame.h * scale }}>
+    <div {...hp.bind} title={variant === "animated" ? "Hover to preview the loop" : kit.name}
+      style={{ width: 58, height: 58, borderRadius: 9, background: C.bg1, border: `1px solid ${C.line}`, overflow: "hidden", position: "relative", flex: "0 0 auto" }}>
+      <div style={{ position: "absolute", left: 29 - frame.x * scale, top: 29 - frame.y * scale, width: frame.w * scale, height: frame.h * scale, pointerEvents: "none" }}>
         <div style={{ transform: `scale(${scale})`, transformOrigin: "0 0", width: frame.w, height: frame.h, position: "relative" }}>
-          <StageObject obj={clip} time={t} stage={{ w: 1280, h: 720 }} selected={false} interactive={false} />
+          <StageObject obj={clip} time={hp.time} stage={{ w: 1280, h: 720 }} selected={false} interactive={false} />
         </div>
       </div>
     </div>
@@ -23,14 +27,6 @@ const KitThumb = React.memo(function KitThumb({ kit, variant, time }) {
 
 export default function IconsPanel({ iconQ, setIconQ, iconCat, setIconCat, insertKitClip }) {
   const [variant, setVariant] = useState("animated"); /* "animated" | "static" */
-  const [time, setTime] = useState(0);
-  useEffect(() => {
-    if (variant === "static") return undefined; /* stills never tick */
-    let raf, last = performance.now(), t = 0;
-    const tick = (now) => { t += Math.min(100, now - last); last = now; setTime(t); raf = requestAnimationFrame(tick); };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [variant]);
   const list = useMemo(() => {
     const q = iconQ.trim().toLowerCase();
     return ICONS.filter((k) =>
@@ -42,7 +38,7 @@ export default function IconsPanel({ iconQ, setIconQ, iconCat, setIconCat, inser
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
         <span style={sectionLabel}>Icons · {ICONS.length} flat</span>
-        <span style={{ fontSize: 9, color: C.dim }}>{variant === "animated" ? "looping motion" : "still art"}</span>
+        <span style={{ fontSize: 9, color: C.dim }}>{variant === "animated" ? "hover a thumb to play" : "still art"}</span>
       </div>
       {/* Animated | Static segmented toggle */}
       <div style={{ display: "flex", background: C.bg1, border: `1px solid ${C.line}`, borderRadius: 8, padding: 2, marginBottom: 8, gap: 2 }}>
@@ -69,7 +65,7 @@ export default function IconsPanel({ iconQ, setIconQ, iconCat, setIconCat, inser
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {list.map((k) => (
           <div key={k.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 10, background: C.bg2, border: `1px solid ${C.line}` }}>
-            <KitThumb kit={k} variant={variant} time={time} />
+            <KitThumb kit={k} variant={variant} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: C.txt, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{k.name}</div>
               <div style={{ fontSize: 9, color: C.dim }}>{k.category}{variant === "animated" ? ` · ${k.recipe}` : " · still"}</div>
@@ -85,7 +81,7 @@ export default function IconsPanel({ iconQ, setIconQ, iconCat, setIconCat, inser
         {!list.length && <div style={{ fontSize: 10.5, color: C.dim, textAlign: "center", padding: 12 }}>No icons match.</div>}
       </div>
       <div style={{ fontSize: 9.5, color: C.dim, marginTop: 10, lineHeight: 1.5 }}>
-        Flat colored icons, Jitter-style motion grammar — {variant === "animated" ? "pop in, signature loop, whip out" : "identical art, zero animation tracks"}. Seeded-deterministic, structurally seamless, loops forever.
+        Flat colored icons, Jitter-style motion grammar — {variant === "animated" ? "pop in, signature loop, whip out" : "identical art, zero animation tracks"}. Seeded-deterministic, structurally seamless, loops forever. Inserts as ONE locked object — move/resize/rotate on canvas; variant + color in the Inspector.
       </div>
     </div>
   );

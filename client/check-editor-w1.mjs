@@ -288,16 +288,19 @@ async function runPart2(page, { check, proj, stageRect, toScreen, drag }) {
   const gripSel = 'div[title="Drag to scale the whole clip uniformly"]';
   check("selected clip shows 4 corner scale grips", await page.locator(gripSel).count() === 4, `count=${await page.locator(gripSel).count()}`);
 
-  /* corner grip (NE, index 1) drag outward → uniform scale via the scale prop */
+  /* corner grip (NE, index 1) drag outward → uniform scale via the scale prop.
+     R7a: grips sit on the clip's CONTENT bbox (not the stage corners), so the
+     expected ratio is measured from the ACTUAL grip position read off the DOM,
+     relative to the clip origin's screen position — geometry-agnostic. */
   let p = await proj(page);
   const s0 = stats(p).props.scale || 1;
   const grip = page.locator(gripSel).nth(1);
   const gb = await grip.boundingBox();
   const gFrom = { x: gb.x + gb.width / 2, y: gb.y + gb.height / 2 };
+  const originS = toScreen(r, stats(p).props.x, stats(p).props.y);
   await drag(page, gFrom, 40, -25);
   p = await proj(page);
-  const dxS = 40 / r.scale, dyS = 25 / r.scale;
-  const r0 = Math.hypot(640, 360) * s0, r1 = Math.hypot(640 + dxS, 360 + dyS);
+  const r0 = Math.hypot(gFrom.x - originS.x, gFrom.y - originS.y), r1 = Math.hypot(gFrom.x + 40 - originS.x, gFrom.y - 25 - originS.y);
   const expected = Math.round(s0 * (r1 / r0) * 100) / 100;
   check("corner grip scales the clip uniformly via the scale prop", Math.abs((stats(p).props.scale || 1) - expected) <= 0.03, `scale=${stats(p).props.scale} expected≈${expected}`);
   check("clip contents live in the wrapper (children scale with it)", (stats(p).children || []).length === 3, `${(stats(p).children || []).length} children in the scaled wrapper`);

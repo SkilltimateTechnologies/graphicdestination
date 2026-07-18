@@ -7,9 +7,10 @@ import { clamp01 } from "../engine/easing.js";
 import { SHAPE_DEFS } from "../engine/shapes.js";
 import { valueAt, posOf, clipLocalTime } from "../engine/keyframes.js";
 import { cameraAt, cameraTransform, cameraFromJson, cameraToJson, clampZoom } from "../engine/camera.js";
-import { MAPS, WORLD_H, CONTINENTS, WORLD_EXT, mapBox, normHi } from "../engine/maps.js";
+import { normHi } from "../engine/maps.js";
 import { FONT_IMPORT } from "../engine/fx.js";
-import { C, KF_PROPS, STAGE_PRESETS, kfAt, layerOut } from "./editor/model";
+import { kitRenderSpec } from "../engine/kits.js";
+import { C, KF_PROPS, STAGE_PRESETS, kfAt, layerOut, objSize, reframeClipToContent } from "./editor/model";
 import { computeSnap, SNAP_THRESHOLD } from "./editor/snapping";
 import TopBar from "./editor/TopBar";
 import IconRail from "./editor/IconRail";
@@ -104,6 +105,14 @@ function makeObject(type, over = {}) {
   if (type === "backdrop") { base.name = "Backdrop"; Object.assign(base.props, backdropDefaults()); }
   if (type === "chart") { base.name = "Chart"; Object.assign(base.props, { chartType: "bar", dataStr: "Q1, 42\nQ2, 65\nQ3, 38\nQ4, 84", start: 200, dur: 1400, w: 560, h: 340, showVals: true, bg: "#171B24", bgOp: 1, radius: 18, borderC: "#2B3140", borderW: 1, pad: 20 }); }
   if (type === "world") { base.name = "World map"; Object.assign(base.props, { hi: [{ cc: "IND", t: 0, zoom: true }], reveal: "simple", revealDur: 600, zoomK: 2.6, autoZoom: true, zoomHoldMs: 1600, zoomTransMs: 550, focus: 0, base: "#2A3350", baseOp: 1, hiFill: "#FFB224", hiStroke: "#FFD984", stroke: "#3D4A6E", strokeW: 0.7, glow: true, w: 780 }); }
+  if (type === "kit") {
+    /* locked kit object (R7a): ONE layer, no children — props.kit is the
+       engine/kits.js registry id, variant "animated"|"static" (icons),
+       color = icon primary (null → the icon's natural), accent = UI accent.
+       w/h are the display box the art scales into. */
+    base.name = over.name || "Kit";
+    Object.assign(base.props, { kit: "", variant: "animated", color: null, accent: "#FFB224", w: 320, h: 320 });
+  }
   if (type === "clip") {
     base.name = over.name || "Clip";
     base.children = over.children || [];
@@ -165,44 +174,11 @@ function updateAtPath(root, path, fn) {
   const [h, ...rest] = path;
   return root.map((o) => (o.id === h ? { ...o, children: updateAtPath(o.children, rest, fn) } : o));
 }
-function objSize(o, time) {
-  const P = o.props;
-  if (o.type === "shape" || o.type === "image") return { w: P.w, h: P.h };
-  if (o.type === "map") { const b = mapBox(MAPS[P.country]); return { w: P.w, h: (P.w * b.h) / b.w }; }
-  if (o.type === "continent") {
-    const codes = CONTINENTS[P.continent] || [];
-    let mnx = 1e9, mny = 1e9, mxx = -1e9, mxy = -1e9;
-    codes.forEach((cc) => { const e = WORLD_EXT[cc]; if (!e) return; mnx = Math.min(mnx, e[0]); mny = Math.min(mny, e[1]); mxx = Math.max(mxx, e[2]); mxy = Math.max(mxy, e[3]); });
-    if (mnx > mxx) return { w: P.w, h: P.w };
-    return { w: P.w, h: (P.w * (mxy - mny)) / (mxx - mnx) };
-  }
-  if (o.type === "world") return { w: P.w, h: (P.w * WORLD_H) / 200 };
-  if (o.type === "chart") return { w: P.w, h: P.h };
-  if (o.type === "backdrop") return { w: P.w, h: P.h };
-  if (o.type === "text") return { w: Math.max(40, P.text.length * P.fontSize * 0.56), h: P.fontSize * 1.25 };
-  if (o.type === "number") {
-    const digits = String(Math.floor(Math.max(P.from, P.to))).length + P.decimals + (P.decimals ? 1 : 0) + P.prefix.length + P.suffix.length;
-    return { w: Math.max(40, digits * P.fontSize * 0.62), h: P.fontSize * 1.2 };
-  }
-  if (o.type === "clip") { const b = bboxOfLayers(o.children, clipLocalTime(P, time) ?? 0); return { w: b.w, h: b.h }; }
-  return { w: 44, h: 44 };
-}
+/* objSize + bboxOfLayers live in editor/model.js now (R7a) — ONE shared
+   source for the editor, StageObject and the node checks. */
 function layerVisible(o, t, dur) {
   if (o.type === "clip") return true;
   return t >= (o.props.inT || 0) && t <= layerOut(o, dur);
-}
-function bboxOfLayers(layers, localT) {
-  let mnx = Infinity, mny = Infinity, mxx = -Infinity, mxy = -Infinity;
-  for (const o of layers) {
-    if (o.type === "clip" && clipLocalTime(o.props, localT) === null) continue;
-    const [x, y] = posOf(o, localT);
-    const s = valueAt(o, "scale", localT);
-    const { w, h } = objSize(o, localT);
-    mnx = Math.min(mnx, x - (w * s) / 2); mxx = Math.max(mxx, x + (w * s) / 2);
-    mny = Math.min(mny, y - (h * s) / 2); mxy = Math.max(mxy, y + (h * s) / 2);
-  }
-  if (mnx === Infinity) { mnx = 550; mxx = 730; mny = 300; mxy = 420; }
-  return { x: mnx, y: mny, w: mxx - mnx, h: mxy - mny, cx: (mnx + mxx) / 2, cy: (mny + mxy) / 2 };
 }
 /* shift every time-based value in a layer by dt (bar move) */
 function shiftLayerTimes(o, dt, dur) {
@@ -665,29 +641,52 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     setLayers((ls) => [o, ...ls]);
     setSelIds([o.id]);
   };
-  /* insert a gallery template as ONE editable clip at the playhead.
+  /* insert a gallery template as ONE editable GROUP-STYLE clip at the
+     playhead (R7a): the clip is reframed to its content — children shift so
+     their occupied bbox lands centered on the stage and the clip's x/y sits
+     at the stage center, the exact geometry a Ctrl+G group has (movable,
+     content-clamped, corner-scale + rotate grips, double-click to open).
      buildClip() ships a full clip layer whose children carry the template
      file's own ob<n> ids — cloneLayer re-issues editor ids for the whole
      subtree, the same fresh-id path paste/duplicate uses (mirrors how
      importProject walks ids and bumps _uid). The clip keeps the template's
-     name and is selected after insert. */
+     name and is selected after insert. Genuinely full-bleed scenes
+     (backdrop-driven templates) are left stage-sized — they ARE the canvas.
+     Camera stays project-level: layers/depths carry over unchanged. */
   const insertTemplateClip = (tpl) => {
-    const clip = cloneLayer(tpl.buildClip());
+    const built = cloneLayer(tpl.buildClip());
+    const { clip } = reframeClipToContent(built, stage);
     clip.locked = false;
     clip.props.start = Math.max(0, Math.min(Math.max(0, ctxDur - 400), Math.round(timeRef.current / 10) * 10));
     setLayers((ls) => [...ls, clip]);
     setSelIds([clip.id]);
     setTemplatesOpen(false);
   };
-  /* insert an icon / UI-element kit as ONE editable, seamlessly-looping clip
-     at the playhead — same insert path as insertTemplateClip (engine/kits.js
-     builders ship fresh ob<n> ids, cloneLayer re-issues editor ids). */
+  /* insert an icon / UI-element kit as ONE LOCKED kit object (R7a): a single
+     movable/resizable/rotatable layer — NO editable children, no clip to
+     enter. The document stores only { kit, variant, color, accent } + the
+     w/h box (content-sized from the kit's frame); StageObject re-derives
+     the art tree read-only via engine/kits.js kitRenderSpec. Old kit CLIPS
+     (inserted before R7a) still render — this is only the new insert path. */
   const insertKitClip = (kit, opts = {}) => {
-    const clip = cloneLayer(kit.build(opts));
-    clip.locked = false;
-    clip.props.start = Math.max(0, Math.min(Math.max(0, ctxDur - 400), Math.round(timeRef.current / 10) * 10));
-    setLayers((ls) => [...ls, clip]);
-    setSelIds([clip.id]);
+    const spec = kitRenderSpec(kit.id, opts);
+    if (!spec) return;
+    const w = Math.max(40, Math.round(spec.frame.w));
+    const h = Math.max(40, Math.round(spec.frame.h));
+    const o = makeObject("kit", {
+      name: kit.name,
+      props: {
+        kit: kit.id,
+        variant: opts.variant === "static" ? "static" : "animated",
+        color: typeof opts.color === "string" && opts.color ? opts.color : null,
+        accent: typeof opts.accent === "string" && opts.accent ? opts.accent : "#FFB224",
+        w, h,
+      },
+    });
+    o.props.x = stage.w / 2; o.props.y = stage.h / 2;
+    o.props.outT = ctxDur;
+    setLayers((ls) => [...ls, o]);
+    setSelIds([o.id]);
     setIconsOpen(false);
     setUiOpen(false);
   };
@@ -1260,8 +1259,10 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
      The ratio is measured from the clip's x/y — the wrapper's transform origin —
      so it's exact under rotation and needs no Shift. Corner grips only. Base
      prop patched live; auto-keyframe ON + an existing scale track writes a ◆
-     at the playhead instead (same setKeyframe path). */
-  const onClipScaleDown = (e, obj, hid, cursor) => {
+     at the playhead instead (same setKeyframe path). `box` is the grip's
+     reference rect in clip-internal coords — the content bbox for group-style
+     clips (StageObject passes it); absent ⇒ the full stage (legacy). */
+  const onClipScaleDown = (e, obj, hid, cursor, box = null) => {
     e.stopPropagation();
     if (obj.locked) return;
     const t = timeRef.current;
@@ -1272,7 +1273,8 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
        the clip's x/y), so the grip corner in stage coords at drag start is
        origin + rotate(local − center) × s0 — distances from the origin are
        rotation-invariant, which keeps the ratio exact at any angle */
-    const lx = hid.includes("e") ? stage.w : 0, ly = hid.includes("s") ? stage.h : 0;
+    const lx = hid.includes("e") ? (box ? box.x + box.w : stage.w) : (box ? box.x : 0);
+    const ly = hid.includes("s") ? (box ? box.y + box.h : stage.h) : (box ? box.y : 0);
     const vx = (lx - stage.w / 2) * s0, vy = (ly - stage.h / 2) * s0;
     const ax = vx * cos - vy * sin, ay = vx * sin + vy * cos;
     const r0 = Math.max(1, Math.hypot(ax, ay));

@@ -1,7 +1,12 @@
 /* ============================================================
    EDITOR MODEL — shared theme, constants + tiny pure helpers.
    Extracted VERBATIM from GraphicDestinationMotion.jsx (Refactor Pass 2).
+   R7a: also hosts the layer-GEOMETRY helpers (objSize / bboxOfLayers /
+   translateLayer / reframeClipToContent) so the editor, StageObject and
+   the node check scripts share ONE pure source (no React imports here).
    ============================================================ */
+import { valueAt, posOf, clipLocalTime } from "../../engine/keyframes.js";
+import { MAPS, WORLD_H, CONTINENTS, WORLD_EXT, mapBox } from "../../engine/maps.js";
 
 export const STAGE_PAD = 120; /* workspace margin (screen px) around the canvas in manual zoom — bounds the scroll/pan area */
 
@@ -134,7 +139,89 @@ export const STAGE_PRESETS = [
 
 export const KF_PROPS = ["x", "y", "scale", "rotation", "opacity", "fill", "prog", "focus"];
 
-export const TYPE_BAR = { chart: "#6E2E4A", clip: "#4A3B0C", text: "#3F2E66", number: "#283D63", shape: "#303F66", image: "#3A4356", map: "#274D40", world: "#274D40", confetti: "#584019", backdrop: "#472F5F" };
+export const TYPE_BAR = { chart: "#6E2E4A", clip: "#4A3B0C", kit: "#553A6E", text: "#3F2E66", number: "#283D63", shape: "#303F66", image: "#3A4356", map: "#274D40", world: "#274D40", confetti: "#584019", backdrop: "#472F5F" };
+
+/* ============================================================
+   LAYER GEOMETRY — moved verbatim from GraphicDestinationMotion.jsx
+   (R7a) so StageObject (content-hugging clip frames), the insert path
+   (group-style reframing) and the node checks share the same math.
+   ============================================================ */
+function objSize(o, time) {
+  const P = o.props;
+  if (o.type === "shape" || o.type === "image") return { w: P.w, h: P.h };
+  if (o.type === "kit") return { w: P.w, h: P.h }; /* locked kit object — fixed box, art scales to fit */
+  if (o.type === "map") { const b = mapBox(MAPS[P.country]); return { w: P.w, h: (P.w * b.h) / b.w }; }
+  if (o.type === "continent") {
+    const codes = CONTINENTS[P.continent] || [];
+    let mnx = 1e9, mny = 1e9, mxx = -1e9, mxy = -1e9;
+    codes.forEach((cc) => { const e = WORLD_EXT[cc]; if (!e) return; mnx = Math.min(mnx, e[0]); mny = Math.min(mny, e[1]); mxx = Math.max(mxx, e[2]); mxy = Math.max(mxy, e[3]); });
+    if (mnx > mxx) return { w: P.w, h: P.w };
+    return { w: P.w, h: (P.w * (mxy - mny)) / (mxx - mnx) };
+  }
+  if (o.type === "world") return { w: P.w, h: (P.w * WORLD_H) / 200 };
+  if (o.type === "chart") return { w: P.w, h: P.h };
+  if (o.type === "backdrop") return { w: P.w, h: P.h };
+  if (o.type === "text") return { w: Math.max(40, P.text.length * P.fontSize * 0.56), h: P.fontSize * 1.25 };
+  if (o.type === "number") {
+    const digits = String(Math.floor(Math.max(P.from, P.to))).length + P.decimals + (P.decimals ? 1 : 0) + P.prefix.length + P.suffix.length;
+    return { w: Math.max(40, digits * P.fontSize * 0.62), h: P.fontSize * 1.2 };
+  }
+  if (o.type === "clip") { const b = bboxOfLayers(o.children, clipLocalTime(P, time) ?? 0); return { w: b.w, h: b.h }; }
+  return { w: 44, h: 44 };
+}
+function bboxOfLayers(layers, localT) {
+  let mnx = Infinity, mny = Infinity, mxx = -Infinity, mxy = -Infinity;
+  for (const o of layers) {
+    if (o.type === "clip" && clipLocalTime(o.props, localT) === null) continue;
+    const [x, y] = posOf(o, localT);
+    const s = valueAt(o, "scale", localT);
+    const { w, h } = objSize(o, localT);
+    mnx = Math.min(mnx, x - (w * s) / 2); mxx = Math.max(mxx, x + (w * s) / 2);
+    mny = Math.min(mny, y - (h * s) / 2); mxy = Math.max(mxy, y + (h * s) / 2);
+  }
+  if (mnx === Infinity) { mnx = 550; mxx = 730; mny = 300; mxy = 420; }
+  return { x: mnx, y: mny, w: mxx - mnx, h: mxy - mny, cx: (mnx + mxx) / 2, cy: (mny + mxy) / 2 };
+}
+export { objSize, bboxOfLayers };
+
+/* shift a layer (and its x/y keyframes + motion path) by (dx, dy) — the same
+   math ungroupClip applies when releasing children onto the parent timeline.
+   NOT recursive: a nested clip's children ride inside the clip's own shifted
+   coordinate space, so shifting the clip's x/y already moves them. */
+export function translateLayer(o, dx, dy) {
+  const n = { ...o, props: { ...o.props, x: (o.props.x || 0) + dx, y: (o.props.y || 0) + dy }, tracks: { ...o.tracks } };
+  if (n.props.path) n.props.path = { ...n.props.path, pts: (n.props.path.pts || []).map(([px, py]) => [px + dx, py + dy]) };
+  if (Array.isArray(n.tracks.x)) n.tracks.x = n.tracks.x.map((k) => ({ ...k, v: typeof k.v === "number" ? k.v + dx : k.v }));
+  if (Array.isArray(n.tracks.y)) n.tracks.y = n.tracks.y.map((k) => ({ ...k, v: typeof k.v === "number" ? k.v + dy : k.v }));
+  return n;
+}
+
+/* ============================================================
+   GROUP-STYLE INSERT REFRAMING (R7a) — turn a full-stage scene clip
+   (template/kit build) into a content-sized, stage-centered GROUP:
+   measure the children's occupied bbox at a representative (settled)
+   frame, shift the children so the bbox center lands on the stage
+   center, and park the clip's x/y at the stage center — the exact
+   geometry a Ctrl+G group has, so rotation/scale pivot around the
+   visible content and the drag clamp hugs the content.
+
+   Genuinely full-bleed scenes (backdrop-driven templates whose content
+   covers ≈ the whole stage) are left untouched: they ARE the canvas.
+   ============================================================ */
+export const REFRAME_T = 0.4; /* representative frame: intros settled, every layer alive (TemplateThumb convention) */
+export const FULLBLEED_MIN = 0.94; /* bbox covering ≥94% of the stage on both axes = full-bleed scene */
+export function reframeClipToContent(clip, stage, tFrac = REFRAME_T) {
+  const P = clip.props || {};
+  const tRep = Math.round((P.dur || 5000) * tFrac);
+  const box = bboxOfLayers(clip.children || [], tRep);
+  const fullBleed = box.w >= stage.w * FULLBLEED_MIN && box.h >= stage.h * FULLBLEED_MIN;
+  if (fullBleed) {
+    return { clip: { ...clip, props: { ...P, x: stage.w / 2, y: stage.h / 2 } }, box, fullBleed: true, shifted: false };
+  }
+  const dx = Math.round(stage.w / 2 - box.cx), dy = Math.round(stage.h / 2 - box.cy);
+  const children = (dx || dy) ? (clip.children || []).map((c) => translateLayer(c, dx, dy)) : clip.children;
+  return { clip: { ...clip, children, props: { ...P, x: stage.w / 2, y: stage.h / 2 } }, box, fullBleed: false, shifted: !!(dx || dy) };
+}
 
 export const inputStyle = { width: "100%", background: "#171B24", border: "1px solid #232936", borderRadius: 6, color: "#E9ECF3", padding: "6px 9px", fontSize: 12.5, outline: "none", fontFamily: "inherit", boxSizing: "border-box" };
 export const chipStyle = { background: "#171B24", border: "1px solid #232936", borderRadius: 6, color: "#939BAD", padding: "4px 10px", fontSize: 11, fontWeight: 600 };

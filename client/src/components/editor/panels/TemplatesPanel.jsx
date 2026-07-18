@@ -1,8 +1,9 @@
 /* templates drawer — search + category filter over the gallery TEMPLATES;
-   click inserts the template as one editable clip at the playhead.
-   Follows the ShapesPanel (search) + MapsPanel (card list) patterns.
-   Cards carry a LIVE-rendered thumbnail (TemplateThumb — the panel only
-   mounts while open, so thumbs render lazily, once, memoized). */
+   click inserts the template as one editable GROUP-STYLE clip at the
+   playhead (R7a: content-sized, stage-centered, movable/resizable/
+   rotatable, double-click to open). Follows the ShapesPanel (search) +
+   MapsPanel (card list) patterns. Cards carry a LIVE-rendered thumbnail
+   (TemplateThumb) that plays ONLY while hovered (static frame otherwise). */
 import { C, inputStyle, chipStyle, sectionLabel } from "../model";
 import { TEMPLATES } from "../../../templates/templates.js";
 import TemplateThumb from "../TemplateThumb";
@@ -15,7 +16,7 @@ export default function TemplatesPanel({ tplQ, setTplQ, tplCat, setTplCat, inser
     (!q || t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q)));
   return (
           <div className="gd-panel" style={{ position: "absolute", left: 84, top: 12, width: 264, background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 8, padding: 12, zIndex: 30, boxShadow: "0 12px 40px rgba(0,0,0,.5)" }}>
-            <div style={{ ...sectionLabel, marginBottom: 9 }}>Templates · insert as clip</div>
+            <div style={{ ...sectionLabel, marginBottom: 9 }}>Templates · insert as movable group</div>
             <input autoFocus value={tplQ} onChange={(e) => setTplQ(e.target.value)} placeholder="Search templates…" style={{ ...inputStyle, marginBottom: 8 }} />
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 10 }}>
               {cats.map((c) => (
@@ -25,7 +26,7 @@ export default function TemplatesPanel({ tplQ, setTplQ, tplCat, setTplCat, inser
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 7, maxHeight: 452, overflowY: "auto" }}>
               {list.map((t) => (
-                <button key={t.id} className="gd-btn" title={`Insert "${t.name}" as a clip at the playhead`} onClick={() => insertTemplateClip(t)}
+                <button key={t.id} className="gd-btn" title={`Insert "${t.name}" as a movable group at the playhead`} onClick={() => insertTemplateClip(t)}
                   style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: 8, background: C.bg1, border: `1px solid ${C.line}`, borderRadius: 8, padding: 8, cursor: "pointer", textAlign: "left" }}>
                   <span style={{ display: "flex", justifyContent: "center" }}><TemplateThumb tpl={t} /></span>
                   <span style={{ flex: 1, minWidth: 0 }}>

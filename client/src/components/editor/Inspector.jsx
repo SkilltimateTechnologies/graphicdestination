@@ -11,6 +11,7 @@ import { CONFETTI_STYLES, confettiStyleOf, NUM_FORMATS, CD_STYLES, cdStyleOf, CO
 import { CAM_PROPS, CAM_ZOOM_MIN, CAM_ZOOM_MAX, CAM_DEPTH_MIN, CAM_DEPTH_MAX, cameraAt, camTrackHost, clampDepth } from "../../engine/camera.js";
 import { BLEND_MODES, BLUR_MAX, clampBlur, normBlend, depthHint } from "../../engine/filters.js";
 import { BACKDROP_VARIANTS, BACKDROP_THEMES, BACKDROP_SPEED_MIN, BACKDROP_SPEED_MAX, BACKDROP_INTENSITY_MIN, BACKDROP_INTENSITY_MAX, BACKDROP_LOOP_MIN, BACKDROP_LOOP_MAX, clampSpeed, clampIntensity, clampLoopMs } from "../../engine/backdrops.js";
+import { KIT_COLORS, kitKind } from "../../engine/kits.js";
 
 /* one-click camera presets — each writes TWO keyframes spanning the whole
    composition (0 → compDur) on its prop, easeInOutCubic like every default ◆ */
@@ -282,6 +283,51 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                   {sel.props.tOut !== "none" && sel.props.end !== "hide" && <div style={{ color: C.amber, fontSize: 10.5, lineHeight: 1.5 }}>Out transition plays when "After end" is set to Hide.</div>}
                 </Card>
               )}
+
+              {sel.type === "kit" && (() => {
+                /* locked kit object (R7a): variant chips (icons) + color
+                   pickers ONLY — the art tree is read-only, there is nothing
+                   else to edit. color drives the icon primary (null = the
+                   icon's natural), accent the UI highlight. */
+                const kind = kitKind(sel.props.kit);
+                const SwatchRow = ({ value, onPick, allowNatural }) => (
+                  <div style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
+                    {allowNatural && (
+                      <button className="gd-btn" onClick={() => onPick(null)} title="The artwork's own natural color"
+                        style={{ ...chipStyle, cursor: "pointer", padding: "3px 9px", fontSize: 10.5, borderColor: value == null ? C.amber : C.line, color: value == null ? C.amber : C.dim }}>Natural</button>
+                    )}
+                    {KIT_COLORS.map((col) => (
+                      <button key={col} className="gd-btn" onClick={() => onPick(col)} title={col}
+                        style={{ width: 18, height: 18, borderRadius: 5, background: col, border: `2px solid ${value === col ? C.amber : C.line}`, cursor: "pointer", padding: 0, boxSizing: "border-box" }} />
+                    ))}
+                    <input type="color" value={value || "#FFB224"} onChange={(e) => onPick(e.target.value)} title="Custom color" style={{ width: 26, height: 20, padding: 0, border: `1px solid ${C.line}`, borderRadius: 4, background: "none", cursor: "pointer" }} />
+                  </div>
+                );
+                return (
+                  <Card title={kind === "ui" ? "UI element" : "Icon"} hint="locked kit · read-only art">
+                    <DepthRow value={sel.props.depth} onChange={setDepth} />
+                    <FiltersRow P={sel.props} onBlur={setBlur} onBlend={setBlend} />
+                    {kind === "icon" && (
+                      <ChipRow label="Variant" options={[["animated", "Animated"], ["static", "Static"]]} value={sel.props.variant || "animated"} onChange={(v) => patchProps(sel.id, { variant: v })} />
+                    )}
+                    <div style={{ color: C.dim, fontSize: 11, fontWeight: 600, marginBottom: 5 }}>{kind === "ui" ? "Accent" : "Color"}</div>
+                    <div style={{ marginBottom: 9 }}>
+                      <SwatchRow value={kind === "ui" ? (sel.props.accent || "#FFB224") : sel.props.color}
+                        allowNatural={kind === "icon"}
+                        onPick={(v) => patchProps(sel.id, kind === "ui" ? { accent: v || "#FFB224" } : { color: v })} />
+                    </div>
+                    {kind === "ui" && (
+                      <>
+                        <div style={{ color: C.dim, fontSize: 11, fontWeight: 600, marginBottom: 5 }}>Ink</div>
+                        <div style={{ marginBottom: 9 }}>
+                          <SwatchRow value={sel.props.color} allowNatural={false} onPick={(v) => patchProps(sel.id, { color: v })} />
+                        </div>
+                      </>
+                    )}
+                    <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.5 }}>One locked object — drag to move, corner grips resize the box (art keeps its aspect), rotate grip spins. Loops seamlessly while visible.</div>
+                  </Card>
+                );
+              })()}
 
               {sel.type === "backdrop" && (
                 <Card title="Backdrop" hint="animated · loops seamlessly">

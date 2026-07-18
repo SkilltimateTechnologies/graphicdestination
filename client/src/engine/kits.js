@@ -1530,4 +1530,49 @@ export function frameOf(clip, pad = 16) {
   return { x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2 };
 }
 
-export default { ICONS, UI_ELEMENTS, ICON_CATS, UI_CATS, KIT_COLORS, frameOf };
+/* ============================================================
+   LOCKED KIT OBJECTS (R7a) — pure accessors backing the editor's "kit"
+   layer type. A kit object stores ONE plain layer (no editable children)
+   with props { kit, variant, color, accent }; StageObject calls
+   kitRenderSpec() to re-derive the SAME layer tree the builders produce
+   and draws it read-only, scaled into the object's w/h box.
+
+   · kitKind(id)      — "icon" | "ui" | null (unknown id)
+   · kitById(id)      — the registry entry (or null)
+   · kitRenderSpec(id, { variant, color, accent, size, dur })
+       → { kind, tree, frame, dur } — tree is the kit clip (children in
+         stage coords, end "loop"), frame its content bbox (frameOf),
+         dur the loop length. Ids are RE-MINTED DETERMINISTICALLY
+         (kt1, kt2, … in walk order) so the same (id, opts) always
+         yields byte-identical markup from the shared render path —
+         build() itself keeps minting fresh ob<n> ids for the editable
+         clip-insert path (old projects, template embeds).
+   ============================================================ */
+export function kitKind(kitId) {
+  if (ICONS.some((k) => k.id === kitId)) return "icon";
+  if (UI_ELEMENTS.some((k) => k.id === kitId)) return "ui";
+  return null;
+}
+export function kitById(kitId) {
+  return ICONS.find((k) => k.id === kitId) || UI_ELEMENTS.find((k) => k.id === kitId) || null;
+}
+/* deterministic re-id — walk-order kt<n>, keeps the tree otherwise intact */
+function reidTree(o) {
+  const c = JSON.parse(JSON.stringify(o));
+  let n = 0;
+  const walk = (l) => { l.id = `kt${(n += 1)}`; (l.children || []).forEach(walk); };
+  walk(c);
+  return c;
+}
+export function kitRenderSpec(kitId, opts = {}) {
+  const kind = kitKind(kitId);
+  const kit = kitById(kitId);
+  if (!kind || !kit) return null;
+  const built = kind === "icon"
+    ? kit.build({ variant: opts.variant, color: opts.color || undefined, size: opts.size, dur: opts.dur })
+    : kit.build({ accent: opts.accent || undefined, color: opts.color || undefined, dur: opts.dur });
+  const tree = reidTree(built);
+  return { kind, tree, frame: frameOf(tree), dur: tree.props.dur };
+}
+
+export default { ICONS, UI_ELEMENTS, ICON_CATS, UI_CATS, KIT_COLORS, frameOf, kitKind, kitById, kitRenderSpec };

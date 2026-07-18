@@ -3,8 +3,10 @@
    Extracted VERBATIM from GraphicDestinationMotion.jsx (Refactor Pass 2);
    GraphicDestinationMotion.jsx re-exports StageObject from here.
    ============================================================ */
-import { C } from "./editor/model";
+import { useMemo } from "react";
+import { C, bboxOfLayers } from "./editor/model";
 import { LockIcon } from "./editor/ui";
+import { kitRenderSpec } from "../engine/kits.js";
 import { EASE, clamp01 } from "../engine/easing.js";
 import { ptsToStr, pathSamples, pointOnPath, morphPtsAt } from "../engine/shapes.js";
 import { valueAt, colorAt, lerpColor, clipLocalTime, clipTransition } from "../engine/keyframes.js";
@@ -205,6 +207,13 @@ export function StageObject(props) {
 
 function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, displayValue, onResize, onRotate, onClipScale, interactive, stageScale = 1, playing = false, selCount = 1, rotLive = null, camera = null }) {
   const P = obj.props;
+  /* locked kit objects (R7a): the art tree is re-derived from engine/kits.js
+     — memoized per (kit id, variant, colors) so render is a pure f(props,time).
+     Hook called unconditionally (before any early return) — null for non-kit. */
+  const kitSpec = useMemo(
+    () => (obj.type === "kit" ? kitRenderSpec(P.kit, { variant: P.variant, color: P.color, accent: P.accent }) : null),
+    [obj.type, P.kit, P.variant, P.color, P.accent]
+  );
   /* layer filters (engine/filters.js): blur applies right on each type's
      wrapper below; blend is skipped here when a camera wrapper already
      carries it (see StageObject above). Both "" at inert defaults. */
@@ -232,16 +241,24 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
        click target → onObjectDown, 40px clamp included); four CORNER grips on
        the selected frame scale the whole wrapper uniformly via the `scale`
        prop (contents scale with it — no Shift needed). Hidden while playing,
-       multi-selected, locked, or non-interactive (export). */
+       multi-selected, locked, or non-interactive (export).
+       R7a: the selection frame + grips now HUG THE CONTENT bbox (the same
+       box the drag clamp/align use), so group-style inserts read as movable
+       objects instead of full-stage "scene" blocks; genuinely full-bleed
+       scenes (bbox ≈ stage) keep the full-stage frame. A rotation grip rides
+       above the content box — same base-rotation drag as the other types. */
     const canManipClip = selected && interactive && !obj.locked && !playing && selCount <= 1;
     const uClip = 1 / Math.max(0.05, (stageScale || 1) * Math.max(0.05, scale)); /* keep grips ~9px on screen at any stage zoom × clip scale */
+    const cbox = interactive && selected && local !== null ? bboxOfLayers(obj.children, local) : null; /* internal clip coords */
+    const gb = cbox || { x: 0, y: 0, w: stage.w, h: stage.h }; /* grip/outline box */
+    const clipGripPos = { nw: [gb.x, gb.y], ne: [gb.x + gb.w, gb.y], se: [gb.x + gb.w, gb.y + gb.h], sw: [gb.x, gb.y + gb.h] };
     return (
       <div style={{ position: "absolute", left: 0, top: 0, width: stage.w, height: stage.h, transform: `translate(${x - stage.w / 2 + tr.tx}px, ${y - stage.h / 2 + tr.ty}px) rotate(${rot}deg) scale(${scale * tr.s})`, transformOrigin: `${stage.w / 2}px ${stage.h / 2}px`, opacity: local === null ? (interactive ? 0.15 : 0) : op * tr.o, pointerEvents: "none", ...fxStyle }}>
         {local !== null && P.bg && <div style={{ position: "absolute", left: 0, top: 0, width: stage.w, height: stage.h, background: P.bg }} />}
         {/* full-canvas click target — a clip IS the canvas, so selecting/entering it works anywhere on the frame, not just around its content */}
         {interactive && (
           <div onPointerDown={(e) => onDown(e, obj)} onDoubleClick={() => onEnterClip(obj.id)}
-            title={`${obj.name} — drag to move · corner grips scale · double-click to open`}
+            title={`${obj.name} — drag to move · corner grips scale · rotate grip spins · double-click to open`}
             style={{ position: "absolute", left: 0, top: 0, width: stage.w, height: stage.h, pointerEvents: "auto", cursor: obj.locked ? "default" : "grab" }} />
         )}
         {/* children recurse WITHOUT a camera — UNLESS the clip opts in via
@@ -250,15 +267,28 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
             in raw clip space, exactly as before (byte-identical). */}
         {local !== null && obj.children.map((ch) => <StageObject key={ch.id} obj={ch} time={local} stage={stage} selected={false} interactive={false} camera={P.camInside ? camera : null} />)}
         {interactive && selected && (
-          <div style={{ position: "absolute", left: 0, top: 0, width: stage.w, height: stage.h, pointerEvents: "none", border: `1.5px solid ${C.amber}` }}>
+          <div style={{ position: "absolute", left: gb.x, top: gb.y, width: gb.w, height: gb.h, pointerEvents: "none", border: `1.5px solid ${C.amber}` }}>
             <span style={{ position: "absolute", top: -20, left: 0, fontSize: 10, fontWeight: 700, color: "#1a1405", background: C.amber, borderRadius: 5, padding: "2px 7px", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4 }}>{obj.name} · clip{obj.locked && <LockIcon locked size={10} color="#1a1405" />}{local === null ? " · out of range" : ""}</span>
           </div>
         )}
-        {canManipClip && onClipScale && CLIP_CORNER_DEFS.map(([hid, left, top, axis]) => (
-          <div key={hid} className="gd-rzh" onPointerDown={(e) => { e.stopPropagation(); onClipScale(e, obj, hid, resizeCursor(axis, rot)); }}
+        {canManipClip && onClipScale && CLIP_CORNER_DEFS.map(([hid, , , axis]) => (
+          <div key={hid} className="gd-rzh" onPointerDown={(e) => { e.stopPropagation(); onClipScale(e, obj, hid, resizeCursor(axis, rot), gb); }}
             title="Drag to scale the whole clip uniformly"
-            style={{ position: "absolute", left, top, width: 9 * uClip, height: 9 * uClip, transform: "translate(-50%,-50%)", background: "#fff", border: `${uClip}px solid ${C.amber}`, borderRadius: 0, cursor: resizeCursor(axis, rot), zIndex: 6, pointerEvents: "auto", touchAction: "none", boxSizing: "border-box" }} />
+            style={{ position: "absolute", left: clipGripPos[hid][0], top: clipGripPos[hid][1], width: 9 * uClip, height: 9 * uClip, transform: "translate(-50%,-50%)", background: "#fff", border: `${uClip}px solid ${C.amber}`, borderRadius: 0, cursor: resizeCursor(axis, rot), zIndex: 6, pointerEvents: "auto", touchAction: "none", boxSizing: "border-box" }} />
         ))}
+        {/* rotation grip above the content box — base `rotation` prop via the
+            shared onRotate drag (auto-keyframe aware, Shift = 15° steps) */}
+        {canManipClip && onRotate && <>
+          <div style={{ position: "absolute", left: gb.x + gb.w / 2, top: gb.y - ROTATE_OFFSET * uClip, width: uClip, height: ROTATE_OFFSET * uClip, transform: "translateX(-50%)", background: C.amber, pointerEvents: "none", zIndex: 6 }} />
+          <div className="gd-rzh" onPointerDown={(e) => { e.stopPropagation(); onRotate(e, obj); }}
+            title="Drag to rotate · Shift = 15° steps"
+            style={{ position: "absolute", left: gb.x + gb.w / 2, top: gb.y - ROTATE_OFFSET * uClip, width: 11 * uClip, height: 11 * uClip, transform: "translate(-50%,-50%)", borderRadius: "50%", background: "#fff", border: `${uClip}px solid ${C.amber}`, cursor: "grab", zIndex: 7, pointerEvents: "auto", touchAction: "none" }} />
+          {rotLive && rotLive.id === obj.id && (
+            <div style={{ position: "absolute", left: gb.x + gb.w / 2 + 13 * uClip, top: gb.y - ROTATE_OFFSET * uClip, transform: `translateY(-50%) rotate(${-rot}deg)`, fontFamily: "'JetBrains Mono'", fontSize: 10.5 * uClip, fontWeight: 700, fontVariantNumeric: "tabular-nums", color: C.amber, background: "rgba(16,19,26,.92)", border: `${uClip}px solid ${C.line}`, borderRadius: 4 * uClip, padding: `${2 * uClip}px ${5 * uClip}px`, whiteSpace: "nowrap", pointerEvents: "none", zIndex: 8 }}>
+              {rotLive.deg}°
+            </div>
+          )}
+        </>}
       </div>
     );
   }
@@ -320,6 +350,32 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
     ...fxStyle,
   };
   const down = interactive && !obj.locked ? (e) => onDown(e, obj) : interactive ? (e) => { e.stopPropagation(); onDown(e, obj); } : undefined;
+
+  if (obj.type === "kit") {
+    /* LOCKED KIT OBJECT (R7a) — ONE document layer, NO editable children:
+       props { kit, variant, color, accent } re-derive the same layer tree
+       the kit builders ship (engine/kits.js kitRenderSpec) and it is drawn
+       READ-ONLY, uniformly scaled + centered into the object's w/h box.
+       The tree is a seamlessly-looping clip in 1280×720 stage coords, so
+       the shared render path below (preview AND export) is literally the
+       old kit-clip path — time runs as clip-local loop time measured from
+       the object's inT. Selection shows the standard move/resize/rotate
+       grips (w/h box); it can never be entered or ungrouped. Unknown kit
+       ids render nothing (defensive — never produced by the panels). */
+    if (!kitSpec) return null;
+    const { tree, frame } = kitSpec;
+    const local = Math.max(0, time - (P.inT || 0));
+    const s = Math.min(P.w / Math.max(1, frame.w), P.h / Math.max(1, frame.h));
+    const cx = frame.x + frame.w / 2, cy = frame.y + frame.h / 2;
+    return (
+      <div onPointerDown={down} style={{ ...common, width: P.w, height: P.h }}>
+        <div style={{ position: "absolute", left: P.w / 2 - s * cx, top: P.h / 2 - s * cy, width: 1280, height: 720, transform: `scale(${s})`, transformOrigin: "0 0", pointerEvents: "none" }}>
+          <StageObject obj={tree} time={local} stage={{ w: 1280, h: 720 }} selected={false} interactive={false} />
+        </div>
+        {handles}
+      </div>
+    );
+  }
 
   if (obj.type === "backdrop") {
     /* full-stage animated background — pure function of (time, props, stage
