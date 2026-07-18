@@ -27,6 +27,8 @@
  *       choreography — renders a placeholder box naming the layer
  *     - confetti — renders nothing (would need per-particle DOM nodes;
  *       out of scope for v1)
+ *     - animated backdrops (props.variant/loopMs) — renders a static
+ *       theme-colored gradient stand-in (its first two theme colors)
  *     - motion paths (props.path / prog) — falls back to the layer's
  *       static x/y, ignoring the path
  *   Porting any of these means adding a case to `renderLayerHTML()` and,
@@ -120,6 +122,13 @@ function renderLayerHTML(layer, id) {
       return `<div id="${id}" data-hf-note="${layer.type} border FX not ported in v1" style="${commonStyle}width:${P.w || 400}px;height:${(P.w || 400) * 0.6}px;border:2px dashed #666;color:#999;display:flex;align-items:center;justify-content:center;font-family:sans-serif;font-size:13px;">${esc(layer.name)}</div>`;
     case "confetti":
       return `<div id="${id}" data-hf-note="confetti not ported in v1" style="${commonStyle}width:2px;height:2px;"></div>`;
+    case "backdrop": {
+      /* animated looping backdrops aren't ported — a static gradient from
+         the layer's theme colors keeps the frame's mood + timing correct */
+      const cols = Array.isArray(P.colors) ? P.colors.filter((c) => typeof c === "string") : [];
+      const c0 = cols[0] || "#101218", c1 = cols[1] || "#F5A524";
+      return `<div id="${id}" data-hf-note="animated backdrop not ported in v1 — static gradient stand-in" style="${commonStyle}width:${P.w ? P.w + "px" : "100%"};height:${P.h ? P.h + "px" : "100%"};background:linear-gradient(160deg,${esc(c0)},${esc(c1)});"></div>`;
+    }
     default:
       return `<div id="${id}" style="${commonStyle}width:${P.w}px;height:${P.h}px;background:${esc(P.fill || "#888")};"></div>`;
   }
@@ -169,7 +178,7 @@ export function compileProject(project) {
   const stage = project.stage || { w: 1280, h: 720, dur: 5000, bg: "#000000" };
   const flat = flattenLayers(project.objects || []);
   const warnings = [];
-  const UNPORTED = new Set(["number", "chart", "map", "world", "continent", "confetti"]);
+  const UNPORTED = new Set(["number", "chart", "map", "world", "continent", "confetti", "backdrop"]);
 
   const bodyParts = [];
   const scriptParts = [];

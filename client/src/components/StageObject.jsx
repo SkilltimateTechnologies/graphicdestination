@@ -12,6 +12,7 @@ import { cameraTransform, camTransformCss } from "../engine/camera.js";
 import { blurCss, blendCss } from "../engine/filters.js";
 import { MAPS, WORLD_H, CONTINENTS, WORLD_EXT, ringsToPath, arcPath, mapBox, WORLD_D, normHi } from "../engine/maps.js";
 import { SWATCHES, CONFETTI_STYLES, confettiStyleOf, confettiLife, confettiParticles, charFx, numberValue, numberColumns, formatNumber, contrastOn, parseChart, highlightFlick, worldCameraAt, cdStyleOf, countdownFraction } from "../engine/fx.js";
+import { backdropModel } from "../engine/backdrops.js";
 
 /* ---------- on-canvas selection handles (direct manipulation) ----------
    Rendered inside the SAME transformed wrapper as the selection outline, so they
@@ -319,6 +320,49 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
     ...fxStyle,
   };
   const down = interactive && !obj.locked ? (e) => onDown(e, obj) : interactive ? (e) => { e.stopPropagation(); onDown(e, obj); } : undefined;
+
+  if (obj.type === "backdrop") {
+    /* full-stage animated background — pure function of (time, props, stage
+       dims) via engine/backdrops.js (seamlessly loops over props.loopMs).
+       The model is plain data (grads + shapes); markup here is a 1:1 map, so
+       preview, SSR checks and the export rasterizer stay identical. Gradient
+       ids are prefixed per layer — several backdrops/thumbnails can share a
+       document without colliding. Softness comes from gradient falloff only
+       (NO CSS blur at full-canvas cost — see engine/backdrops.js perf note).
+       No resize grips: w/h are inert for this type (it always covers the
+       stage); x/y/rotation/scale/opacity + depth/blur/blend still apply. */
+    const M = backdropModel(P, time, stage.w, stage.h);
+    const pid = "bd" + obj.id;
+    const fillOf = (s) => (s.grad ? `url(#${pid}${s.grad})` : s.fill || "none");
+    return (
+      <div onPointerDown={down} style={{ ...common, width: stage.w, height: stage.h }}>
+        <svg width={stage.w} height={stage.h} viewBox={`0 0 ${stage.w} ${stage.h}`} style={{ display: "block", overflow: "hidden" }}>
+          <defs>
+            {M.grads.map((g) => g.type === "radial" ? (
+              <radialGradient key={g.id} id={`${pid}${g.id}`} cx="50%" cy="50%" r="50%">
+                {g.stops.map((s, i) => <stop key={i} offset={s[0]} stopColor={s[1]} stopOpacity={s[2]} />)}
+              </radialGradient>
+            ) : (
+              <linearGradient key={g.id} id={`${pid}${g.id}`} x1={g.x1} y1={g.y1} x2={g.x2} y2={g.y2}>
+                {g.stops.map((s, i) => <stop key={i} offset={s[0]} stopColor={s[1]} stopOpacity={s[2]} />)}
+              </linearGradient>
+            ))}
+          </defs>
+          {M.shapes.map((s, i) => {
+            if (s.k === "rect") return <rect key={i} x={s.x} y={s.y} width={s.w} height={s.h} fill={fillOf(s)} opacity={s.op} />;
+            if (s.k === "ellipse") return <ellipse key={i} cx={s.cx} cy={s.cy} rx={s.rx} ry={s.ry} fill={fillOf(s)} opacity={s.op} />;
+            if (s.k === "circle") return <circle key={i} cx={s.cx} cy={s.cy} r={s.r} fill={fillOf(s)} opacity={s.op} />;
+            if (s.k === "line") return <line key={i} x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2} stroke={s.stroke} strokeWidth={s.sw} opacity={s.op} strokeLinecap="round" />;
+            /* poly — closed silhouette (polygon) or open crest stroke (polyline) */
+            const ptsStr = s.pts.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+            return s.close
+              ? <polygon key={i} points={ptsStr} fill={fillOf(s)} opacity={s.op} strokeLinejoin="round" />
+              : <polyline key={i} points={ptsStr} fill="none" stroke={s.stroke} strokeWidth={s.sw} opacity={s.op} strokeLinejoin="round" strokeLinecap="round" />;
+          })}
+        </svg>
+      </div>
+    );
+  }
 
   if (obj.type === "shape") {
     const pts = morphPtsAt(obj, time);

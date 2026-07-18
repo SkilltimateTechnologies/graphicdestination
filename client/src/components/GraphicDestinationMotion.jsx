@@ -22,6 +22,8 @@ import TemplatesPanel from "./editor/panels/TemplatesPanel";
 import ConfettiPanel from "./editor/panels/ConfettiPanel";
 import ChartsPanel from "./editor/panels/ChartsPanel";
 import ThreeDPanel from "./editor/panels/ThreeDPanel";
+import BackgroundsPanel from "./editor/panels/BackgroundsPanel";
+import { BACKDROP_VARIANTS, backdropDefaults, themeOf, variantOf } from "../engine/backdrops.js";
 import StageView from "./editor/StageView";
 import Inspector from "./editor/Inspector";
 import Timeline from "./editor/Timeline";
@@ -98,6 +100,7 @@ function makeObject(type, over = {}) {
   if (type === "map") { base.name = "Map"; Object.assign(base.props, { country: "IND", mapStyle: "comet", stroke: "#FFB224", fillC: "#FFB224", fillOp: 0.85, strokeW: 1.6, start: 200, dur: 1800, w: 420 }); }
   if (type === "continent") { base.name = "Continent"; Object.assign(base.props, { continent: "ASIA", mapStyle: "comet", stroke: "#FFB224", fillC: "#FFB224", fillOp: 0.7, strokeW: 1, start: 200, dur: 2200, w: 620, hi: [], reveal: "simple", revealDur: 600, hiFill: "#FFD984", hiStroke: "#ffffff", glow: true, autoZoom: true, zoomK: 2.2, zoomHoldMs: 1600, zoomTransMs: 550 }); }
   if (type === "confetti") { base.name = "Confetti"; Object.assign(base.props, { burst: 500, count: 70, power: 1, seed: 7, style: "burst" }); }
+  if (type === "backdrop") { base.name = "Backdrop"; Object.assign(base.props, backdropDefaults()); }
   if (type === "chart") { base.name = "Chart"; Object.assign(base.props, { chartType: "bar", dataStr: "Q1, 42\nQ2, 65\nQ3, 38\nQ4, 84", start: 200, dur: 1400, w: 560, h: 340, showVals: true, bg: "#171B24", bgOp: 1, radius: 18, borderC: "#2B3140", borderW: 1, pad: 20 }); }
   if (type === "world") { base.name = "World map"; Object.assign(base.props, { hi: [{ cc: "IND", t: 0, zoom: true }], reveal: "simple", revealDur: 600, zoomK: 2.6, autoZoom: true, zoomHoldMs: 1600, zoomTransMs: 550, focus: 0, base: "#2A3350", baseOp: 1, hiFill: "#FFB224", hiStroke: "#FFD984", stroke: "#3D4A6E", strokeW: 0.7, glow: true, w: 780 }); }
   if (type === "clip") {
@@ -174,6 +177,7 @@ function objSize(o, time) {
   }
   if (o.type === "world") return { w: P.w, h: (P.w * WORLD_H) / 200 };
   if (o.type === "chart") return { w: P.w, h: P.h };
+  if (o.type === "backdrop") return { w: P.w, h: P.h };
   if (o.type === "text") return { w: Math.max(40, P.text.length * P.fontSize * 0.56), h: P.fontSize * 1.25 };
   if (o.type === "number") {
     const digits = String(Math.floor(Math.max(P.from, P.to))).length + P.decimals + (P.decimals ? 1 : 0) + P.prefix.length + P.suffix.length;
@@ -276,6 +280,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   const [chartsOpen, setChartsOpen] = useState(false);
   const [confettiOpen, setConfettiOpen] = useState(false);
   const [threeDOpen, setThreeDOpen] = useState(false);
+  const [bgOpen, setBgOpen] = useState(false);
   const [tplQ, setTplQ] = useState(""); /* templates panel search (persists across open/close, like shapeQ) */
   const [tplCat, setTplCat] = useState("All");
   const [assets, setAssets] = useState(null); /* null = not fetched yet; [] = fetched, empty */
@@ -638,6 +643,21 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     setShapesOpen(false);
     setNumbersOpen(false);
     if (type === "clip" && !over.children) enterClip(o.id);
+  };
+  /* animated backdrop layers (Backgrounds rail panel) — same makeObject
+     insert as every other type, but prepended so the backdrop paints FIRST
+     (bottom of the layer stack, behind all content) at full stage dims.
+     Stays inside the current clip context, like any other insert. */
+  const addBackdrop = (variantId, themeId) => {
+    const theme = themeOf(themeId);
+    const variant = variantOf(variantId);
+    const vName = (BACKDROP_VARIANTS.find((v) => v.id === variant) || BACKDROP_VARIANTS[0]).name;
+    const o = makeObject("backdrop", { name: `${vName} Background`, props: { variant, theme: theme.id, colors: [...theme.colors] } });
+    o.props.x = stage.w / 2; o.props.y = stage.h / 2;
+    o.props.w = stage.w; o.props.h = stage.h;
+    o.props.outT = ctxDur;
+    setLayers((ls) => [o, ...ls]);
+    setSelIds([o.id]);
   };
   /* insert a gallery template as ONE editable clip at the playhead.
      buildClip() ships a full clip layer whose children carry the template
@@ -1576,6 +1596,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
           confettiOpen={confettiOpen} setConfettiOpen={setConfettiOpen}
           numbersOpen={numbersOpen} setNumbersOpen={setNumbersOpen}
           threeDOpen={threeDOpen} setThreeDOpen={setThreeDOpen}
+          bgOpen={bgOpen} setBgOpen={setBgOpen}
           audioTrack={audioTrack} addObject={addObject} />
 
         {/* templates drawer: search + categories, inserts as one editable clip at the playhead */}
@@ -1595,6 +1616,9 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
 
         {/* 3D drawer: 4 fake-3D widgets, each inserted as one editable clip */}
         {threeDOpen && <ThreeDPanel addObject={addObject} setThreeDOpen={setThreeDOpen} mkId={uid} stage={stage} ctxDur={ctxDur} />}
+
+        {/* backgrounds drawer: 8 animated looping backdrops, inserted at the bottom of the stack */}
+        {bgOpen && <BackgroundsPanel addBackdrop={addBackdrop} sel={sel} patchProps={patchProps} />}
 
         {/* maps drawer */}
         {mapsOpen && <MapsPanel addObject={addObject} setMapsOpen={setMapsOpen} />}

@@ -10,6 +10,7 @@ import { MAPS, CONTINENT_NAMES, CONTINENTS, normHi } from "../../engine/maps.js"
 import { CONFETTI_STYLES, confettiStyleOf, NUM_FORMATS, CD_STYLES, cdStyleOf } from "../../engine/fx.js";
 import { CAM_PROPS, CAM_ZOOM_MIN, CAM_ZOOM_MAX, CAM_DEPTH_MIN, CAM_DEPTH_MAX, cameraAt, camTrackHost, clampDepth } from "../../engine/camera.js";
 import { BLEND_MODES, BLUR_MAX, clampBlur, normBlend, depthHint } from "../../engine/filters.js";
+import { BACKDROP_VARIANTS, BACKDROP_THEMES, BACKDROP_SPEED_MIN, BACKDROP_SPEED_MAX, BACKDROP_INTENSITY_MIN, BACKDROP_INTENSITY_MAX, BACKDROP_LOOP_MIN, BACKDROP_LOOP_MAX, clampSpeed, clampIntensity, clampLoopMs } from "../../engine/backdrops.js";
 
 /* one-click camera presets — each writes TWO keyframes spanning the whole
    composition (0 → compDur) on its prop, easeInOutCubic like every default ◆ */
@@ -279,6 +280,40 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                   <ChipRow label="Out" options={TRANSITIONS.map((t) => [t.id, t.name])} value={sel.props.tOut} onChange={(v) => patchProps(sel.id, { tOut: v })} wrap />
                   <SliderRow label="Length" min={150} max={1500} step={10} value={sel.props.tDur} onChange={(v) => patchProps(sel.id, { tDur: v })} />
                   {sel.props.tOut !== "none" && sel.props.end !== "hide" && <div style={{ color: C.amber, fontSize: 10.5, lineHeight: 1.5 }}>Out transition plays when "After end" is set to Hide.</div>}
+                </Card>
+              )}
+
+              {sel.type === "backdrop" && (
+                <Card title="Backdrop" hint="animated · loops seamlessly">
+                  <DepthRow value={sel.props.depth} onChange={setDepth} />
+                  <FiltersRow P={sel.props} onBlur={setBlur} onBlend={setBlend} />
+                  <ChipRow label="Variant" options={BACKDROP_VARIANTS.map((v) => [v.id, v.name])} value={sel.props.variant} onChange={(v) => patchProps(sel.id, { variant: v })} wrap />
+                  <div style={{ color: C.dim, fontSize: 11, fontWeight: 600, marginBottom: 5 }}>Theme</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 9 }}>
+                    {BACKDROP_THEMES.map((t) => {
+                      const on = sel.props.theme === t.id;
+                      return (
+                        <button key={t.id} className="gd-btn" title={`Apply ${t.name}`} onClick={() => patchProps(sel.id, { theme: t.id, colors: [...t.colors] })}
+                          style={{ display: "flex", alignItems: "center", gap: 8, background: C.bg1, border: `1px solid ${on ? C.amber : C.line}`, borderRadius: 7, padding: "5px 8px", cursor: "pointer", textAlign: "left" }}>
+                          <span style={{ display: "flex", gap: 3, flexShrink: 0 }}>
+                            {t.colors.map((c) => <span key={c} style={{ width: 13, height: 13, borderRadius: 4, background: c, border: "1px solid rgba(255,255,255,.14)" }} />)}
+                          </span>
+                          <span style={{ fontSize: 10.5, fontWeight: 600, color: on ? C.amber : C.dim }}>{t.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <SliderRow label="Speed" min={BACKDROP_SPEED_MIN} max={BACKDROP_SPEED_MAX} step={0.05} value={sel.props.speed ?? 1} onChange={(v) => patchProps(sel.id, { speed: clampSpeed(v) })} />
+                  <SliderRow label="Intensity" min={BACKDROP_INTENSITY_MIN} max={BACKDROP_INTENSITY_MAX} step={0.05} value={sel.props.intensity ?? 1} onChange={(v) => patchProps(sel.id, { intensity: clampIntensity(v) })} />
+                  <Row label="Loop">
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <input type="number" min={BACKDROP_LOOP_MIN} max={BACKDROP_LOOP_MAX} step={100} value={sel.props.loopMs ?? 8000}
+                        onChange={(e) => patchProps(sel.id, { loopMs: clampLoopMs(parseFloat(e.target.value)) })}
+                        style={{ ...inputStyle, fontFamily: "'JetBrains Mono'", fontSize: 12, fontVariantNumeric: "tabular-nums" }} aria-label="Loop duration (ms)" />
+                      <span style={{ color: C.faint, fontSize: 10.5, flexShrink: 0 }}>ms</span>
+                    </div>
+                  </Row>
+                  <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.55 }}>Motion repeats exactly every {((sel.props.loopMs ?? 8000) / (sel.props.speed ?? 1) / 1000).toFixed(1)}s — frame 0 equals the loop-end frame, so exports loop with no jump. Effective loop = loop ÷ speed.</div>
                 </Card>
               )}
 

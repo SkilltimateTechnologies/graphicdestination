@@ -134,7 +134,7 @@ export const STAGE_PRESETS = [
 
 export const KF_PROPS = ["x", "y", "scale", "rotation", "opacity", "fill", "prog", "focus"];
 
-export const TYPE_BAR = { chart: "#6E2E4A", clip: "#4A3B0C", text: "#3F2E66", number: "#283D63", shape: "#303F66", image: "#3A4356", map: "#274D40", world: "#274D40", confetti: "#584019" };
+export const TYPE_BAR = { chart: "#6E2E4A", clip: "#4A3B0C", text: "#3F2E66", number: "#283D63", shape: "#303F66", image: "#3A4356", map: "#274D40", world: "#274D40", confetti: "#584019", backdrop: "#472F5F" };
 
 export const inputStyle = { width: "100%", background: "#171B24", border: "1px solid #232936", borderRadius: 6, color: "#E9ECF3", padding: "6px 9px", fontSize: 12.5, outline: "none", fontFamily: "inherit", boxSizing: "border-box" };
 export const chipStyle = { background: "#171B24", border: "1px solid #232936", borderRadius: 6, color: "#939BAD", padding: "4px 10px", fontSize: 11, fontWeight: 600 };
