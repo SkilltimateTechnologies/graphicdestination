@@ -21,6 +21,7 @@ import AudioPanel from "./editor/panels/AudioPanel";
 import TemplatesPanel from "./editor/panels/TemplatesPanel";
 import ConfettiPanel from "./editor/panels/ConfettiPanel";
 import ChartsPanel from "./editor/panels/ChartsPanel";
+import ThreeDPanel from "./editor/panels/ThreeDPanel";
 import StageView from "./editor/StageView";
 import Inspector from "./editor/Inspector";
 import Timeline from "./editor/Timeline";
@@ -274,6 +275,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [chartsOpen, setChartsOpen] = useState(false);
   const [confettiOpen, setConfettiOpen] = useState(false);
+  const [threeDOpen, setThreeDOpen] = useState(false);
   const [tplQ, setTplQ] = useState(""); /* templates panel search (persists across open/close, like shapeQ) */
   const [tplCat, setTplCat] = useState("All");
   const [assets, setAssets] = useState(null); /* null = not fetched yet; [] = fetched, empty */
@@ -1573,6 +1575,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
           templatesOpen={templatesOpen} setTemplatesOpen={setTemplatesOpen} chartsOpen={chartsOpen} setChartsOpen={setChartsOpen}
           confettiOpen={confettiOpen} setConfettiOpen={setConfettiOpen}
           numbersOpen={numbersOpen} setNumbersOpen={setNumbersOpen}
+          threeDOpen={threeDOpen} setThreeDOpen={setThreeDOpen}
           audioTrack={audioTrack} addObject={addObject} />
 
         {/* templates drawer: search + categories, inserts as one editable clip at the playhead */}
@@ -1589,6 +1592,9 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
 
         {/* confetti drawer: 8 emission styles */}
         {confettiOpen && <ConfettiPanel addObject={addObject} setConfettiOpen={setConfettiOpen} />}
+
+        {/* 3D drawer: 4 fake-3D widgets, each inserted as one editable clip */}
+        {threeDOpen && <ThreeDPanel addObject={addObject} setThreeDOpen={setThreeDOpen} mkId={uid} stage={stage} ctxDur={ctxDur} />}
 
         {/* maps drawer */}
         {mapsOpen && <MapsPanel addObject={addObject} setMapsOpen={setMapsOpen} />}

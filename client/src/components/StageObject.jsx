@@ -9,6 +9,7 @@ import { EASE, clamp01 } from "../engine/easing.js";
 import { ptsToStr, pathSamples, pointOnPath, morphPtsAt } from "../engine/shapes.js";
 import { valueAt, colorAt, lerpColor, clipLocalTime, clipTransition } from "../engine/keyframes.js";
 import { cameraTransform, camTransformCss } from "../engine/camera.js";
+import { blurCss, blendCss } from "../engine/filters.js";
 import { MAPS, WORLD_H, CONTINENTS, WORLD_EXT, ringsToPath, arcPath, mapBox, WORLD_D, normHi } from "../engine/maps.js";
 import { SWATCHES, CONFETTI_STYLES, confettiStyleOf, confettiLife, confettiParticles, charFx, numberValue, numberColumns, formatNumber, contrastOn, parseChart, highlightFlick, worldCameraAt, cdStyleOf, countdownFraction } from "../engine/fx.js";
 
@@ -188,15 +189,29 @@ export function StageObject(props) {
   const { camera } = props;
   if (!camera) return <StageObjectInner {...props} />;
   const t = cameraTransform(camera, props.time, props.obj?.props?.depth);
+  /* mix-blend-mode is HOISTED to this outermost camera wrapper: the wrapper's
+     own transform makes it a stacking context, so a blend mode on the inner
+     element would blend against an empty (transparent) backdrop. Blur stays
+     on the inner wrapper (unaffected by stacking contexts). Inert defaults
+     (normal/absent) add NO style key → old projects render byte-identical. */
+  const blend = blendCss(props.obj?.props);
   return (
-    <div style={{ position: "absolute", left: 0, top: 0, width: props.stage.w, height: props.stage.h, transform: camTransformCss(t), transformOrigin: `${props.stage.w / 2}px ${props.stage.h / 2}px`, pointerEvents: "none" }}>
+    <div style={{ position: "absolute", left: 0, top: 0, width: props.stage.w, height: props.stage.h, transform: camTransformCss(t), transformOrigin: `${props.stage.w / 2}px ${props.stage.h / 2}px`, pointerEvents: "none", ...(blend ? { mixBlendMode: blend } : {}) }}>
       <StageObjectInner {...props} stageScale={(props.stageScale || 1) * t.s} />
     </div>
   );
 }
 
-function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, displayValue, onResize, onRotate, onClipScale, interactive, stageScale = 1, playing = false, selCount = 1, rotLive = null }) {
+function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, displayValue, onResize, onRotate, onClipScale, interactive, stageScale = 1, playing = false, selCount = 1, rotLive = null, camera = null }) {
   const P = obj.props;
+  /* layer filters (engine/filters.js): blur applies right on each type's
+     wrapper below; blend is skipped here when a camera wrapper already
+     carries it (see StageObject above). Both "" at inert defaults. */
+  const filterFx = blurCss(P);
+  const blendFx = camera ? "" : blendCss(P);
+  const fxStyle = {}; /* stays empty at inert defaults ⇒ byte-identical styles */
+  if (filterFx) fxStyle.filter = filterFx;
+  if (blendFx) fxStyle.mixBlendMode = blendFx;
   if (obj.hidden && !(interactive && selected)) return null;
   if (obj.type !== "clip") {
     const inT = P.inT || 0;
@@ -220,7 +235,7 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
     const canManipClip = selected && interactive && !obj.locked && !playing && selCount <= 1;
     const uClip = 1 / Math.max(0.05, (stageScale || 1) * Math.max(0.05, scale)); /* keep grips ~9px on screen at any stage zoom × clip scale */
     return (
-      <div style={{ position: "absolute", left: 0, top: 0, width: stage.w, height: stage.h, transform: `translate(${x - stage.w / 2 + tr.tx}px, ${y - stage.h / 2 + tr.ty}px) rotate(${rot}deg) scale(${scale * tr.s})`, transformOrigin: `${stage.w / 2}px ${stage.h / 2}px`, opacity: local === null ? (interactive ? 0.15 : 0) : op * tr.o, pointerEvents: "none" }}>
+      <div style={{ position: "absolute", left: 0, top: 0, width: stage.w, height: stage.h, transform: `translate(${x - stage.w / 2 + tr.tx}px, ${y - stage.h / 2 + tr.ty}px) rotate(${rot}deg) scale(${scale * tr.s})`, transformOrigin: `${stage.w / 2}px ${stage.h / 2}px`, opacity: local === null ? (interactive ? 0.15 : 0) : op * tr.o, pointerEvents: "none", ...fxStyle }}>
         {local !== null && P.bg && <div style={{ position: "absolute", left: 0, top: 0, width: stage.w, height: stage.h, background: P.bg }} />}
         {/* full-canvas click target — a clip IS the canvas, so selecting/entering it works anywhere on the frame, not just around its content */}
         {interactive && (
@@ -228,7 +243,11 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
             title={`${obj.name} — drag to move · corner grips scale · double-click to open`}
             style={{ position: "absolute", left: 0, top: 0, width: stage.w, height: stage.h, pointerEvents: "auto", cursor: obj.locked ? "default" : "grab" }} />
         )}
-        {local !== null && obj.children.map((ch) => <StageObject key={ch.id} obj={ch} time={local} stage={stage} selected={false} interactive={false} />)}
+        {/* children recurse WITHOUT a camera — UNLESS the clip opts in via
+            props.camInside (3D widgets: per-child parallax depths inside the
+            group). Absent on every old clip ⇒ children get camera=null and
+            render in raw clip space, exactly as before (byte-identical). */}
+        {local !== null && obj.children.map((ch) => <StageObject key={ch.id} obj={ch} time={local} stage={stage} selected={false} interactive={false} camera={P.camInside ? camera : null} />)}
         {interactive && selected && (
           <div style={{ position: "absolute", left: 0, top: 0, width: stage.w, height: stage.h, pointerEvents: "none", border: `1.5px solid ${C.amber}` }}>
             <span style={{ position: "absolute", top: -20, left: 0, fontSize: 10, fontWeight: 700, color: "#1a1405", background: C.amber, borderRadius: 5, padding: "2px 7px", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4 }}>{obj.name} · clip{obj.locked && <LockIcon locked size={10} color="#1a1405" />}{local === null ? " · out of range" : ""}</span>
@@ -254,7 +273,7 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
     const glyph = (CONFETTI_STYLES.find((s) => s.id === style) || CONFETTI_STYLES[0]).glyph;
     return (
       <div onPointerDown={interactive && !obj.locked ? (e) => onDown(e, obj) : undefined}
-        style={{ position: "absolute", left: x, top: y, transform: "translate(-50%,-50%)", width: 44, height: 44, cursor: interactive && !obj.locked ? "grab" : "default", zIndex: 50, pointerEvents: interactive ? "auto" : "none" }}>
+        style={{ position: "absolute", left: x, top: y, transform: "translate(-50%,-50%)", width: 44, height: 44, cursor: interactive && !obj.locked ? "grab" : "default", zIndex: 50, pointerEvents: interactive ? "auto" : "none", ...fxStyle }}>
         {(selected || (!active && interactive)) && <div style={{ position: "absolute", inset: 0, border: selected ? `1.5px dashed ${C.amber}` : "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, opacity: active ? 1 : 0.35 }}>{glyph}</div>}
         {active && parts.map((p, i) => {
           const m = confettiMotion(style, p, dt, life, anchor);
@@ -297,6 +316,7 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
     opacity: obj.hidden ? op * 0.32 : op, cursor: interactive && !obj.locked ? "grab" : "default",
     outline: selected ? `1.5px solid ${obj.hidden ? C.faint : C.amber}` : "none", outlineOffset: 4,
     pointerEvents: interactive ? "auto" : "none",
+    ...fxStyle,
   };
   const down = interactive && !obj.locked ? (e) => onDown(e, obj) : interactive ? (e) => { e.stopPropagation(); onDown(e, obj); } : undefined;
 
@@ -324,7 +344,7 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
     sp.forEach((p) => { pcx += p[0]; pcy += p[1]; });
     pcx /= Math.max(1, sp.length); pcy /= Math.max(1, sp.length);
     return (
-      <svg style={{ position: "absolute", left: 0, top: 0, width: "100%", height: "100%", overflow: "visible", opacity: op, pointerEvents: "none" }}>
+      <svg style={{ position: "absolute", left: 0, top: 0, width: "100%", height: "100%", overflow: "visible", opacity: op, pointerEvents: "none", ...fxStyle }}>
         <defs><path id={"tp" + obj.id} d={dPath} /></defs>
         <g transform={`translate(${pcx} ${pcy}) rotate(${rot}) scale(${scale}) translate(${-pcx} ${-pcy})`}>
           {selected && <path d={dPath} fill="none" stroke={C.amber} strokeOpacity={0.35} strokeWidth={2} strokeDasharray="4 4" />}

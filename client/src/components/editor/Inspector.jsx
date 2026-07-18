@@ -9,6 +9,7 @@ import { SHAPE_IDS, SHAPE_DEFS, ptsToStr } from "../../engine/shapes.js";
 import { MAPS, CONTINENT_NAMES, CONTINENTS, normHi } from "../../engine/maps.js";
 import { CONFETTI_STYLES, confettiStyleOf, NUM_FORMATS, CD_STYLES, cdStyleOf } from "../../engine/fx.js";
 import { CAM_PROPS, CAM_ZOOM_MIN, CAM_ZOOM_MAX, CAM_DEPTH_MIN, CAM_DEPTH_MAX, cameraAt, camTrackHost, clampDepth } from "../../engine/camera.js";
+import { BLEND_MODES, BLUR_MAX, clampBlur, normBlend, depthHint } from "../../engine/filters.js";
 
 /* one-click camera presets — each writes TWO keyframes spanning the whole
    composition (0 → compDur) on its prop, easeInOutCubic like every default ◆ */
@@ -47,10 +48,43 @@ function DepthRow({ value, onChange }) {
   return (
     <div title="Parallax depth vs. the scene camera — 0 world-locked · −0.9 far background (barely moves) · +1.5 foreground (whips past) · −1 in JSON = camera-locked overlay"
       style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-      <span style={{ width: 62, color: C.dim, fontSize: 11, fontWeight: 600, flexShrink: 0 }}>Depth</span>
+      <span style={{ width: 62, color: C.dim, fontSize: 11, fontWeight: 600, flexShrink: 0, lineHeight: 1.25 }}>
+        Depth
+        {/* tiny quick-view hint (engine/filters.js depthHint) — updates live so
+            users discover what depth does: far background / mid / foreground.
+            <em> (NOT a span) keeps the row's span:last-child readout contract. */}
+        <em style={{ display: "block", fontStyle: "normal", fontSize: 8.5, fontWeight: 600, color: on ? C.amber : C.faint, textTransform: "uppercase", letterSpacing: "0.04em" }}>{depthHint(d)}</em>
+      </span>
       <input type="range" min={CAM_DEPTH_MIN} max={CAM_DEPTH_MAX} step={0.05} value={d} onChange={(e) => onChange(parseFloat(e.target.value))} style={{ flex: 1 }} aria-label="Parallax depth" />
       <span style={{ width: 40, textAlign: "right", fontFamily: "'JetBrains Mono'", fontSize: 10.5, fontVariantNumeric: "tabular-nums", color: on ? C.amber : C.txt }}>{d.toFixed(2)}</span>
     </div>
+  );
+}
+
+/* layer filters — blur slider (mono readout) + blend chips. Sits right under
+   DepthRow in the FIRST card of every object type. Both props default inert
+   (blur 0 / blend normal ⇒ keys REMOVED from the JSON, old projects stay
+   byte-identical); the renderer honors them on every type (StageObject). */
+function FiltersRow({ P, onBlur, onBlend }) {
+  const b = clampBlur(P.blur);
+  const m = normBlend(P.blend);
+  return (
+    <>
+      <div title="Gaussian blur radius in px — 0 (default) keeps the layer crisp; renders in the preview AND the export" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <span style={{ width: 62, color: C.dim, fontSize: 11, fontWeight: 600, flexShrink: 0 }}>Blur</span>
+        <input type="range" min={0} max={BLUR_MAX} step={0.5} value={b} onChange={(e) => onBlur(parseFloat(e.target.value))} style={{ flex: 1 }} aria-label="Blur radius" />
+        <span style={{ width: 40, textAlign: "right", fontFamily: "'JetBrains Mono'", fontSize: 10.5, fontVariantNumeric: "tabular-nums", color: b > 0 ? C.amber : C.txt }}>{b.toFixed(1)}px</span>
+      </div>
+      <div title="Blend mode vs. the layers below — normal (default) keeps the project byte-identical; screen / multiply / overlay render in preview AND export" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <span style={{ width: 62, color: C.dim, fontSize: 11, fontWeight: 600, flexShrink: 0 }}>Blend</span>
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+          {BLEND_MODES.map((id) => (
+            <button key={id} className="gd-btn" onClick={() => onBlend(id)}
+              style={{ ...chipStyle, cursor: "pointer", padding: "3px 9px", fontSize: 10.5, borderColor: m === id ? C.amber : C.line, color: m === id ? C.amber : C.dim }}>{id}</button>
+          ))}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -66,6 +100,18 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
     const d = clampDepth(v);
     if (Math.abs(d) < 1e-9) patchObject(sel.id, (o) => { const p = { ...o.props }; delete p.depth; return { ...o, props: p }; });
     else patchProps(sel.id, { depth: d });
+  };
+  /* layer filters — same inert-default discipline as depth: blur 0 / blend
+     "normal" REMOVE the key so untouched layers keep their old JSON shape */
+  const setBlur = (v) => {
+    const b = clampBlur(v);
+    if (b <= 0) patchObject(sel.id, (o) => { const p = { ...o.props }; delete p.blur; return { ...o, props: p }; });
+    else patchProps(sel.id, { blur: b });
+  };
+  const setBlend = (v) => {
+    const m = normBlend(v);
+    if (m === "normal") patchObject(sel.id, (o) => { const p = { ...o.props }; delete p.blend; return { ...o, props: p }; });
+    else patchProps(sel.id, { blend: m });
   };
   /* number style preset click: reset every preset-controlled prop to inert,
      apply the preset patch, remember the swatch (amber ring). Outline inks
@@ -204,6 +250,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
               {sel.type === "clip" && (
                 <Card title="Clip">
                   <DepthRow value={sel.props.depth} onChange={setDepth} />
+                  <FiltersRow P={sel.props} onBlur={setBlur} onBlend={setBlend} />
                   <button className="gd-btn" onClick={() => enterClip(sel.id)} style={{ width: "100%", background: C.amber, color: "#1a1405", border: "none", borderRadius: 6, padding: "8px 0", cursor: "pointer", fontWeight: 700, marginBottom: 10 }}>Open clip timeline →</button>
                   <SliderRow label="Start" min={0} max={Math.max(100, ctxDur - 100)} step={10} value={sel.props.start} onChange={(v) => patchProps(sel.id, { start: v })} />
                   <SliderRow label="Duration" min={300} max={15000} step={100} value={sel.props.dur} onChange={(v) => stretchClipDur(sel.id, v)} />
@@ -238,6 +285,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
               {sel.type === "shape" && (
                 <Card title="Shape" hint="click = morph keyframe">
                   <DepthRow value={sel.props.depth} onChange={setDepth} />
+                  <FiltersRow P={sel.props} onBlur={setBlur} onBlend={setBlend} />
                   <input value={morphQ} onChange={(e) => setMorphQ(e.target.value)} placeholder="Search shapes…" style={{ ...inputStyle, marginBottom: 7 }} />
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 5, marginBottom: 9 }}>
                     {SHAPE_IDS.filter((sid) => SHAPE_DEFS[sid].name.toLowerCase().includes(morphQ.toLowerCase())).map((sid) => {
@@ -266,6 +314,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
               {sel.type === "text" && (
                 <Card title="Text">
                   <DepthRow value={sel.props.depth} onChange={setDepth} />
+                  <FiltersRow P={sel.props} onBlur={setBlur} onBlend={setBlend} />
                   <Row label="Text"><input value={sel.props.text} onChange={(e) => patchProps(sel.id, { text: e.target.value })} style={inputStyle} /></Row>
                   <FontControls P={sel.props} onChange={(patch) => patchProps(sel.id, patch)} showSpacing brand={brand} />
                   <ColorKfRow label="Color" obj={sel} time={time} sw={SW} onEdit={(v) => editProp(sel.id, "fill", v)} onKf={(has, v) => { if (has) removeKeyframe(sel.id, "fill", Math.round(time / 10) * 10); else { const T = setKeyframe(sel.id, "fill", time, v); setSelKf({ objId: sel.id, prop: "fill", t: T }); } }} />
@@ -285,6 +334,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
               {sel.type === "number" && (
                 <Card title="Number">
                   <DepthRow value={sel.props.depth} onChange={setDepth} />
+                  <FiltersRow P={sel.props} onBlur={setBlur} onBlend={setBlend} />
                   {/* mode selection lives in the Number rail panel (count up / countdown / odometer insert buttons) — no duplicate chips here */}
                   <ChipRow label="Format" options={NUM_FORMATS.map((f) => [f.id, f.name])} value={sel.props.format || "plain"} onChange={(v) => patchProps(sel.id, { format: v })} wrap />
                   {(sel.props.format || "plain") === "time" && <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.5, margin: "-4px 0 8px" }}>Seconds in, mm:ss out — pairs with Countdown mode.</div>}
@@ -353,6 +403,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
               {sel.type === "image" && (
                 <Card title="Image">
                   <DepthRow value={sel.props.depth} onChange={setDepth} />
+                  <FiltersRow P={sel.props} onBlur={setBlur} onBlend={setBlend} />
                   <button className="gd-btn" onClick={() => fileRef.current?.click()} style={{ ...chipStyle, cursor: "pointer" }}>Replace image…</button>
                 </Card>
               )}
@@ -360,6 +411,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
               {sel.type === "map" && (
                 <Card title="Country map" hint="real outlines">
                   <DepthRow value={sel.props.depth} onChange={setDepth} />
+                  <FiltersRow P={sel.props} onBlur={setBlur} onBlend={setBlend} />
                   <ChipRow label="Country" options={Object.keys(MAPS).map((cc) => [cc, MAPS[cc].name])} value={sel.props.country} onChange={(v) => patchProps(sel.id, { country: v })} wrap />
                   <ChipRow label="Effect" options={[["plain", "Plain"], ["draw", "Draw & stay"], ["comet", "Comet"], ["neon", "Neon"], ["reveal", "Draw → Glow"], ["pulse", "Glow pulse"]]} value={sel.props.mapStyle} onChange={(v) => patchProps(sel.id, { mapStyle: v })} wrap />
                   <Row label="Fill"><input type="color" value={sel.props.fillC} onChange={(e) => patchProps(sel.id, { fillC: e.target.value })} /></Row>
@@ -378,6 +430,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
               {sel.type === "world" && (
                 <Card title="World map" hint="countries appear at their set time">
                   <DepthRow value={sel.props.depth} onChange={setDepth} />
+                  <FiltersRow P={sel.props} onBlur={setBlur} onBlend={setBlend} />
                   <WorldPicker hi={normHi(sel.props.hi)} fmt={fmt} zoomHoldMs={sel.props.zoomHoldMs || 1600}
                     onAdd={(cc) => patchProps(sel.id, { hi: [...normHi(sel.props.hi), { cc, t: Math.round(timeRef.current / 10) * 10, zoom: true }] })}
                     onRetime={(cc) => patchProps(sel.id, { hi: normHi(sel.props.hi).map((h) => (h.cc === cc ? { ...h, t: Math.round(timeRef.current / 10) * 10 } : h)) })}
@@ -419,6 +472,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
               {sel.type === "continent" && (
                 <Card title="Continent map" hint="all countries in the region">
                   <DepthRow value={sel.props.depth} onChange={setDepth} />
+                  <FiltersRow P={sel.props} onBlur={setBlur} onBlend={setBlend} />
                   <ChipRow label="Region" options={Object.keys(CONTINENT_NAMES).map((k) => [k, CONTINENT_NAMES[k]])} value={sel.props.continent} onChange={(v) => patchProps(sel.id, { continent: v })} wrap />
                   <ChipRow label="Effect" options={[["plain", "Plain"], ["draw", "Draw & stay"], ["comet", "Comet"], ["neon", "Neon"], ["reveal", "Draw → Glow"], ["pulse", "Glow pulse"]]} value={sel.props.mapStyle} onChange={(v) => patchProps(sel.id, { mapStyle: v })} wrap />
                   <Row label="Fill"><input type="color" value={sel.props.fillC} onChange={(e) => patchProps(sel.id, { fillC: e.target.value })} /></Row>
@@ -465,6 +519,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                 <Card title="Chart" hint="one row per line: Label, value">
                   {/* chart type is chosen at insert (Charts rail panel) — not switchable here */}
                   <DepthRow value={sel.props.depth} onChange={setDepth} />
+                  <FiltersRow P={sel.props} onBlur={setBlur} onBlend={setBlend} />
                   <textarea value={sel.props.dataStr} onChange={(e) => patchProps(sel.id, { dataStr: e.target.value })}
                     style={{ ...inputStyle, height: 92, resize: "none", fontFamily: "'JetBrains Mono'", fontSize: 11, marginBottom: 8 }} placeholder={"Q1, 42\nQ2, 65"} />
                   {sel.props.chartType !== "gauge" && <ChipRow label="Values" options={[[true, "Show"], [false, "Hide"]]} value={sel.props.showVals} onChange={(v) => patchProps(sel.id, { showVals: v })} />}
@@ -491,6 +546,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
               {sel.type === "confetti" && (
                 <Card title="Confetti">
                   <DepthRow value={sel.props.depth} onChange={setDepth} />
+                  <FiltersRow P={sel.props} onBlur={setBlur} onBlend={setBlend} />
                   <ChipRow label="Style" options={CONFETTI_STYLES.map((s) => [s.id, s.name])} value={confettiStyleOf(sel.props)} onChange={(v) => patchProps(sel.id, { style: v })} wrap />
                   <SliderRow label="Burst" min={0} max={Math.max(100, ctxDur - 500)} step={10} value={sel.props.burst} onChange={(v) => patchProps(sel.id, { burst: v })} />
                   <SliderRow label="Particles" min={20} max={160} value={sel.props.count} onChange={(v) => patchProps(sel.id, { count: v })} />
