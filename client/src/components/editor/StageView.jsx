@@ -28,7 +28,7 @@ function CameraCorners() {
   );
 }
 
-export default function StageView({ stageWrapRef, stageScrollRef, tlDragging, zoomed, stage, stageScale, stageBg, inClip, ctx, ctxLayers, time, selIds, sel, overflowShow, zoomMode, playing, rotLive, onObjectDown, enterClip, displayValue, onResizeDown, onRotateDown, onClipScaleDown, onPathPtDown, patchPath, setOverflowShow, camera, cameraLaneSel, onStageEmptyDown, stepZoom, cycleZoom, setZoom }) {
+export default function StageView({ stageWrapRef, stageScrollRef, tlDragging, zoomed, stage, stageScale, stageBg, inClip, ctx, ctxLayers, time, selIds, sel, overflowShow, zoomMode, playing, rotLive, onObjectDown, enterClip, displayValue, onResizeDown, onRotateDown, onClipScaleDown, onPathPtDown, patchPath, setOverflowShow, camera, cameraLaneSel, onStageEmptyDown, snapGuides, snapOn, onToggleSnap, stepZoom, cycleZoom, setZoom }) {
   /* the scene camera applies at the ROOT scene level only — inside-clip
      editing shows raw clip space (documented in engine/camera.js) */
   const cam = !inClip && camera ? camera : null;
@@ -64,6 +64,28 @@ export default function StageView({ stageWrapRef, stageScrollRef, tlDragging, zo
                 </div>
               );
             })()}
+            {/* alignment guides — stage coordinate space (same as the selection
+                chrome, so they track zoom); u counter-scales the stroke so lines
+                stay a crisp 1 screen px. Rendered only while a drag supplies them. */}
+            {snapGuides && snapGuides.length > 0 && (() => {
+              const u = 1 / Math.max(0.05, stageScale || 1);
+              const tick = 6 * u, col = "rgba(245,165,36,0.7)"; /* accent amber @ 70% */
+              return (
+                <div className="gd-snap-guides" style={{ position: "absolute", inset: 0, zIndex: 72, pointerEvents: "none" }}>
+                  {snapGuides.map((g, i) => {
+                    const vert = g.axis === "x";
+                    const len = Math.max(0, g.to - g.from);
+                    return (
+                      <div key={i} data-axis={g.axis} data-pos={g.pos}>
+                        <div style={{ position: "absolute", left: vert ? g.pos - u / 2 : g.from, top: vert ? g.from : g.pos - u / 2, width: vert ? u : len, height: vert ? len : u, background: col }} />
+                        <div style={{ position: "absolute", left: vert ? g.pos - tick / 2 : g.from, top: vert ? g.from : g.pos - tick / 2, width: vert ? tick : u, height: vert ? u : tick, background: col }} />
+                        <div style={{ position: "absolute", left: vert ? g.pos - tick / 2 : g.to - u, top: vert ? g.to - u : g.pos - tick / 2, width: vert ? tick : u, height: vert ? u : tick, background: col }} />
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
             {cameraLaneSel && !inClip && <CameraCorners />}
           </div>
           </div>
@@ -78,6 +100,15 @@ export default function StageView({ stageWrapRef, stageScrollRef, tlDragging, zo
               style={{ ...zoomCtlBtn, color: overflowShow ? C.amber : C.dim }}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>
+              </svg>
+            </button>
+            <button className="gd-btn" onClick={onToggleSnap}
+              title={snapOn ? "Snapping ON — drag objects to snap to edges/centers + canvas (Alt-drag inverts)" : "Snapping OFF — Alt-drag snaps temporarily"}
+              style={{ ...zoomCtlBtn, color: snapOn ? C.amber : C.dim }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 3v8a6 6 0 0 0 12 0V3"/>
+                <path d="M6 3h4v5H6z"/>
+                <path d="M14 3h4v5h-4z"/>
               </svg>
             </button>
             <div style={{ width: 1, height: 16, background: C.line, margin: "0 2px" }} />

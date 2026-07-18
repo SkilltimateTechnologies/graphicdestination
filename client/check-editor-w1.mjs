@@ -46,6 +46,10 @@ import { createElement as h } from "react";
 import { createRoot } from "react-dom/client";
 import "../src/index.css";
 import GraphicDestinationMotion from "../src/components/GraphicDestinationMotion.jsx";
+/* w2: this pack asserts EXACT drag deltas (auto-key ◆ values, clip moves, the
+   40px clamp) — run it with smart snapping disabled so drags land unsnapped;
+   snapping itself is covered by check-snapping-ui.mjs. */
+localStorage.setItem("gd:snapping", "0");
 createRoot(document.getElementById("root")).render(h(GraphicDestinationMotion, {
   onChange: (json) => { window.__lastProject = json; },
 }));

@@ -10,6 +10,7 @@ import { cameraAt, cameraTransform, cameraFromJson, cameraToJson, clampZoom } fr
 import { MAPS, WORLD_H, CONTINENTS, WORLD_EXT, mapBox, normHi } from "../engine/maps.js";
 import { FONT_IMPORT } from "../engine/fx.js";
 import { C, KF_PROPS, STAGE_PRESETS, kfAt, layerOut } from "./editor/model";
+import { computeSnap, SNAP_THRESHOLD } from "./editor/snapping";
 import TopBar from "./editor/TopBar";
 import IconRail from "./editor/IconRail";
 import ShapesPanel from "./editor/panels/ShapesPanel";
@@ -57,6 +58,11 @@ const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5];
    already have a track write/replace a ◆ at the playhead instead of patching base */
 const AUTOKEY_KEY = "gd:autokey";
 const readAutokey = () => { try { const v = localStorage.getItem(AUTOKEY_KEY); return v === null ? true : v === "1"; } catch { return true; } };
+/* smart snapping (stage zoom-cluster magnet toggle, persisted): body-drags and
+   resize-grip drags snap to sibling edges/centers + canvas center/edges with
+   alignment guides; Alt-drag inverts the toggle for the gesture */
+const SNAP_KEY = "gd:snapping";
+const readSnapping = () => { try { const v = localStorage.getItem(SNAP_KEY); return v === null ? true : v === "1"; } catch { return true; } };
 
 /* ============================================================
    KEYFRAMES + INTERPOLATION
@@ -289,6 +295,10 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   const [shapeQ, setShapeQ] = useState("");
   const [morphQ, setMorphQ] = useState("");
   const [overflowShow, setOverflowShow] = useState(true);
+  const [snapOn, setSnapOn] = useState(readSnapping);
+  const snapOnRef = useRef(true); /* read inside drag closures (Alt inverts it live via ev.altKey) */
+  snapOnRef.current = snapOn;
+  const [snapGuides, setSnapGuides] = useState(null); /* alignment guides — set only while a canvas drag is active */
   const clipboardRef = useRef([]);
   const [clipCount, setClipCount] = useState(0);
   const [menu, setMenu] = useState(null); // context menu {x,y,kind,...}
@@ -409,6 +419,11 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   const setAutokeyPersist = useCallback((v) => {
     setAutokey(v);
     try { localStorage.setItem(AUTOKEY_KEY, v ? "1" : "0"); } catch { /* storage unavailable — the toggle just won't persist */ }
+  }, []);
+  /* snapping toggle (stage zoom-cluster magnet), persisted */
+  const setSnapOnPersist = useCallback((v) => {
+    setSnapOn(v);
+    try { localStorage.setItem(SNAP_KEY, v ? "1" : "0"); } catch { /* storage unavailable — the toggle just won't persist */ }
   }, []);
 
   /* AUTO-KEYFRAME mode — CANVAS gestures only (move / rotate / clip-scale):
@@ -934,6 +949,18 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
 
   /* ---------- stage drag (group + path aware, lock aware, canvas-bounds clamped) ---------- */
   const dragRef = useRef(null);
+  /* a layer's stage-space bbox at time t — the same box align() and the drag
+     clamp use (live size × scale around the path-aware position) */
+  const layerBBox = (o, t) => {
+    const s = Math.max(0.05, valueAt(o, "scale", t) ?? 1);
+    const { w, h } = objSize(o, t);
+    const [px, py] = posOf(o, t);
+    return { x: px - (w * s) / 2, y: py - (h * s) / 2, w: w * s, h: h * s };
+  };
+  /* snap targets for a canvas drag: bboxes of the visible, unlocked, NON-selected
+     layers of the CURRENT editing context (root scene or the open clip) */
+  const snapTargetsFor = (excludeIds, t) =>
+    ctxLayers.filter((o) => !excludeIds.includes(o.id) && !o.locked && !o.hidden && layerVisible(o, t, ctxDur)).map((o) => layerBBox(o, t));
   /* on-screen scale of a layer under the scene camera (1 when the camera is off
      or inside a clip). Pointer deltas divide by it so objects, resize grips and
      path points track the pointer 1:1 even when the camera scales the layer. */
@@ -959,17 +986,33 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
         return { id: o.id, hasPath: !!o.props.path, pts: o.props.path ? o.props.path.pts.map((p) => p.slice()) : null, ox: valueAt(o, "x", t), oy: valueAt(o, "y", t), px, py, hw: (w * s) / 2, hh: (h * s) / 2, cs: camVisScale(o) };
       });
     if (!members.length) return;
-    dragRef.current = { members, sx: e.clientX, sy: e.clientY, moved: false, live: {} };
+    dragRef.current = { members, sx: e.clientX, sy: e.clientY, moved: false, live: {}, targets: snapTargetsFor(ids, t) };
     const move = (ev) => {
       const d = dragRef.current;
       if (!d) return;
       const dx = (ev.clientX - d.sx) / stageScale, dy = (ev.clientY - d.sy) / stageScale;
       if (Math.abs(dx) + Math.abs(dy) > 2) d.moved = true;
+      /* smart snapping: snap the dragged SELECTION bbox to sibling edges/centers
+         + canvas center/edges, applied BEFORE the 40px clamp so a snapped drop
+         still clamps identically. Threshold is 6 screen px (stage-zoom × camera
+         scale aware). Alt-drag inverts the toggle for the gesture. */
+      let sdx = 0, sdy = 0, guides = null;
+      if (d.moved && snapOnRef.current !== ev.altKey) {
+        const th = SNAP_THRESHOLD / Math.max(0.05, stageScale * (d.members[0]?.cs || 1));
+        const cx = (m) => (m.hasPath ? m.px : m.ox) + dx / m.cs, cy = (m) => (m.hasPath ? m.py : m.oy) + dy / m.cs;
+        const L = Math.min(...d.members.map((m) => cx(m) - m.hw)), R = Math.max(...d.members.map((m) => cx(m) + m.hw));
+        const T = Math.min(...d.members.map((m) => cy(m) - m.hh)), B = Math.max(...d.members.map((m) => cy(m) + m.hh));
+        const r = computeSnap({ moving: { x: L, y: T, w: R - L, h: B - T }, others: d.targets, stageW: stage.w, stageH: stage.h, threshold: th });
+        sdx = r.dx; sdy = r.dy;
+        guides = r.guides.length ? r.guides : null;
+      }
+      setSnapGuides(guides);
       d.members.forEach((m) => {
         /* divide by the layer's camera screen-scale: under a zoomed camera a
            stage-px move covers more screen px, so the pointer delta shrinks
-           back to stage units (1 while the camera is off). */
-        const mdx = dx / m.cs, mdy = dy / m.cs;
+           back to stage units (1 while the camera is off). The snap delta is a
+           stage-unit translation of the whole selection, added after. */
+        const mdx = dx / m.cs + sdx, mdy = dy / m.cs + sdy;
         /* clamp AFTER rounding so the visible overlap stays >= DRAG_MIN_VISIBLE:
            center ∈ [MIN − half, stage − MIN + half] ⇔ [center−half, center+half]
            overlaps [0, stage] by at least MIN px on that axis — applied live,
@@ -993,6 +1036,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
       dragRef.current = null;
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      setSnapGuides(null); /* guides live only for the duration of the drag */
       if (!d || !d.moved) return;
       /* drop lands through the auto-keyframe path: ON → ◆ at the playhead for
          props that already have a track, base patch otherwise; OFF → classic */
@@ -1077,13 +1121,38 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     const textual = obj.type === "text" || obj.type === "number"; /* fontSize-driven */
     const singleW = obj.type === "map" || obj.type === "continent" || obj.type === "world"; /* w-only, h derived */
     const cs = camVisScale(obj); /* camera screen-scale of this layer (1 when camera off) */
+    const [ox, oy] = posOf(obj, t); /* the center stays fixed — resize grows symmetrically */
+    const targets = snapTargetsFor([obj.id], t); /* snap context, captured once per drag */
+    /* the would-be size (prop units) for a given local delta — mirrors the three
+       patch branches below so the snap bbox measures exactly what will render */
+    const sizeAt = (lx, ly) => {
+      if (textual) { const f = Math.max(0.05, hy !== 0 ? (sz0.h + 2 * hy * ly) / sz0.h : (sz0.w + 2 * hx * lx) / sz0.w); return { w: sz0.w * f, h: sz0.h * f }; }
+      if (singleW) { const fx = hx !== 0 ? (sz0.w + 2 * hx * lx) / sz0.w : 1; const fy = hy !== 0 ? (sz0.h + 2 * hy * ly) / sz0.h : 1; const f = Math.max(0.05, hx !== 0 && hy !== 0 ? Math.max(fx, fy) : hx !== 0 ? fx : fy); return { w: sz0.w * f, h: sz0.h * f }; }
+      return { w: hx !== 0 ? sz0.w + 2 * hx * lx : sz0.w, h: hy !== 0 ? sz0.h + 2 * hy * ly : sz0.h };
+    };
     const sx = e.clientX, sy = e.clientY;
     const prevCursor = document.body.style.cursor;
     if (cursor) document.body.style.cursor = cursor;
     const move = (ev) => {
       /* pointer delta → stage units → the object's local axes (undo its rotation) → prop units (undo its scale) */
       const dx = (ev.clientX - sx) / (stageScale * cs), dy = (ev.clientY - sy) / (stageScale * cs);
-      const ddx = (dx * cos + dy * sin) / s0, ddy = (-dx * sin + dy * cos) / s0;
+      let ddx = (dx * cos + dy * sin) / s0, ddy = (-dx * sin + dy * cos) / s0;
+      /* smart snapping (the grip's own edges only): measure the would-be bbox,
+         snap it, then fold the stage-space snap delta back into the local delta —
+         the symmetric resize then lands the dragged edge exactly on the guide.
+         Same Alt-invert + zoom-aware threshold as the body drag. */
+      if (snapOnRef.current !== ev.altKey) {
+        const uns = sizeAt(ddx, ddy);
+        const th = SNAP_THRESHOLD / Math.max(0.05, stageScale * cs);
+        const r = computeSnap({
+          moving: { x: ox - (uns.w * s0) / 2, y: oy - (uns.h * s0) / 2, w: uns.w * s0, h: uns.h * s0 },
+          others: targets, stageW: stage.w, stageH: stage.h, threshold: th,
+          points: { x: hx > 0 ? ["right"] : hx < 0 ? ["left"] : [], y: hy > 0 ? ["bottom"] : hy < 0 ? ["top"] : [] },
+        });
+        ddx += (r.dx * cos + r.dy * sin) / s0;
+        ddy += (-r.dx * sin + r.dy * cos) / s0;
+        setSnapGuides(r.guides.length ? r.guides : null);
+      } else setSnapGuides(null);
       let patch;
       if (textual) {
         /* scale fontSize proportionally — the vertical delta ratio drives (corners + N/S);
@@ -1110,6 +1179,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       document.body.style.cursor = prevCursor;
+      setSnapGuides(null); /* guides live only for the duration of the drag */
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -1538,6 +1608,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
           onPathPtDown={onPathPtDown} patchPath={patchPath} setOverflowShow={setOverflowShow}
           setSelIds={setSelIds} setSelKf={setSelKf} setAudioSel={setAudioSel} setShapesOpen={setShapesOpen} setMapsOpen={setMapsOpen} setImagesOpen={setImagesOpen} setAudioOpen={setAudioOpen}
           camera={camera} cameraLaneSel={cameraLaneSel} onStageEmptyDown={onStageEmptyDown}
+          snapGuides={snapGuides} snapOn={snapOn} onToggleSnap={() => setSnapOnPersist(!snapOn)}
           stepZoom={stepZoom} cycleZoom={cycleZoom} setZoom={setZoom} />
 
         {/* ---- inspector ---- */}
