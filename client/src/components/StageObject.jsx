@@ -245,9 +245,9 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
             style={{ position: "absolute", left: 0, top: 0, width: stage.w, height: stage.h, pointerEvents: "auto", cursor: obj.locked ? "default" : "grab" }} />
         )}
         {/* children recurse WITHOUT a camera — UNLESS the clip opts in via
-            props.camInside (3D widgets: per-child parallax depths inside the
-            group). Absent on every old clip ⇒ children get camera=null and
-            render in raw clip space, exactly as before (byte-identical). */}
+            props.camInside (per-child parallax depths inside the group).
+            Absent on every old clip ⇒ children get camera=null and render
+            in raw clip space, exactly as before (byte-identical). */}
         {local !== null && obj.children.map((ch) => <StageObject key={ch.id} obj={ch} time={local} stage={stage} selected={false} interactive={false} camera={P.camInside ? camera : null} />)}
         {interactive && selected && (
           <div style={{ position: "absolute", left: 0, top: 0, width: stage.w, height: stage.h, pointerEvents: "none", border: `1.5px solid ${C.amber}` }}>

@@ -1,12 +1,10 @@
 /**
- * check-editor-w4.mjs — UI smoke for the w4 pack (3D widgets + layer
- * filters + depth quick-view). Mounts the REAL editor
- * (GraphicDestinationMotion) in headless Chromium and drives it with
- * Playwright, reading project state through the onChange seam:
+ * check-editor-w4.mjs — UI smoke for the layer filters + depth quick-view
+ * (the 2.5D widgets panel was removed — this pack's surviving surface).
+ * Mounts the REAL editor (GraphicDestinationMotion) in headless Chromium
+ * and drives it with Playwright, reading project state through the
+ * onChange seam:
  *
- *   A · the 3D rail button opens a panel listing all 4 widgets; each widget
- *       inserts ONE enter-editable clip with the expected children (JSON);
- *       double-clicking the inserted clip opens its timeline (breadcrumb).
  *   B · every first card shows the Filters row: blur slider (0–20, mono
  *       readout) + 4 blend chips; blur 8 / blend screen land in the project
  *       JSON AND in the stage DOM; back to 0 / normal REMOVES the keys.
@@ -123,64 +121,9 @@ async function main() {
     await page.waitForFunction("window.__ready === true", null, { timeout: 30_000 });
     await page.waitForTimeout(600);
 
-    /* ---------- A · 3D rail + panel + widget inserts ---------- */
-    console.log("\nA · 3D rail panel + widget clips");
-    await page.locator('button:has(span:text-is("3D"))').first().click();
-    await page.waitForTimeout(250);
-    const panelText = await page.evaluate(() => document.body.textContent);
-    check("panel lists all 4 widgets with blurbs", ["Photo Depth Stack", "Tilted Card", "Isometric Cube", "Extruded 3D Text"].every((n) => panelText.includes(n)));
-
-    const stageBox = await page.evaluate(() => {
-      const el = [...document.querySelectorAll("div")].find((d) => d.style.width === "1280px" && d.style.height === "720px");
-      const r = el.getBoundingClientRect();
-      return { left: r.left, top: r.top, width: r.width, height: r.height, scale: r.width / 1280 };
-    });
-    const toScreen = (x, y) => ({ x: stageBox.left + x * stageBox.scale, y: stageBox.top + y * stageBox.scale });
-
-    /* panel verified above is still open — close it, then per widget:
-       open the panel → click the widget (insert closes the panel) */
-    await page.locator('button:has(span:text-is("3D"))').first().click();
-    await page.waitForTimeout(150);
-    const WIDGETS = [
-      ["Photo Depth Stack", "3D · Photo Depth Stack", 5],
-      ["Tilted Card", "3D · Tilted Card", 4],
-      ["Isometric Cube", "3D · Isometric Cube", 3],
-      ["Extruded 3D Text", "3D · Extruded Text", 6],
-    ];
-    for (const [btn, clipName, kids] of WIDGETS) {
-      await page.locator('button:has(span:text-is("3D"))').first().click();
-      await page.waitForTimeout(200);
-      await page.locator(`button:has-text("${btn}")`).first().click();
-      await page.waitForTimeout(250);
-      const p = await proj(page);
-      const clip = p.objects.find((o) => o.type === "clip" && o.name === clipName);
-      check(`${btn}: inserted as one clip with ${kids} children`, !!clip && (clip.children || []).length === kids, clip ? `${clip.children.length} children` : "clip missing");
-    }
-    let p = await proj(page);
-    const stack = p.objects.find((o) => o.name === "3D · Photo Depth Stack");
-    check("photo stack clip opts into camInside + preset depths", stack.props.camInside === true && stack.children[0].props.depth === -0.6 && stack.children[2].props.depth === 0.6 && stack.children[4].props.depth === 1.2);
-    check("photo stack SUBJECT note layer present, world-locked", stack.children[3].name === "SUBJECT (replace + mask)" && !("depth" in stack.children[3].props));
-    const cube = p.objects.find((o) => o.name === "3D · Isometric Cube");
-    check("iso cube: 3 diamond faces rotated 0/+60/−60", cube.children.every((c) => c.props.shape === "diamond") && cube.children.map((c) => c.props.rotation).join(",") === "0,60,-60");
-    const card = p.objects.find((o) => o.name === "3D · Tilted Card");
-    check("tilt card: blurred shadow + tilted rounded card + badge", card.children[0].props.blur === 14 && card.children[1].props.cornerR === 24 && card.children[3].props.bg === "#F5A524");
-    const ext = p.objects.find((o) => o.name === "3D · Extruded Text");
-    check("extruded text: 5 copies + face, same word", ext.children.filter((c) => c.props.text === "DEPTH").length === 6);
-
-    /* enter-editable: the last inserted clip is selected + on top — double-click
-       the stage center opens its timeline */
-    await page.mouse.dblclick(toScreen(640, 360).x, toScreen(640, 360).y);
-    await page.waitForTimeout(300);
-    check("double-click enters the widget clip", await page.evaluate(() => document.body.textContent.includes("Editing clip") && document.body.textContent.includes("Extruded Text")));
-    for (let i = 0; i < 4; i++) {
-      if (!(await page.evaluate(() => document.body.textContent.includes("Editing clip")))) break;
-      await page.keyboard.press("Escape");
-      await page.waitForTimeout(150);
-    }
-    check("escaped back to the root", !(await page.evaluate(() => document.body.textContent.includes("Editing clip"))));
-
     /* ---------- B · filters row ---------- */
     console.log("\nB · filters row (blur + blend) in the first card");
+    let p;
     await page.locator('button:has(span:text-is("Text"))').first().click();
     await page.waitForTimeout(300);
     check("blur slider present (0–20)", await page.evaluate(() => { const el = document.querySelector('input[aria-label="Blur radius"]'); return !!el && el.min === "0" && el.max === "20"; }));

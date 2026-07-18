@@ -21,7 +21,6 @@ import AudioPanel from "./editor/panels/AudioPanel";
 import TemplatesPanel from "./editor/panels/TemplatesPanel";
 import ConfettiPanel from "./editor/panels/ConfettiPanel";
 import ChartsPanel from "./editor/panels/ChartsPanel";
-import ThreeDPanel from "./editor/panels/ThreeDPanel";
 import BackgroundsPanel from "./editor/panels/BackgroundsPanel";
 import { BACKDROP_VARIANTS, backdropDefaults, themeOf, variantOf } from "../engine/backdrops.js";
 import StageView from "./editor/StageView";
@@ -279,7 +278,6 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [chartsOpen, setChartsOpen] = useState(false);
   const [confettiOpen, setConfettiOpen] = useState(false);
-  const [threeDOpen, setThreeDOpen] = useState(false);
   const [bgOpen, setBgOpen] = useState(false);
   const [tplQ, setTplQ] = useState(""); /* templates panel search (persists across open/close, like shapeQ) */
   const [tplCat, setTplCat] = useState("All");
@@ -1595,7 +1593,6 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
           templatesOpen={templatesOpen} setTemplatesOpen={setTemplatesOpen} chartsOpen={chartsOpen} setChartsOpen={setChartsOpen}
           confettiOpen={confettiOpen} setConfettiOpen={setConfettiOpen}
           numbersOpen={numbersOpen} setNumbersOpen={setNumbersOpen}
-          threeDOpen={threeDOpen} setThreeDOpen={setThreeDOpen}
           bgOpen={bgOpen} setBgOpen={setBgOpen}
           audioTrack={audioTrack} addObject={addObject} />
 
@@ -1614,10 +1611,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
         {/* confetti drawer: 8 emission styles */}
         {confettiOpen && <ConfettiPanel addObject={addObject} setConfettiOpen={setConfettiOpen} />}
 
-        {/* 3D drawer: 4 fake-3D widgets, each inserted as one editable clip */}
-        {threeDOpen && <ThreeDPanel addObject={addObject} setThreeDOpen={setThreeDOpen} mkId={uid} stage={stage} ctxDur={ctxDur} />}
-
-        {/* backgrounds drawer: 8 animated looping backdrops, inserted at the bottom of the stack */}
+        {/* backgrounds drawer: 10 animated looping backdrops, inserted at the bottom of the stack */}
         {bgOpen && <BackgroundsPanel addBackdrop={addBackdrop} sel={sel} patchProps={patchProps} />}
 
         {/* maps drawer */}
