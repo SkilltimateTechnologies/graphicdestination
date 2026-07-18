@@ -176,6 +176,252 @@ export function contrastOn(bg) {
 }
 
 /* ============================================================
+   COUNTER STYLES (props.style) — 6 Jitter-grade counter renders for
+   number layers, frame-by-frame matches of the Jitter.video counters:
+     "bold"         countdown-bold: every digit change is a poster scene —
+                    huge digit springs in (easeOutBack overshoot ≈
+                    cubic-bezier(.34,1.56,.64,1)), holds, accelerates out;
+                    2 wave-echo ghosts of the previous digit scale up +
+                    fade behind on each change.
+     "blur"         digit changes ride a blur ramp — outgoing blurs
+                    0 → 24px while fading, incoming blurs 24 → 0.
+     "dotted"       digits slide-swap vertically (out up, in from below,
+                    accent-tinted), wrapped by a dotted circle whose conic
+                    pie sweep fills per unit time.
+     "poster"       Swiss counter: linear count, huge tabular numerals,
+                    thin rule draw-on, small-caps caption + index marker;
+                    easeOutBack only on the scene entrance.
+     "pixel"        3×5 rect-composed pixel digits + seeded glitch slices
+                    (2-3 horizontal slice offsets, color-split ghosts) on
+                    digit change.
+     "progressring" expo-out count (0 → 99 default) with a synced arc
+                    sweeping 0 → 354°, glow dot trailing the tip, snap/reset
+                    accent at the loop point (state at t ≥ end ≡ t ≤ start).
+   Pure functions of (props, timeline time) — no wall clock, no RNG beyond
+   seeded mulberry32 — so editor preview, SSR checks and the export frame
+   renderer produce identical frames. New style ids only: odometer/count/
+   slot and every countdown variant fall through to their legacy paths
+   byte-identical (counterStyleOf → null).
+   ============================================================ */
+export const COUNTER_STYLES = [
+  { id: "bold", name: "Bold scenes" },
+  { id: "blur", name: "Blur swap" },
+  { id: "dotted", name: "Dotted ring" },
+  { id: "poster", name: "Swiss poster" },
+  { id: "pixel", name: "Pixel glitch" },
+  { id: "progressring", name: "Progress 0→99" },
+];
+export const counterStyleOf = (P) => (P && COUNTER_STYLES.some((s) => s.id === P.style) ? P.style : null);
+
+/* 3×5 pixel bitmap font (rows of "1"/"0") — digits + the punctuation the
+   number formats emit. Rect-composed in the renderer (crispEdges). */
+export const PIXEL_FONT = {
+  "0": ["111", "101", "101", "101", "111"],
+  "1": ["010", "110", "010", "010", "111"],
+  "2": ["111", "001", "111", "100", "111"],
+  "3": ["111", "001", "111", "001", "111"],
+  "4": ["101", "101", "111", "001", "001"],
+  "5": ["111", "100", "111", "001", "111"],
+  "6": ["111", "100", "111", "101", "111"],
+  "7": ["111", "001", "001", "010", "010"],
+  "8": ["111", "101", "111", "101", "111"],
+  "9": ["111", "101", "111", "001", "111"],
+  ".": ["000", "000", "000", "000", "010"],
+  ",": ["000", "000", "000", "010", "100"],
+  ":": ["000", "010", "000", "010", "000"],
+  "-": ["000", "000", "111", "000", "000"],
+  "+": ["000", "010", "111", "010", "000"],
+  "%": ["101", "001", "010", "100", "101"],
+  "/": ["001", "001", "010", "100", "100"],
+  " ": ["000", "000", "000", "000", "000"],
+};
+
+/* model rounding — 3dp, −0 → 0 (equal states serialize byte-identical) */
+const csR = (v) => { const r = Math.round(v * 1000) / 1000; return r === 0 ? 0 : r; };
+/* expo-out (0→99 progress-ring count): fast rise, long asymptotic settle */
+const easeOutExpo = (x) => { const u = clamp01(x); return u >= 1 ? 1 : 1 - Math.pow(2, -10 * u); };
+
+/* the full display string at a time (affixes included — constant, so they
+   never trigger change detection themselves) */
+export function counterText(P, time) {
+  return (P.prefix || "") + formatNumber(Math.max(0, numberValue(P, time)), P.format || "plain", P.decimals) + (P.suffix || "");
+}
+
+/* counterEpoch — the current "value epoch": t0 = the most recent time ≤ time
+   when the display string changed (null before the first change), t1 = the
+   next time it will change (null when never), plus the current/previous
+   strings. Pure sampling scan (adaptive step + 12× bisection, sub-ms
+   resolution) of the same numberValue/formatNumber the plain path renders —
+   deterministic, no wall clock. */
+export function counterEpoch(P, time) {
+  const start = Number(P.start) || 0;
+  const dur = Math.max(1, Number(P.dur) || 1);
+  const end = start + dur;
+  const t = Number(time) || 0;
+  const txt = counterText(P, t);
+  const step = Math.max(2, Math.min(16, dur / 400));
+  let t0 = null, prevTxt = null;
+  for (let s = t - step, lo = Math.max(start - 1, t - 9000); s >= lo; s -= step) {
+    if (counterText(P, s) !== txt) {
+      let a = s, b = s + step; /* a differs, b === txt → boundary in (a, b] */
+      for (let i = 0; i < 12; i++) { const m = (a + b) / 2; if (counterText(P, m) === txt) b = m; else a = m; }
+      t0 = b; prevTxt = counterText(P, a);
+      break;
+    }
+  }
+  let t1 = null;
+  for (let s = t + step, hi = Math.min(end + 1, t + 9000); s <= hi; s += step) {
+    if (counterText(P, s) !== txt) {
+      let a = t, b = s; /* a === txt, b differs → boundary in (a, b] */
+      for (let i = 0; i < 12; i++) { const m = (a + b) / 2; if (counterText(P, m) === txt) a = m; else b = m; }
+      t1 = b;
+      break;
+    }
+  }
+  /* the visual scene starts at the last real change, or at the run's start
+     for the initial value (digits spring/blur/slide in at start) */
+  return { t0, t1, txt, prevTxt, epochStart: t0 == null ? start : t0 };
+}
+
+/* counterModel(P, time) → plain-data frame description for the 6 counter
+   styles (null for legacy styles). StageObject.jsx maps it 1:1 to DOM/SVG —
+   the single shared render point, exactly like chartModel for charts. All
+   numbers pre-rounded (3dp); `txt`/`prevTxt` carry the SAME strings the
+   plain path would show. */
+export function counterModel(P, time) {
+  const style = counterStyleOf(P);
+  if (!style) return null;
+  const t = Number(time) || 0;
+  const start = Number(P.start) || 0;
+  const dur = Math.max(1, Number(P.dur) || 1);
+
+  if (style === "progressring") {
+    /* 0 → 99 expo-out count, synced 0 → 354° arc, glow dot on the tip.
+       Snap/reset at the loop point: t ≥ start+dur ≡ t ≤ start (p 0, arc 0),
+       so a comp whose length matches the run loops cleanly. The flash ring
+       accents the snap over the last 180 ms before the reset. */
+    const u = clamp01((t - start) / dur);
+    const p = t >= start + dur ? 0 : easeOutExpo(u);
+    const v = (Number(P.from) || 0) + ((Number(P.to) || 0) - (Number(P.from) || 0)) * p;
+    return {
+      style,
+      txt: formatNumber(Math.max(0, v), P.format || "plain", P.decimals),
+      p: csR(p), arc: csR(354 * p), dotA: csR(-90 + 354 * p),
+      flash: csR(t < start + dur ? clamp01((t - (start + dur - 180)) / 180) : 0),
+      op: csR(clamp01((t - start) / 140)),
+    };
+  }
+
+  const ep = counterEpoch(P, t);
+  const sceneT = t - ep.epochStart;
+
+  if (style === "bold") {
+    /* each digit change = one poster scene: spring in (190 ms, overshoot),
+       hold, accelerate out over the 150 ms before the next change; two
+       wave-echo ghosts of the previous digit scale up + fade behind. */
+    const IN = 190, OUT = 150;
+    const ein = clamp01(sceneT / IN);
+    let s = 0.3 + 0.7 * EASE.easeOutBack(ein);
+    let op = clamp01(ein * 2);
+    const eout = ep.t1 == null ? 0 : clamp01((OUT - (ep.t1 - t)) / OUT);
+    s *= 1 + 0.14 * EASE.easeInCubic(eout);
+    op *= 1 - EASE.easeInCubic(eout);
+    const echoes = [];
+    if (ep.prevTxt != null && sceneT < 900) {
+      const e1 = clamp01(sceneT / 620), e2 = clamp01(sceneT / 880);
+      echoes.push({ txt: ep.prevTxt, scale: csR(1 + 0.42 * EASE.easeOutCubic(e1)), op: csR((1 - e1) * 0.34), accent: false });
+      echoes.push({ txt: ep.prevTxt, scale: csR(1 + 0.85 * EASE.easeOutCubic(e2)), op: csR((1 - e2) * 0.2), accent: true });
+    }
+    return { style, txt: ep.txt, scale: csR(s), op: csR(clamp01(op)), echoes: echoes.filter((e) => e.op > 0.02) };
+  }
+
+  if (style === "blur") {
+    /* change crossfade (260 ms): outgoing blurs 0 → 24px while fading,
+       incoming blurs 24 → 0; the initial scene blurs in at start. */
+    const TR = 260;
+    const iu = clamp01(sceneT / TR);
+    return {
+      style,
+      txt: ep.txt,
+      in: { txt: ep.txt, blur: csR(24 * (1 - iu)), op: csR(iu) },
+      out: ep.t0 != null && sceneT < TR ? { txt: ep.prevTxt, blur: csR(24 * iu), op: csR(1 - iu) } : null,
+    };
+  }
+
+  if (style === "dotted") {
+    /* per-char vertical slide-swap (240 ms): changed chars slide the old
+       glyph up (accelerating) while the new one rises from below in the
+       accent color (settling to the fill); unchanged chars stay put. The
+       dotted ring's conic pie sweep fills linearly per unit time. */
+    const u = clamp01((t - start) / dur);
+    const su = clamp01(sceneT / 240);
+    const n = ep.txt.length, m = ep.prevTxt ? ep.prevTxt.length : 0, shift = m - n;
+    const chars = [];
+    for (let i = 0; i < n; i++) {
+      const pc = ep.prevTxt == null ? null : (i + shift >= 0 && i + shift < m ? ep.prevTxt[i + shift] : null);
+      const changed = ep.txt[i] !== pc;
+      chars.push({
+        ch: ep.txt[i], prevCh: ep.t0 == null ? null : pc, changed,
+        su: csR(su),
+        outDy: csR(-1.05 * EASE.easeInCubic(su)), outOp: csR(1 - su),
+        inDy: csR(1.05 * (1 - EASE.easeOutCubic(su))), inOp: csR(su), mix: csR(1 - su),
+      });
+    }
+    return { style, chars, pie: csR(359.9 * u), u: csR(u) };
+  }
+
+  if (style === "poster") {
+    /* Swiss counter: the count itself is the motion (numEase — linear by
+       default at insert), thin rules draw on over the first 38%, the whole
+       block enters with easeOutBack (320 ms) and accelerates off over the
+       last 18% (opacity 0 at both bounds). */
+    const iu = clamp01((t - start) / 320);
+    let op = clamp01(iu * 1.6);
+    const ou = clamp01((t - (start + dur * 0.82)) / (dur * 0.18));
+    op *= 1 - EASE.easeInCubic(ou);
+    const v = Math.max(0, numberValue(P, t));
+    return {
+      style,
+      txt: formatNumber(v, P.format || "plain", P.decimals),
+      caption: (P.suffix || "COUNT").toUpperCase(),
+      idx: "N." + String(Math.min(99, Math.max(0, Math.round(v)))).padStart(2, "0"),
+      scale: csR(0.92 + 0.08 * EASE.easeOutBack(iu)),
+      op: csR(op),
+      dy: csR(-16 * EASE.easeInCubic(ou)),
+      rule: csR(EASE.easeOutCubic(clamp01((t - start) / (dur * 0.38)))),
+    };
+  }
+
+  /* pixel — 3×5 rect-composed digits, per-digit pop-in stagger, and on each
+     digit change a seeded (72% of changes) glitch: 2-3 horizontal slice
+     ghosts, color-split, offset ±12px, for 200 ms. */
+  const chars = ep.txt.split("").map((ch, i) => ({
+    ch, bmp: PIXEL_FONT[ch] || null,
+    pop: csR(EASE.easeOutBack(clamp01((sceneT - i * 45) / 200))),
+  }));
+  let ghosts = [];
+  if (ep.t0 != null && sceneT < 200) {
+    const seed = (Math.round(ep.t0 * 13) + Math.round((Number(P.to) || 0) * 7) + Math.round(start * 3) + Math.round((Number(P.from) || 0) * 5) + ep.txt.length * 11) >>> 0;
+    const rng = mulberry32(seed);
+    if (rng() < 0.72) {
+      const nG = rng() < 0.45 ? 3 : 2;
+      const cols = [P.ringC || "#FFB224", "#5B8CFF", "#FF6B6B"];
+      const bands = [[6, 58], [56, 8], [30, 34]]; /* clip-inset top/bottom % per ghost */
+      ghosts = [];
+      for (let i = 0; i < nG; i++) {
+        ghosts.push({
+          dx: csR((rng() * 2 - 1) * 12),
+          top: csR(bands[i][0] + (rng() * 2 - 1) * 5),
+          bot: csR(bands[i][1] + (rng() * 2 - 1) * 5),
+          color: cols[i], op: csR(0.5 + rng() * 0.25),
+        });
+      }
+    }
+  }
+  return { style, txt: ep.txt, chars, ghosts };
+}
+
+/* ============================================================
    CONFETTI (seeded) — 8 emission styles. Missing/unknown
    props.style falls back to "burst", the original upward
    fountain, so projects saved before styles existed render

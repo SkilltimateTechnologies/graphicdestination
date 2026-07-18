@@ -7,7 +7,7 @@ import { Card, ChipRow, ColorKfRow, PropRow, FontControls, WorldPicker, Row, Sli
 import { EASE, EASE_LABEL } from "../../engine/easing.js";
 import { SHAPE_IDS, SHAPE_DEFS, ptsToStr } from "../../engine/shapes.js";
 import { MAPS, CONTINENT_NAMES, CONTINENTS, normHi } from "../../engine/maps.js";
-import { CONFETTI_STYLES, confettiStyleOf, NUM_FORMATS, CD_STYLES, cdStyleOf } from "../../engine/fx.js";
+import { CONFETTI_STYLES, confettiStyleOf, NUM_FORMATS, CD_STYLES, cdStyleOf, COUNTER_STYLES, counterStyleOf } from "../../engine/fx.js";
 import { CAM_PROPS, CAM_ZOOM_MIN, CAM_ZOOM_MAX, CAM_DEPTH_MIN, CAM_DEPTH_MAX, cameraAt, camTrackHost, clampDepth } from "../../engine/camera.js";
 import { BLEND_MODES, BLUR_MAX, clampBlur, normBlend, depthHint } from "../../engine/filters.js";
 import { BACKDROP_VARIANTS, BACKDROP_THEMES, BACKDROP_SPEED_MIN, BACKDROP_SPEED_MAX, BACKDROP_INTENSITY_MIN, BACKDROP_INTENSITY_MAX, BACKDROP_LOOP_MIN, BACKDROP_LOOP_MAX, clampSpeed, clampIntensity, clampLoopMs } from "../../engine/backdrops.js";
@@ -402,6 +402,17 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                   <Row label="From"><input type="number" value={sel.props.from} onChange={(e) => patchProps(sel.id, { from: Math.max(0, parseFloat(e.target.value) || 0) })} style={inputStyle} /></Row>
                   <Row label="To"><input type="number" value={sel.props.to} onChange={(e) => patchProps(sel.id, { to: Math.max(0, parseFloat(e.target.value) || 0) })} style={inputStyle} /></Row>
                   <ChipRow label="Digits" options={NUM_STYLES.map((s) => [s.id, s.name])} value={sel.props.style} onChange={(v) => patchProps(sel.id, { style: v })} wrap />
+                  {/* counter styles (engine/fx.js COUNTER_STYLES) — Jitter-grade renders
+                      inserted from the Number rail panel; "Off" returns to plain digits.
+                      Accent (ringC) inks echoes/ghosts/ring/pie; Ring W sizes the
+                      dotted/progressring stroke. */}
+                  <ChipRow label="Counter FX" options={[["count", "Off"], ...COUNTER_STYLES.map((s) => [s.id, s.name])]} value={counterStyleOf(sel.props) || "count"} onChange={(v) => patchProps(sel.id, { style: v })} wrap />
+                  {counterStyleOf(sel.props) && (
+                    <Row label="Accent"><input type="color" value={(sel.props.ringC || "#FFB224").slice(0, 7)} onChange={(e) => patchProps(sel.id, { ringC: e.target.value })} /></Row>
+                  )}
+                  {(sel.props.style === "dotted" || sel.props.style === "progressring") && (
+                    <SliderRow label="Ring W" min={3} max={22} value={sel.props.ringW} onChange={(v) => patchProps(sel.id, { ringW: v })} />
+                  )}
                   <SliderRow label="Start" min={0} max={Math.max(100, ctxDur - 300)} step={10} value={sel.props.start} onChange={(v) => patchProps(sel.id, { start: v })} />
                   <SliderRow label="Duration" min={300} max={5000} step={10} value={sel.props.dur} onChange={(v) => patchProps(sel.id, { dur: v })} />
                   <SliderRow label="Decimals" min={0} max={2} value={sel.props.decimals} onChange={(v) => patchProps(sel.id, { decimals: v })} />

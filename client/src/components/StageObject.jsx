@@ -11,7 +11,7 @@ import { valueAt, colorAt, lerpColor, clipLocalTime, clipTransition } from "../e
 import { cameraTransform, camTransformCss } from "../engine/camera.js";
 import { blurCss, blendCss } from "../engine/filters.js";
 import { MAPS, WORLD_H, CONTINENTS, WORLD_EXT, ringsToPath, arcPath, mapBox, WORLD_D, normHi } from "../engine/maps.js";
-import { CONFETTI_STYLES, confettiStyleOf, confettiLife, confettiParticles, charFx, numberValue, numberColumns, formatNumber, contrastOn, chartModel, highlightFlick, worldCameraAt, cdStyleOf, countdownFraction } from "../engine/fx.js";
+import { CONFETTI_STYLES, confettiStyleOf, confettiLife, confettiParticles, charFx, numberValue, numberColumns, formatNumber, contrastOn, chartModel, highlightFlick, worldCameraAt, cdStyleOf, countdownFraction, counterStyleOf, counterModel } from "../engine/fx.js";
 import { backdropModel } from "../engine/backdrops.js";
 
 /* ---------- on-canvas selection handles (direct manipulation) ----------
@@ -515,6 +515,164 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
       return (
         <div onPointerDown={down} style={{ ...common, ...fontCss }} data-cdstyle={cdStyle}>
           {cdBody}
+          {handles}
+        </div>
+      );
+    }
+    /* counter styles (props.style ∈ COUNTER_STYLES — engine/fx.js
+       counterModel): 6 Jitter-grade renders (bold/blur/dotted/poster/pixel/
+       progressring). counterModel is the pure frame source; the markup maps
+       it 1:1, so preview, SSR checks and the export renderer produce
+       identical frames. New style ids ONLY — odometer/count/slot fall
+       through to the legacy paths below, byte-identical. data-cs markers
+       double as the SSR/export render hooks. */
+    const cStyle = counterStyleOf(P);
+    if (cStyle) {
+      const M = counterModel(P, time);
+      const accent = P.ringC || "#FFB224";
+      const csFont = { fontFamily: `'${P.fontFamily}'`, fontSize: P.fontSize, color, lineHeight: 1, ...numFx };
+      const affix = (a, key) => (a ? <span key={key} style={{ whiteSpace: "pre" }}>{a}</span> : null);
+      if (cStyle === "bold") {
+        /* each digit change is a poster scene: the current digits spring in
+           with overshoot + accelerate out; echo ghosts of the previous value
+           scale up + fade behind (fill + accent layer) */
+        return (
+          <div onPointerDown={down} style={common} data-cs="bold">
+            <span style={{ ...csFont, fontWeight: 800, position: "relative", display: "inline-flex", alignItems: "center" }}>
+              {affix(P.prefix, "pre")}
+              <span style={{ position: "relative", display: "inline-block" }}>
+                {M.echoes.map((e, i) => (
+                  <span key={i} data-cs="echo" aria-hidden="true" style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: e.accent ? accent : color, opacity: e.op, transform: `scale(${e.scale})`, pointerEvents: "none" }}>{e.txt}</span>
+                ))}
+                <span data-cs="digit" style={{ position: "relative", display: "inline-block", transform: `scale(${M.scale})`, opacity: M.op }}>{M.txt}</span>
+              </span>
+              {affix(P.suffix, "suf")}
+            </span>
+            {handles}
+          </div>
+        );
+      }
+      if (cStyle === "blur") {
+        /* change crossfade: outgoing blurs 0 → 24px while fading (CSS blur,
+           the same filter mechanism the layer blur uses — export-safe),
+           incoming blurs 24 → 0; a slight scale sells the defocus */
+        return (
+          <div onPointerDown={down} style={common} data-cs="blur">
+            <span style={{ ...csFont, fontWeight: P.fontWeight || 700, position: "relative", display: "inline-flex", alignItems: "center" }}>
+              {affix(P.prefix, "pre")}
+              <span style={{ position: "relative", display: "inline-block" }}>
+                {M.out && (
+                  <span data-cs="out" aria-hidden="true" style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", filter: `blur(${M.out.blur}px)`, opacity: M.out.op, transform: `scale(${1 + M.out.blur / 260})`, pointerEvents: "none" }}>{M.out.txt}</span>
+                )}
+                <span data-cs="in" style={{ position: "relative", display: "inline-block", filter: M.in.blur > 0.05 ? `blur(${M.in.blur}px)` : "none", opacity: M.in.op, transform: `scale(${1 + M.in.blur / 260})` }}>{M.txt}</span>
+              </span>
+              {affix(P.suffix, "suf")}
+            </span>
+            {handles}
+          </div>
+        );
+      }
+      if (cStyle === "dotted") {
+        /* digits slide-swap vertically inside an overflow mask (old up, new
+           from below in the accent color), wrapped by a dotted circle whose
+           conic pie sweep fills per unit time */
+        const R = P.fontSize * 1.15, rw = P.ringW || 8;
+        const size = R * 2 + rw * 2 + 10, c = size / 2;
+        const dotGap = (2 * Math.PI * R) / 60; /* ~60 dots around the ring */
+        return (
+          <div onPointerDown={down} style={common} data-cs="dotted">
+            <div style={{ position: "relative", width: size, height: size, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <svg width={size} height={size} style={{ position: "absolute", inset: 0, overflow: "visible" }}>
+                {M.pie > 0.05 && <path data-cs="pie" d={arcPath(c, c, Math.max(1, R - rw / 2 - 3), -90, -90 + Math.min(359.9, M.pie))} fill={accent} fillOpacity={0.16} />}
+                <circle data-cs="dots" cx={c} cy={c} r={R} fill="none" stroke={accent} strokeWidth={rw} strokeLinecap="round" strokeDasharray={`0.1 ${dotGap.toFixed(2)}`} style={{ filter: `drop-shadow(0 0 4px ${accent}66)` }} />
+              </svg>
+              <div style={{ position: "relative", zIndex: 1, ...csFont, fontWeight: P.fontWeight || 700, display: "flex", alignItems: "center" }}>
+                {affix(P.prefix, "pre")}
+                {M.chars.map((cc, i) => (cc.changed && cc.su < 1) ? (
+                  <span key={i} data-cs="swap" style={{ position: "relative", display: "inline-block", height: "1em", overflow: "hidden" }}>
+                    <span style={{ visibility: "hidden", whiteSpace: "pre" }}>{cc.ch}</span>
+                    {cc.prevCh != null && <span aria-hidden="true" style={{ position: "absolute", left: 0, right: 0, top: 0, textAlign: "center", transform: `translateY(${cc.outDy}em)`, opacity: cc.outOp, whiteSpace: "pre" }}>{cc.prevCh}</span>}
+                    <span style={{ position: "absolute", left: 0, right: 0, top: 0, textAlign: "center", transform: `translateY(${cc.inDy}em)`, opacity: cc.inOp, color: cc.mix > 0.02 ? lerpColor(color, accent, cc.mix) : color, whiteSpace: "pre" }}>{cc.ch}</span>
+                  </span>
+                ) : <span key={i} style={{ whiteSpace: "pre" }}>{cc.ch}</span>)}
+                {affix(P.suffix, "suf")}
+              </div>
+            </div>
+            {handles}
+          </div>
+        );
+      }
+      if (cStyle === "poster") {
+        /* Swiss counter: the count itself is the motion; thin rules draw on,
+           small-caps caption + zero-padded index marker; easeOutBack only on
+           the scene entrance, accelerating exit over the last 18% */
+        const fs = P.fontSize;
+        return (
+          <div onPointerDown={down} style={common} data-cs="poster">
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: Math.max(4, fs * 0.12), minWidth: fs * 2.4, opacity: M.op, transform: `translateY(${M.dy}px) scale(${M.scale})`, transformOrigin: "0 50%", fontFamily: "'Inter'" }}>
+              <span data-cs="rule" style={{ display: "block", height: 2, width: `${M.rule * 100}%`, background: color }} />
+              <span data-cs="cap" style={{ fontSize: Math.max(9, fs * 0.13), fontWeight: 700, letterSpacing: "0.34em", color: accent }}>{M.caption}</span>
+              <span data-cs="num" style={{ fontFamily: `'${P.fontFamily}'`, fontWeight: 800, fontSize: fs, lineHeight: 0.95, color, letterSpacing: "-0.02em", whiteSpace: "pre", ...numFx }}>{P.prefix}{M.txt}</span>
+              <span style={{ display: "flex", alignItems: "center", gap: "0.6em" }}>
+                <span data-cs="idx" style={{ fontFamily: "'JetBrains Mono'", fontSize: Math.max(9, fs * 0.12), fontWeight: 700, color: accent, fontVariantNumeric: "tabular-nums" }}>{M.idx}</span>
+                <span data-cs="rule2" style={{ display: "block", height: 1, flex: 1, background: color, opacity: 0.45, transform: `scaleX(${M.rule})`, transformOrigin: "0 50%" }} />
+              </span>
+            </div>
+            {handles}
+          </div>
+        );
+      }
+      if (cStyle === "pixel") {
+        /* 3×5 rect-composed pixel digits (crispEdges) with per-digit pop-in;
+           on a digit change, seeded color-split slice ghosts glitch for
+           200 ms (clip-path inset bands offset ±12px) */
+        const k = P.fontSize / 5.2, gap = k * 0.55;
+        const row = (ink, key) => (
+          <span key={key} style={{ display: "inline-flex", alignItems: "baseline", gap }}>
+            {M.chars.map((cc, i) => cc.bmp ? (
+              <span key={i} style={{ display: "inline-block", transform: key === "main" ? `scale(${cc.pop})` : "none", transformOrigin: "50% 100%" }}>
+                <svg data-cs={key === "main" ? "px" : undefined} width={3 * k} height={5 * k} viewBox="0 0 3 5" style={{ display: "block", shapeRendering: "crispEdges" }}>
+                  {cc.bmp.map((r, ry) => r.split("").map((b, rx) => (b === "1" ? <rect key={`${rx}-${ry}`} x={rx} y={ry} width={1.06} height={1.06} fill={ink} /> : null)))}
+                </svg>
+              </span>
+            ) : (
+              <span key={i} style={{ fontFamily: `'${P.fontFamily}'`, fontWeight: 700, fontSize: P.fontSize * 0.82, color: ink, lineHeight: 1, opacity: key === "main" ? cc.pop : 1, whiteSpace: "pre" }}>{cc.ch}</span>
+            ))}
+          </span>
+        );
+        return (
+          <div onPointerDown={down} style={common} data-cs="pixel">
+            <span style={{ position: "relative", display: "inline-block" }}>
+              {M.ghosts.map((g, i) => (
+                <span key={i} data-cs="ghost" aria-hidden="true" style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", clipPath: `inset(${g.top}% 0 ${g.bot}% 0)`, transform: `translateX(${g.dx}px)`, opacity: g.op, pointerEvents: "none" }}>
+                  {row(g.color, "g" + i)}
+                </span>
+              ))}
+              {row(color, "main")}
+            </span>
+            {handles}
+          </div>
+        );
+      }
+      /* progressring — expo-out count with a synced 0 → 354° arc, a glow dot
+         trailing the arc tip, and a flash ring accenting the snap/reset at
+         the loop point (state at t ≥ end ≡ t ≤ start) */
+      const R = P.fontSize * 1.15, rw2 = P.ringW || 8;
+      const size = R * 2 + rw2 * 2 + 10, c = size / 2;
+      const rad = (M.dotA * Math.PI) / 180;
+      return (
+        <div onPointerDown={down} style={common} data-cs="progressring">
+          <div style={{ position: "relative", width: size, height: size, display: "flex", alignItems: "center", justifyContent: "center", opacity: M.op }}>
+            <svg width={size} height={size} style={{ position: "absolute", inset: 0, overflow: "visible" }}>
+              <circle cx={c} cy={c} r={R} fill="none" stroke={accent} strokeOpacity={0.16} strokeWidth={rw2} />
+              {M.arc > 0.3 && <path data-cs="arc" d={arcStrokeD(c, c, R, -90, -90 + M.arc)} fill="none" stroke={accent} strokeWidth={rw2} strokeLinecap="round" style={{ filter: `drop-shadow(0 0 6px ${accent})` }} />}
+              <circle data-cs="dot" cx={c + R * Math.cos(rad)} cy={c + R * Math.sin(rad)} r={rw2 * (0.72 + 0.5 * M.flash)} fill={accent} style={{ filter: `drop-shadow(0 0 ${6 + 6 * M.flash}px ${accent})` }} />
+              {M.flash > 0 && <circle data-cs="flash" cx={c} cy={c} r={R + 4 + M.flash * 14} fill="none" stroke={accent} strokeWidth={2} opacity={(1 - M.flash) * 0.55} />}
+            </svg>
+            <div style={{ position: "relative", zIndex: 1, ...csFont, fontWeight: P.fontWeight || 700, display: "flex", alignItems: "center" }}>
+              {affix(P.prefix, "pre")}{M.txt}{affix(P.suffix, "suf")}
+            </div>
+          </div>
           {handles}
         </div>
       );
