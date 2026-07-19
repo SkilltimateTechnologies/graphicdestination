@@ -8,7 +8,7 @@ import { C, bboxOfLayers } from "./editor/model";
 import { LockIcon } from "./editor/ui";
 import { kitRenderSpec } from "../engine/kits.js";
 import { clamp01 } from "../engine/easing.js";
-import { ptsToStr, pathSamples, pointOnPath, morphPtsAt } from "../engine/shapes.js";
+import { ptsToStr, pathSamples, pointOnPath, morphPtsAt, morphPairAt, shapePtsOf } from "../engine/shapes.js";
 import { valueAt, colorAt, lerpColor, clipLocalTime, clipTransition } from "../engine/keyframes.js";
 import { cameraTransform, camTransformCss } from "../engine/camera.js";
 import { blurCss, blendCss } from "../engine/filters.js";
@@ -489,11 +489,23 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
     const pts = morphPtsAt(obj, time);
     const fill = colorAt(obj, "fill", time);
     const fm = P.fillMode || "fill";
+    /* MORPH INDICATOR (R9w2): when the shape carries an A→B morph, the
+       selected object gets an unmistakable glyph→glyph chip pinned under it
+       (editor chrome only — never exported; counter-scaled like the grips) */
+    const mpair = interactive && selected ? morphPairAt(obj, time) : null;
     return (
       <div onPointerDown={down} style={common}>
         <svg width={P.w} height={P.h} viewBox="0 0 100 100" preserveAspectRatio="none" style={{ display: "block", overflow: "visible" }}>
           <polygon points={ptsToStr(pts)} fill={fm === "stroke" ? "none" : fill} stroke={fm !== "fill" ? P.sC : "none"} strokeWidth={fm !== "fill" ? P.sW : 0} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
         </svg>
+        {mpair && (
+          <div data-morph-rider={`${mpair.a}>${mpair.b}`} title={`Morphing: ${mpair.a} → ${mpair.b} (shape ◆ on the timeline)`}
+            style={{ position: "absolute", left: "50%", top: "100%", transform: `translate(-50%, ${9 * u}px)`, display: "flex", alignItems: "center", gap: 3 * u, background: "rgba(16,19,26,.94)", border: `${Math.max(1, u)}px solid ${C.amber}`, borderRadius: 6 * u, padding: `${2.5 * u}px ${5 * u}px`, lineHeight: 0, pointerEvents: "none", zIndex: 2 }}>
+            <svg width={13 * u} height={13 * u} viewBox="-6 -6 112 112"><polygon points={ptsToStr(shapePtsOf(mpair.a))} fill={C.dim} /></svg>
+            <svg width={8 * u} height={8 * u} viewBox="0 0 10 10"><path d="M1 5h6M5.2 2.2 8 5l-2.8 2.8" fill="none" stroke={C.amber} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            <svg width={13 * u} height={13 * u} viewBox="-6 -6 112 112"><polygon points={ptsToStr(shapePtsOf(mpair.b))} fill={C.amber} /></svg>
+          </div>
+        )}
         {handles}
       </div>
     );

@@ -2,10 +2,12 @@
    INSPECTOR — right-hand property panel (per-type cards).
    Extracted VERBATIM from GraphicDestinationMotion.jsx (Refactor Pass 2).
    ============================================================ */
-import { C, PROP_LABEL, TEXTFX_LIST, NUM_STYLES, NUM_STYLE_PRESETS, NUM_STYLE_RESET, PRESETS, TRANSITIONS, STAGE_PRESETS, kfAt, inputStyle, chipStyle, sectionLabel } from "./model";
+import { useEffect, useState } from "react";
+import { C, PROP_LABEL, TEXTFX_LIST, NUM_STYLES, NUM_STYLE_PRESETS, NUM_STYLE_RESET, PRESETS, TRANSITIONS, STAGE_PRESETS, kfAt, layerOut, inputStyle, chipStyle, sectionLabel } from "./model";
 import { Card, ChipRow, ColorKfRow, PropRow, FontControls, WorldPicker, Row, SliderRow, EaseCurve, NoteIcon, CamIcon, LockIcon } from "./ui";
 import { EASE, EASE_LABEL } from "../../engine/easing.js";
-import { SHAPE_IDS, SHAPE_DEFS, ptsToStr } from "../../engine/shapes.js";
+import { SHAPE_IDS, SHAPE_DEFS, ptsToStr, shapePtsOf, lerpPts, morphPairAt, shapeIdAt, progKeyPlan, pathSamples, pointOnPath } from "../../engine/shapes.js";
+import { valueAt } from "../../engine/keyframes.js";
 import { MAPS, CONTINENT_NAMES, CONTINENTS, normHi } from "../../engine/maps.js";
 import { CONFETTI_STYLES, confettiStyleOf, confettiLife, confettiDurMs, CONFETTI_DUR_MIN, CONFETTI_DUR_MAX, NUM_FORMATS, CD_STYLES, cdStyleOf, COUNTER_STYLES, counterStyleOf } from "../../engine/fx.js";
 import { CAM_PROPS, CAM_ZOOM_MIN, CAM_ZOOM_MAX, CAM_DEPTH_MIN, CAM_DEPTH_MAX, cameraAt, camTrackHost, clampDepth } from "../../engine/camera.js";
@@ -35,6 +37,58 @@ function NumStyleSwatch({ id }) {
     case "minimal": return <T fontWeight="400" fill={C.dim} letterSpacing="3" />;
     default: return null;
   }
+}
+
+/* ---------- MORPH UI (R9w2) ---------- */
+/* one glyph of a shape id — used by the morph chip + picker */
+export function ShapeGlyph({ id, size = 14, color = C.dim }) {
+  return (
+    <svg width={size} height={size} viewBox="-6 -6 112 112" style={{ flexShrink: 0 }}>
+      <polygon points={ptsToStr(shapePtsOf(id))} fill={color} />
+    </svg>
+  );
+}
+/* animated A→B→A ping-pong preview — plays the actual morph math
+   (alignPts + lerpPts, easeInOutCubic) on a 2.4 s loop; SSR renders frame A */
+export function MorphPreview({ a, b, cornerR = 0, size = 54 }) {
+  const [u, setU] = useState(0);
+  useEffect(() => {
+    const t0 = performance.now();
+    const iv = setInterval(() => {
+      const ph = ((performance.now() - t0) % 2400) / 2400;
+      const tri = ph < 0.5 ? ph * 2 : (1 - ph) * 2;
+      setU(EASE.easeInOutCubic(tri));
+    }, 90);
+    return () => clearInterval(iv);
+  }, [a, b]);
+  const pts = lerpPts(shapePtsOf(a, cornerR), shapePtsOf(b, cornerR), u);
+  return (
+    <svg data-morph-preview={`${a}>${b}`} width={size} height={size} viewBox="-6 -6 112 112"
+      style={{ background: C.bg0, border: `1px solid ${C.line}`, borderRadius: 8, flexShrink: 0 }}>
+      <polygon points={ptsToStr(pts)} fill={C.amber} />
+    </svg>
+  );
+}
+/* the unmistakable MORPH chip: glyph A → glyph B + MORPHING + segment % */
+export function MorphChip({ sel, time }) {
+  const mp = morphPairAt(sel, time);
+  if (!mp) {
+    return (
+      <div data-morph-chip="none" style={{ display: "flex", alignItems: "center", gap: 7, background: C.bg1, border: `1px dashed ${C.line}`, borderRadius: 7, padding: "6px 9px", marginBottom: 9, fontSize: 10.5, color: C.faint, lineHeight: 1.45 }}>
+        One static shape right now — morph it by picking a target below.
+      </div>
+    );
+  }
+  const pct = mp.t1 > mp.t0 ? Math.round(Math.min(1, Math.max(0, (time - mp.t0) / (mp.t1 - mp.t0))) * 100) : 100;
+  return (
+    <div data-morph-chip={`${mp.a}>${mp.b}`} style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(245,165,36,.10)", border: `1px solid ${C.amber}`, borderRadius: 7, padding: "5px 9px", marginBottom: 9 }}>
+      <ShapeGlyph id={mp.a} size={15} color={C.dim} />
+      <svg width="11" height="9" viewBox="0 0 10 10" style={{ flexShrink: 0 }}><path d="M1 5h6M5.2 2.2 8 5l-2.8 2.8" fill="none" stroke={C.amber} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      <ShapeGlyph id={mp.b} size={15} color={C.amber} />
+      <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", color: C.amber, textTransform: "uppercase" }}>Morphing</span>
+      <span style={{ fontSize: 10, color: C.dim, fontFamily: "'JetBrains Mono'" }}>{SHAPE_DEFS[mp.a]?.name || mp.a}→{SHAPE_DEFS[mp.b]?.name || mp.b}{mp.active ? ` · ${pct}%` : ""}</span>
+    </div>
+  );
 }
 
 /* per-layer parallax depth slider — lives in the FIRST card of every object
@@ -86,7 +140,7 @@ function FiltersRow({ P, onBlur, onBlend }) {
   );
 }
 
-export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detachAudio, fmt, cameraLaneSel, camera, editCameraProp, setCameraKeyframe, removeCameraKeyframe, cameraKfNav, resetCamera, selCamKfData, setCameraSegmentEase, applyCameraPreset, applyCameraAction, selMany, groupSelection, align, duplicateSelected, removeSelected, inClip, ctx, sel, patchObject, toggleHide, toggleLock, stage, stageBg, setStageBg, applyStagePreset, stageIsPreset, enterClip, patchProps, ctxDur, stretchClipDur, stretchClips, setStretchClips, ungroupClip, morphQ, setMorphQ, time, timeRef, setShapeAt, editProp, removeKeyframe, setKeyframe, setSelKf, flowText, brand, SW, addPathTo, patchPath, animateAlongPath, kfNav, selectedKfData, setSegmentEase, applyPreset, fileRef }) {
+export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detachAudio, fmt, cameraLaneSel, camera, editCameraProp, setCameraKeyframe, removeCameraKeyframe, cameraKfNav, resetCamera, selCamKfData, setCameraSegmentEase, applyCameraPreset, applyCameraAction, selMany, groupSelection, align, duplicateSelected, removeSelected, inClip, ctx, sel, patchObject, toggleHide, toggleLock, stage, stageBg, setStageBg, applyStagePreset, stageIsPreset, enterClip, patchProps, ctxDur, stretchClipDur, stretchClips, setStretchClips, ungroupClip, morphQ, setMorphQ, time, timeRef, setShapeAt, editProp, removeKeyframe, setKeyframe, setSelKf, flowText, brand, SW, addPathTo, patchPath, kfNav, selectedKfData, setSegmentEase, applyPreset, fileRef }) {
   /* camera as a valueAt-compatible pseudo-object for the shared PropRow UI */
   const camObj = camTrackHost(camera);
   const camVals = cameraAt(camera, time);
@@ -426,6 +480,44 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                 </Card>
               )}
 
+              {sel.type === "shape" && (() => {
+                const mp = morphPairAt(sel, time);
+                const curId = shapeIdAt(sel, time) || sel.props.shape;
+                const demoA = mp ? mp.a : curId;
+                const demoB = mp ? mp.b : (curId === "star" ? "heart" : "star");
+                const clearMorph = () => patchObject(sel.id, (o) => { const tr = { ...o.tracks }; delete tr.shape; return { ...o, tracks: tr, props: { ...o.props, shape: curId } }; });
+                return (
+                <Card title="Morph" hint="A→B over time · ◆ keyframes on the timeline">
+                  {/* unmistakable indicator: glyph→glyph chip (mirrors the on-canvas badge) */}
+                  <MorphChip sel={sel} time={time} />
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10 }}>
+                    <MorphPreview a={demoA} b={demoB} cornerR={sel.props.cornerR} />
+                    <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.55 }}>
+                      {mp
+                        ? <>This shape melts <b style={{ color: C.txt }}>{SHAPE_DEFS[mp.a]?.name}</b> → <b style={{ color: C.amber }}>{SHAPE_DEFS[mp.b]?.name}</b> between its shape ◆. Scrub the timeline to watch it morph; right-click a segment for easing.</>
+                        : <>Pick a <b style={{ color: C.txt }}>different</b> shape below at another point in time — the shape melts into it between the two ◆. The preview shows the idea.</>}
+                    </div>
+                  </div>
+                  <div style={{ ...sectionLabel, marginBottom: 6 }}>{mp ? "Extend the morph — target at playhead ◆" : "Morph target — sets a shape ◆ at the playhead"}</div>
+                  <div data-morph-picker style={{ display: "grid", gridTemplateColumns: "repeat(8,1fr)", gap: 4, marginBottom: 8 }}>
+                    {SHAPE_IDS.map((sid) => {
+                      const isCur = curId === sid;
+                      return (
+                        <button key={sid} className="gd-btn" title={`${SHAPE_DEFS[sid].name}${isCur ? " (current)" : " — morph into this"}`} onClick={() => setShapeAt(sel.id, sid)}
+                          style={{ background: C.bg2, border: `1px solid ${isCur ? C.amber : C.line}`, borderRadius: 5, padding: 2, cursor: "pointer", aspectRatio: "1" }}>
+                          <svg width="100%" height="100%" viewBox="-6 -6 112 112"><polygon points={ptsToStr(SHAPE_DEFS[sid].pts)} fill={isCur ? C.amber : C.dim} /></svg>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    {mp && <button className="gd-btn" data-morph-clear onClick={clearMorph} style={{ ...chipStyle, cursor: "pointer", color: C.danger }}>✕ Clear morph</button>}
+                    <span style={{ color: C.faint, fontSize: 9.5, lineHeight: 1.4 }}>Every click lands on the timeline as a shape ◆ — move, copy or ease them like any keyframe.</span>
+                  </div>
+                </Card>
+                );
+              })()}
+
               {sel.type === "text" && (
                 <Card title="Text">
                   <DepthRow value={sel.props.depth} onChange={setDepth} />
@@ -694,6 +786,31 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                     </div>
                   ) : (
                     <>
+                      {/* ON-PATH status (R9w2): unmistakable "this object rides a path"
+                          chip + live mini map — the amber rider dot is placed by the
+                          SAME prog value the stage uses, so scrubbing moves it */}
+                      {(() => {
+                        const prog = valueAt(sel, "prog", time);
+                        const sps = pathSamples(sel.props.path);
+                        const xs = sps.map((p) => p[0]), ys = sps.map((p) => p[1]);
+                        const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+                        const PW = 224, PH = 64, pad = 8;
+                        const k = Math.max(1e-6, Math.min((PW - 2 * pad) / Math.max(1, x1 - x0), (PH - 2 * pad) / Math.max(1, y1 - y0)));
+                        const mp = (p) => [pad + (p[0] - x0) * k, pad + (p[1] - y0) * k];
+                        const dot = mp(pointOnPath(sel.props.path, prog));
+                        return (
+                          <div data-onpath-chip style={{ display: "flex", gap: 9, alignItems: "center", background: "rgba(88,196,126,.08)", border: `1px solid ${C.info}`, borderRadius: 7, padding: "6px 9px", marginBottom: 9 }}>
+                            <svg width={PW} height={PH} viewBox={`0 0 ${PW} ${PH}`} style={{ background: C.bg0, borderRadius: 5, flexShrink: 0 }}>
+                              <polyline points={sps.map((p) => mp(p).map((n) => n.toFixed(1)).join(",")).join(" ")} fill="none" stroke={C.info} strokeWidth="1.5" opacity="0.7" />
+                              <circle cx={dot[0].toFixed(1)} cy={dot[1].toFixed(1)} r="4" fill={C.amber} stroke="#1A1405" strokeWidth="1" />
+                            </svg>
+                            <div style={{ fontSize: 10.5, lineHeight: 1.5, color: C.dim }}>
+                              <b style={{ color: C.info, textTransform: "uppercase", letterSpacing: "0.08em", fontSize: 9.5 }}>On path</b><br />
+                              progress <b style={{ color: C.txt, fontFamily: "'JetBrains Mono'" }}>{Math.round(prog * 100)}%</b> — the dot is where the object sits right now
+                            </div>
+                          </div>
+                        );
+                      })()}
                       <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 9 }}>
                         <button className="gd-btn" onClick={() => patchPath(sel.id, (p) => ({ ...p, show: !p.show }))} style={{ ...chipStyle, cursor: "pointer", borderColor: sel.props.path.show ? C.amber : C.line, color: sel.props.path.show ? C.amber : C.dim }}>{sel.props.path.show ? "Guide on" : "Guide off"}</button>
                         <button className="gd-btn" onClick={() => patchPath(sel.id, (p) => ({ ...p, curved: !p.curved }))} style={{ ...chipStyle, cursor: "pointer", borderColor: sel.props.path.curved ? C.amber : C.line, color: sel.props.path.curved ? C.amber : C.dim }}>{sel.props.path.curved ? "Curved" : "Straight"}</button>
@@ -702,8 +819,17 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                         <button className="gd-btn" onClick={() => patchProps(sel.id, { path: null })} style={{ ...chipStyle, cursor: "pointer", color: C.danger }}>✕ Remove</button>
                       </div>
                       {sel.type === "text" && <ChipRow label="Text" options={[["flow", "Flows on path"], ["travel", "Travels the path"]]} value={sel.props.pathMode || "flow"} onChange={(v) => patchProps(sel.id, { pathMode: v })} />}
-                      <button className="gd-btn" onClick={() => animateAlongPath(sel.id)} style={{ width: "100%", background: C.bg2, border: `1px solid ${C.amber}`, color: C.amber, borderRadius: 6, padding: "7px 0", cursor: "pointer", fontWeight: 700, marginBottom: 6 }}>▶ Animate along path (adds ◆ 0 → 1)</button>
-                      <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.5 }}>Drag the round handles on stage to reshape · drag the object to move the whole path · keyframe "Path progress" below.</div>
+                      <button className="gd-btn" data-animate-path onClick={() => {
+                        /* R9w2: progKeyPlan guarantees a REAL 0→1 span — the old
+                           writer collapsed both ◆ onto the layer end when the
+                           playhead sat there, freezing the rider at prog=1 */
+                        const lo = sel.props.inT || 0;
+                        const hi = Math.min(ctxDur, layerOut(sel, ctxDur));
+                        const [ka, kb] = progKeyPlan(timeRef.current, lo, hi, 1600);
+                        setKeyframe(sel.id, "prog", ka.t, ka.v, ka.ease);
+                        setKeyframe(sel.id, "prog", kb.t, kb.v, kb.ease);
+                      }} style={{ width: "100%", background: C.bg2, border: `1px solid ${C.amber}`, color: C.amber, borderRadius: 6, padding: "7px 0", cursor: "pointer", fontWeight: 700, marginBottom: 6 }}>▶ Animate along path (adds ◆ 0 → 1)</button>
+                      <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.5 }}>Drag the round handles on stage to reshape · drag the object to move the whole path (it stays glued to it) · keyframe "Path progress" below.</div>
                     </>
                   )}
                 </Card>

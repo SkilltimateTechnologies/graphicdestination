@@ -174,3 +174,49 @@ export function morphPtsAt(obj, time) {
   }
   return pt(last.v);
 }
+
+/* ---------- morph state helpers (R9w2) — the Inspector's Morph section, the
+   on-canvas badge and the node checks all read morph state through these ONE
+   pure accessors so every indicator agrees ----------
+   shapeIdAt: the shape id in force at time t (mid-morph = the segment's A).
+   morphPairAt: the A→B pair of the segment surrounding t (different shapes),
+     else the first morphing segment on the track; null = the shape never
+     morphs (needs ≥2 shape ◆ with DIFFERENT values — a lone ◆ is a static
+     shape change, morphPtsAt holds it constant). */
+export function shapeIdAt(obj, time) {
+  const tr = obj?.tracks?.shape || [];
+  if (!tr.length) return obj?.props?.shape;
+  if (time <= tr[0].t) return tr[0].v;
+  const last = tr[tr.length - 1];
+  if (time >= last.t) return last.v;
+  for (let i = 0; i < tr.length - 1; i++) {
+    if (time >= tr[i].t && time <= tr[i + 1].t) return tr[i].v;
+  }
+  return last.v;
+}
+export function morphPairAt(obj, time) {
+  const tr = obj?.tracks?.shape || [];
+  if (tr.length < 2) return null;
+  for (let i = 0; i < tr.length - 1; i++) {
+    const a = tr[i], b = tr[i + 1];
+    if (a.v !== b.v && time >= a.t && time <= b.t) return { a: a.v, b: b.v, t0: a.t, t1: b.t, active: true };
+  }
+  for (let i = 0; i < tr.length - 1; i++) {
+    if (tr[i].v !== tr[i + 1].v) return { a: tr[i].v, b: tr[i + 1].v, t0: tr[i].t, t1: tr[i + 1].t, active: false };
+  }
+  return null;
+}
+
+/* ---------- "Animate along path" keyframe planner (R9w2) ----------
+   Returns the two prog ◆ (0 → 1, span ms apart) for a ride starting at the
+   playhead. Guarantees a REAL span (b.t > a.t) even when the playhead sits
+   at/after the layer's last visible ms: the old writer clamped both keys to
+   the layer end, collapsing them onto one t — the second (v=1) replaced the
+   first, prog froze at 1 and the rider sat motionless at the path's end. */
+export function progKeyPlan(t, lo, hi, span = 1600) {
+  const L = Math.max(0, lo || 0);
+  const H = Math.max(L + 100, hi == null ? L + span : hi);
+  const s = Math.round(Math.min(Math.max(t, L), Math.max(L, H - span)) / 10) * 10;
+  const e = Math.round(Math.min(H, s + span) / 10) * 10;
+  return [{ t: s, v: 0, ease: "easeInOutCubic" }, { t: e, v: 1, ease: "easeInOutCubic" }];
+}
