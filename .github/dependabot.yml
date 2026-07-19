@@ -1,0 +1,32 @@
+version: 2
+# Weekly dependency PRs, grouped so a routine bump is one review, not twenty.
+# Lockfiles/.npmrc/vendor/ are deploy-critical (AGENTS.md rule #5): review
+# every dependabot PR against the pinned-registry constraints before merging.
+updates:
+  - package-ecosystem: npm
+    directory: /client
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      client-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /server
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      server-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

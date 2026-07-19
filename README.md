@@ -59,18 +59,35 @@ cd client && npm ci && npm run dev   # http://localhost:5173
 cd client && npm run build && cd ../server && npm start
 ```
 
-Server tests: `cd server && node test-api.mjs` (26 checks: auth, signup,
-rate limiting, headers, health).
+Tests — the whole battery (client engine/editor checks, export/render fidelity,
+and server integration) runs from the repo root with one command:
+
+```bash
+npm test                 # run every suite (auto-discovered)
+npm run test:server      # server integration only
+npm run test:client      # engine + editor checks only
+npm run test:list        # list discovered suites
+```
+
+Suites are self-contained Node scripts that exit non-zero on failure; the runner
+(`scripts/run-checks.mjs`) orchestrates and aggregates them. CI runs the same
+command on every push/PR. See [CONTRIBUTING.md](CONTRIBUTING.md#testing).
 
 ## Environment variables
 
 | Var | Required | Purpose |
 |---|---|---|
-| `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` | prod | Turso cloud DB (unset → local SQLite file) |
-| `JWT_SECRET` | prod | Session signing key |
+| `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` | prod | Turso cloud DB (unset → local SQLite file; must be set together) |
+| `JWT_SECRET` | prod | Session signing key (≥32 chars; **boot fails** in production if missing/weak) |
+| `NODE_ENV` | prod | `production` enables fail-fast config validation |
 | `PORT` | no | Default 8787 |
-| `ENABLE_ADMIN_HINT` | no | `1` exposes the seeded-admin bootstrap endpoint (dev only) |
+| `LOG_LEVEL` | no | Structured-log verbosity: `debug`/`info`/`warn`/`error` (default `info`) |
+| `ENABLE_ADMIN_HINT` | no | `1` exposes the seeded-admin bootstrap endpoint (dev only; **rejected in production**) |
 | `CLIENT_ORIGIN` | no | CORS origin for the client |
+
+Health endpoints: `GET /api/health` (liveness — process is up) and
+`GET /api/ready` (readiness — DB reachable; returns 503 if not). Point load
+balancers / orchestrators at `/api/ready`.
 
 ## Deploy
 
@@ -81,3 +98,16 @@ rate limiting, headers, health).
 
 - Secrets live only in `server/.env` (git-ignored). Never commit credentials.
 - Rotate any credential that has ever been shared in chat/tickets.
+- Full posture, hardening gaps, and reporting: [SECURITY.md](SECURITY.md).
+
+## Documentation
+
+| Doc | What it covers |
+|---|---|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System overview, module map, data model, render/export pipelines |
+| [AGENTS.md](AGENTS.md) | **Read first before changing code** — frozen-feature contracts, golden rules, regression history |
+| [RENDERING.md](RENDERING.md) | Server-side MP4 (HyperFrames) pipeline in depth |
+| [ROADMAP.md](ROADMAP.md) | Enterprise-grade roadmap — current-state assessment + prioritized phases |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Setup, testing, code style, PR process |
+| [SECURITY.md](SECURITY.md) | Security posture, known gaps, vulnerability reporting |
+| [CHANGELOG.md](CHANGELOG.md) | Notable changes per release |
