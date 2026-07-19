@@ -6,7 +6,7 @@ import { makeAudioTrack, audioToJson, audioFromJson, audioGainAt, audioWithinAt,
 import { clamp01 } from "../engine/easing.js";
 import { SHAPE_DEFS } from "../engine/shapes.js";
 import { valueAt, posOf, clipLocalTime } from "../engine/keyframes.js";
-import { cameraAt, cameraTransform, cameraFromJson, cameraToJson, clampZoom } from "../engine/camera.js";
+import { cameraAt, cameraTransform, cameraFromJson, cameraToJson, clampZoom, depthFactor } from "../engine/camera.js";
 import { normHi } from "../engine/maps.js";
 import { FONT_IMPORT } from "../engine/fx.js";
 import { kitRenderSpec } from "../engine/kits.js";
@@ -87,6 +87,63 @@ function withKeyframe(track = [], t, v, ease) {
   next.push({ t: T, v, ease: ease || (old && old.ease) || "easeInOutCubic" });
   next.sort((a, b) => a.t - b.t);
   return next;
+}
+
+/* ============================================================
+   R8w3 — CANVAS-DROP KEYFRAME MODEL (pure, exported)
+   Every canvas transform drop lands ◆ keyframes at the playhead through the
+   one withKeyframe/setKeyframe path (autokey is ALWAYS-ON):
+     move   → x ◆ + y ◆          (every type — incl. confetti + backdrop)
+     rotate → rotation ◆         (every gripped type — all but confetti/backdrop)
+     resize → scale ◆ + a base-compensation patch
+   Resize rides the `scale` prop because it is the ONLY size channel that is
+   keyframable end-to-end: it renders (valueAt in StageObject), it shows on
+   the timeline lanes (KF_PROPS) and it interpolates — w/h/fontSize tracks
+   would be inert in the renderer and invisible on the timeline. The pure
+   helpers below are extracted and exercised by check-r8w3.mjs so the node
+   audit runs the exact drop math the gestures use.
+   ============================================================ */
+export function resizeDropPlan({ fw, fh, s0, lo = 0.05, hi = 10 }) {
+  /* pick the DOMINANT axis factor (a corner drag's bigger change), clamp the
+     resulting scale into [lo, hi], and derive g — the base-compensation
+     divisor that keeps the drop-time render pixel-identical to the live drag
+     (base := dragged / g under the new scale s0·g). A bare grip click
+     (fw = fh = 1) reports changed:false so no stray ◆ is written. */
+  const f = Math.abs(Math.log(Math.max(1e-9, fw))) >= Math.abs(Math.log(Math.max(1e-9, fh))) ? fw : fh;
+  const ns = Math.max(lo, Math.min(hi, Math.round(s0 * f * 100) / 100));
+  const g = ns / Math.max(1e-9, s0);
+  return { ns, g, changed: Math.abs(g - 1) > 1e-6 };
+}
+
+/* ============================================================
+   R8w3 — OBJECT-LEVEL CAMERA ACTIONS (pure, exported)
+   One-click camera moves a selected object drives WITHOUT manual track
+   editing: each action anchors the current framing at the playhead and lands
+   eased (withKeyframe default easeInOutCubic) one beat later. The math below
+   inverts the engine's own transform (engine/camera.js):
+     screen(p) = (p − c0)·s + c0 + (−camX·f, −camY·f),  s = 1 + (zoom−1)·f
+   so centering p means camX = (px − c0x)·s / f (and likewise for y).
+   ============================================================ */
+export const CAM_ACT_BEAT = 600; /* ms — every one-click move lands one beat after the playhead */
+export const CAM_FIT_FILL = 0.8; /* zoom-to-fit leaves a 10% margin on the limiting axis */
+export function cameraFocusXY({ ox, oy, zoom, depth, stage }) {
+  /* camera x/y that centers an object sitting at stage point (ox, oy), given
+     the zoom it will be under. f floors at 0.1 (the depth slider's own min)
+     so a camera-locked layer (depth −1 ⇒ f 0) still yields a finite pan. */
+  const f = Math.max(0.1, depthFactor(depth));
+  const s = 1 + (zoom - 1) * f;
+  return { x: Math.round(((ox - stage.w / 2) * s) / f), y: Math.round(((oy - stage.h / 2) * s) / f) };
+}
+export function cameraFitZoom({ w, h, depth, stage, fill = CAM_FIT_FILL }) {
+  /* zoom at which an object of RENDERED size w×h (objSize × its scale prop)
+     fills `fill` of the stage on the limiting axis: screen = size·(1+(z−1)f) */
+  const f = Math.max(0.1, depthFactor(depth));
+  const k = Math.min((stage.w * fill) / Math.max(1e-6, w), (stage.h * fill) / Math.max(1e-6, h));
+  return Math.round(clampZoom(1 + (k - 1) / f) * 100) / 100;
+}
+export function cameraPushZoom(zoom, dir) {
+  /* Push in (dir +1) / Pull out (dir −1): a gentle 1.25× zoom step, clamped */
+  return Math.round(clampZoom(zoom * (dir > 0 ? 1.25 : 1 / 1.25)) * 100) / 100;
 }
 
 /* ============================================================
@@ -397,6 +454,51 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   };
   const selectCamera = useCallback(() => { setCameraSel(true); setAudioSel(false); setSelIds([]); setSelKf(null); }, []);
 
+  /* ---------- R8w3: OBJECT-LEVEL one-click camera moves ----------
+     The Inspector "Camera" card of the SELECTED object calls this — no manual
+     track editing: every action anchors the current framing at the playhead
+     and lands eased (withKeyframe's default easeInOutCubic) one beat later
+     (CAM_ACT_BEAT, clamped to the comp end). All keyframes go through the one
+     setCameraKeyframe path onto project camera.tracks; the pure math helpers
+     above (cameraFocusXY / cameraFitZoom / cameraPushZoom) are shared with
+     check-r8w3.mjs. Root-scene only (the camera never applies inside clips),
+     so the card only shows on the root timeline. */
+  const applyCameraAction = useCallback((objId, action) => {
+    if (action === "reset") { resetCamera(); return; }
+    const o = ctxLayers.find((x) => x.id === objId);
+    if (!o || path.length > 0) return;
+    const t = Math.max(0, Math.min(compDur, timeRef.current));
+    const land = Math.min(compDur, t + CAM_ACT_BEAT);
+    const cam = cameraAt(camera, t);
+    const depth = o.props.depth || 0;
+    if (action === "push" || action === "pull") {
+      setCameraKeyframe("zoom", t, cam.zoom); /* anchor the current zoom */
+      setCameraKeyframe("zoom", land, cameraPushZoom(cam.zoom, action === "push" ? 1 : -1));
+      return;
+    }
+    const [ox, oy] = posOf(o, t); /* live, track/path-aware position at the playhead */
+    if (action === "fit") {
+      const { w, h } = objSize(o, t);
+      const sObj = Math.max(0.05, valueAt(o, "scale", t) ?? 1);
+      const zoom = cameraFitZoom({ w: w * sObj, h: h * sObj, depth, stage });
+      const p = cameraFocusXY({ ox, oy, zoom, depth, stage });
+      setCameraKeyframe("x", t, Math.round(cam.x));
+      setCameraKeyframe("y", t, Math.round(cam.y));
+      setCameraKeyframe("zoom", t, cam.zoom);
+      setCameraKeyframe("x", land, p.x);
+      setCameraKeyframe("y", land, p.y);
+      setCameraKeyframe("zoom", land, zoom);
+      return;
+    }
+    if (action === "focus") {
+      const p = cameraFocusXY({ ox, oy, zoom: cam.zoom, depth, stage });
+      setCameraKeyframe("x", t, Math.round(cam.x));
+      setCameraKeyframe("y", t, Math.round(cam.y));
+      setCameraKeyframe("x", land, p.x);
+      setCameraKeyframe("y", land, p.y);
+    }
+  }, [ctxLayers, path, compDur, camera, stage, setCameraKeyframe, resetCamera]);
+
   const editProp = useCallback((id, prop, v) => {
     const obj = ctxLayers.find((o) => o.id === id);
     if (!obj || obj.locked) return;
@@ -425,17 +527,18 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   }, []);
 
   /* AUTO-KEYFRAME mode — CANVAS gestures only (move / rotate / clip-scale):
-     autokey ON + the prop ALREADY has a track → write/replace a ◆ at the
-     playhead through the exact setKeyframe path (default easing); the prop's
-     track is empty → patch the base value. autokey OFF → editProp, the
-     classic behavior (existing animation shifts as a whole / base patches). */
+     autokey is ALWAYS-ON, so EVERY canvas drop writes/replaces a ◆ at the
+     playhead through the exact setKeyframe path (default easing) — R8w3:
+     previously a fresh prop silently patched its base value instead, so a
+     first canvas edit left NO keyframe on the timeline (the user's text
+     test). A repeated drop at the same playhead updates that ◆ in place
+     (withKeyframe ±5ms replace), identical for every object type. */
   const canvasEditProp = useCallback((id, prop, v) => {
     if (!autokey) { editProp(id, prop, v); return; }
     const obj = ctxLayers.find((o) => o.id === id);
     if (!obj || obj.locked) return;
-    if ((obj.tracks[prop] || []).length) setKeyframe(id, prop, timeRef.current, v);
-    else patchProps(id, { [prop]: v });
-  }, [autokey, editProp, ctxLayers, setKeyframe, patchProps]);
+    setKeyframe(id, prop, timeRef.current, v);
+  }, [autokey, editProp, ctxLayers, setKeyframe]);
 
   const setShapeAt = (id, shapeId) => {
     const obj = ctxLayers.find((o) => o.id === id);
@@ -1109,8 +1212,10 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
       window.removeEventListener("pointerup", up);
       setSnapGuides(null); /* guides live only for the duration of the drag */
       if (!d || !d.moved) return;
-      /* drop lands through the auto-keyframe path: ON → ◆ at the playhead for
-         props that already have a track, base patch otherwise; OFF → classic */
+      /* drop lands through the auto-keyframe path: autokey is always-on, so
+         every move writes/updates an x ◆ and a y ◆ at the playhead (R8w3 —
+         identical for every object type; path-dragged members shift their
+         path points instead, position comes from the path) */
       d.members.forEach((m) => { const lv = d.live[m.id]; if (lv && !m.hasPath) { canvasEditProp(m.id, "x", lv.x); canvasEditProp(m.id, "y", lv.y); } });
     };
     window.addEventListener("pointermove", move);
@@ -1167,10 +1272,13 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     return () => el.removeEventListener("wheel", onWheel);
   }, [camera, cameraSel, audioSel, selIds, path, setCameraKeyframe]);
   /* ---------- on-canvas direct manipulation: 8-way resize grips + rotation grip ----------
-     Both write BASE PROPS through patchProps — the same live-update path the move-drag
-     uses — so keyframe tracks stay untouched (exactly like the old Inspector inputs).
-     Resize target by type: w/h for box types (shape/image/chart), `w` for the map
-     types (their height is derived), fontSize for text/number. */
+     The drag itself keeps writing BASE PROPS live (pixel-true preview). On the
+     DROP the resize becomes a ◆ on the `scale` lane at the playhead + a
+     base-compensation patch (resizeDropPlan above): the render at the drop is
+     identical to the live drag, and scrubbing interpolates the resize like any
+     other keyframed motion (R8w3 — before, resize never wrote a keyframe).
+     Resize target by type: w/h for box types (shape/image/chart/kit), `w` for
+     the map types (their height is derived), fontSize for text/number. */
   const onResizeDown = (e, obj, hid, cursor) => {
     e.stopPropagation();
     if (obj.locked) return;
@@ -1202,6 +1310,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
       return { w: hx !== 0 ? sz0.w + 2 * hx * lx : sz0.w, h: hy !== 0 ? sz0.h + 2 * hy * ly : sz0.h };
     };
     const sx = e.clientX, sy = e.clientY;
+    let last = null; /* latest live patch + its size factors (vs the pre-drag base) — the drop converts them into a scale ◆ */
     const prevCursor = document.body.style.cursor;
     if (cursor) document.body.style.cursor = cursor;
     const move = (ev) => {
@@ -1224,17 +1333,19 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
         ddy += (-r.dx * sin + r.dy * cos) / s0;
         setSnapGuides(r.guides.length ? r.guides : null);
       } else setSnapGuides(null);
-      let patch;
+      let patch, fw = 1, fh = 1;
       if (textual) {
         /* scale fontSize proportionally — the vertical delta ratio drives (corners + N/S);
            E/W grips fall back to the horizontal ratio so no grip is dead on auto-width text */
         const f = hy !== 0 ? (sz0.h + 2 * hy * ddy) / sz0.h : (sz0.w + 2 * hx * ddx) / sz0.w;
         patch = { fontSize: Math.max(10, Math.round(fs0 * Math.max(0.05, f))) };
+        fw = fh = patch.fontSize / fs0; /* the whole text box scales with fontSize */
       } else if (singleW) {
         const fx = hx !== 0 ? (sz0.w + 2 * hx * ddx) / sz0.w : 1;
         const fy = hy !== 0 ? (sz0.h + 2 * hy * ddy) / sz0.h : 1;
         const f = Math.max(0.05, hx !== 0 && hy !== 0 ? Math.max(fx, fy) : hx !== 0 ? fx : fy);
         patch = { w: Math.max(10, Math.round(w0 * f)) };
+        fw = fh = patch.w / w0; /* map height is derived — resize is uniform */
       } else {
         let nw = hx !== 0 ? sz0.w + 2 * hx * ddx : sz0.w;
         let nh = hy !== 0 ? sz0.h + 2 * hy * ddy : sz0.h;
@@ -1243,7 +1354,9 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
           nw = sz0.w * f; nh = sz0.h * f;
         }
         patch = { w: Math.max(10, Math.round(nw)), h: Math.max(10, Math.round(nh)) };
+        fw = patch.w / sz0.w; fh = patch.h / sz0.h;
       }
+      last = { fw, fh, patch };
       patchProps(obj.id, patch);
     };
     const up = () => {
@@ -1251,20 +1364,43 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
       window.removeEventListener("pointerup", up);
       document.body.style.cursor = prevCursor;
       setSnapGuides(null); /* guides live only for the duration of the drag */
+      /* R8w3 — resize drop lands as a ◆ on the scale lane at the playhead
+         (autokey always-on, same setKeyframe path as move/rotate). The base
+         prop is compensated by g so the drop frame renders pixel-identically
+         to the live drag; a bare grip click (f ≈ 1) writes nothing. */
+      if (last) {
+        const plan = resizeDropPlan({ fw: last.fw, fh: last.fh, s0 });
+        if (plan.changed) {
+          const g = plan.g, p = last.patch;
+          setKeyframe(obj.id, "scale", t, plan.ns);
+          if (p.fontSize != null) patchProps(obj.id, { fontSize: Math.max(10, Math.round(p.fontSize / g)) });
+          else if (p.h == null) patchProps(obj.id, { w: Math.max(10, Math.round(p.w / g)) });
+          else patchProps(obj.id, { w: Math.max(10, Math.round(p.w / g)), h: Math.max(10, Math.round(p.h / g)) });
+          /* mirror the base scale to the ◆ value — the compensated w/h/fontSize
+             are only exact UNDER that scale, so keeping base scale in sync means
+             deleting the ◆ still renders the resized size (move/rotate/clip-scale
+             end base+◆ the same way) */
+          patchProps(obj.id, { scale: plan.ns });
+        }
+        last = null;
+      }
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
   /* rotation grip — drag around the object's center; 1° steps, shift snaps to 15°.
-     Base `rotation` prop only — EXCEPT auto-keyframe ON + an existing rotation
-     track: then the drag writes/updates a ◆ at the playhead (live, so the layer
-     visibly spins mid-drag). rotLive feeds the on-canvas readout either way. */
+     Autokey is always-on (R8w3): EVERY rotate drag writes/updates a rotation ◆
+     at the playhead, live, so the layer visibly spins mid-drag — a fresh prop
+     starts its track here, an existing track gets its playhead ◆ replaced.
+     rotLive feeds the on-canvas readout either way. */
   const onRotateDown = (e, obj) => {
     e.stopPropagation();
     if (obj.locked) return;
     const wrap = e.currentTarget.parentElement.getBoundingClientRect(); /* the object wrapper — its AABB center is the rotation center */
     const cx = wrap.left + wrap.width / 2, cy = wrap.top + wrap.height / 2;
-    const r0 = obj.props.rotation || 0;
+    /* start from the LIVE angle (track-aware): with a rotation ◆ at the
+       playhead the base prop is stale — reading it jumped the layer mid-drag */
+    const r0 = valueAt(obj, "rotation", timeRef.current) || 0;
     const a0 = Math.atan2(e.clientY - cy, e.clientX - cx);
     const prevCursor = document.body.style.cursor;
     document.body.style.cursor = "grabbing";
@@ -1274,7 +1410,12 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
       if (ev.shiftKey) nr = Math.round(nr / 15) * 15;
       nr = Math.max(-360, Math.min(360, nr));
       if (autokey && (obj.tracks.rotation || []).length) setKeyframe(obj.id, "rotation", timeRef.current, nr);
+      else if (autokey) setKeyframe(obj.id, "rotation", timeRef.current, nr); /* R8w3: fresh prop starts its track at the playhead too (was: silent base patch) */
       else patchProps(obj.id, { rotation: nr });
+      /* R8w3: the ◆ drives the render while it exists; mirror the base prop so
+         the angle survives ◆ deletion — the same base+◆ end state the move
+         drag has always produced */
+      if (autokey) patchProps(obj.id, { rotation: nr });
       setRotLive({ id: obj.id, deg: nr });
     };
     const up = () => {
@@ -1289,11 +1430,12 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   /* clip corner grips — drag scales the WHOLE clip wrapper uniformly through the
      `scale` prop (children live inside the wrapper, so contents scale with it).
      The ratio is measured from the clip's x/y — the wrapper's transform origin —
-     so it's exact under rotation and needs no Shift. Corner grips only. Base
-     prop patched live; auto-keyframe ON + an existing scale track writes a ◆
-     at the playhead instead (same setKeyframe path). `box` is the grip's
-     reference rect in clip-internal coords — the content bbox for group-style
-     clips (StageObject passes it); absent ⇒ the full stage (legacy). */
+     so it's exact under rotation and needs no Shift. Corner grips only. Autokey
+     is always-on (R8w3): the drag writes/updates a scale ◆ at the playhead,
+     live — a fresh prop starts its track, an existing track gets its ◆
+     replaced (same setKeyframe path). `box` is the grip's reference rect in
+     clip-internal coords — the content bbox for group-style clips (StageObject
+     passes it); absent ⇒ the full stage (legacy). */
   const onClipScaleDown = (e, obj, hid, cursor, box = null) => {
     e.stopPropagation();
     if (obj.locked) return;
@@ -1317,8 +1459,9 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     const move = (ev) => {
       const dx = (ev.clientX - sx) / (stageScale * cs), dy = (ev.clientY - sy) / (stageScale * cs);
       const ns = Math.max(0.05, Math.min(10, Math.round(s0 * (Math.hypot(ax + dx, ay + dy) / r0) * 100) / 100));
-      if (autokey && (obj.tracks.scale || []).length) setKeyframe(obj.id, "scale", timeRef.current, ns);
+      if (autokey) setKeyframe(obj.id, "scale", timeRef.current, ns); /* R8w3: always ◆ at the playhead (fresh props start their track) */
       else patchProps(obj.id, { scale: ns });
+      if (autokey) patchProps(obj.id, { scale: ns }); /* R8w3: mirror the base — the scale survives ◆ deletion (move/rotate end base+◆ too) */
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
@@ -1742,7 +1885,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
           morphQ={morphQ} setMorphQ={setMorphQ} time={time} timeRef={timeRef} setShapeAt={setShapeAt} editProp={editProp}
           removeKeyframe={removeKeyframe} setKeyframe={setKeyframe} setSelKf={setSelKf} flowText={flowText} brand={brand} SW={SW}
           addPathTo={addPathTo} patchPath={patchPath} animateAlongPath={animateAlongPath} kfNav={kfNav} selectedKfData={selectedKfData}
-          setSegmentEase={setSegmentEase} applyPreset={applyPreset} fileRef={fileRef} />
+          setSegmentEase={setSegmentEase} applyPreset={applyPreset} fileRef={fileRef} applyCameraAction={applyCameraAction} />
       </div>
 
       {/* ============ TIMELINE ============ */}

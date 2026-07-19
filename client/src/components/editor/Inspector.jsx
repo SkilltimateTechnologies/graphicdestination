@@ -22,10 +22,6 @@ const CAM_PRESETS = [
   { id: "panR", name: "Pan Right", prop: "x", v0: 0, v1: 120 },
   { id: "drift", name: "Drift Up", prop: "y", v0: 0, v1: -80 },
 ];
-/* ◆-only Inspector rows: these transform props are edited spatially on the
-   canvas — their PropRow shows the value read-only + ◆ / ‹ › (no input) */
-const TRANSFORM_RO_PROPS = ["x", "y", "rotation", "scale", "opacity"];
-
 /* tiny 56×34 inline-SVG swatch for the number style presets — renders "123"
    in the preset's own style (bold / mono / outline / pill / neon / minimal) */
 function NumStyleSwatch({ id }) {
@@ -90,7 +86,7 @@ function FiltersRow({ P, onBlur, onBlend }) {
   );
 }
 
-export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detachAudio, fmt, cameraLaneSel, camera, editCameraProp, setCameraKeyframe, removeCameraKeyframe, cameraKfNav, resetCamera, selCamKfData, setCameraSegmentEase, applyCameraPreset, selMany, groupSelection, align, duplicateSelected, removeSelected, inClip, ctx, sel, patchObject, toggleHide, toggleLock, stage, stageBg, setStageBg, applyStagePreset, stageIsPreset, enterClip, patchProps, ctxDur, stretchClipDur, stretchClips, setStretchClips, ungroupClip, morphQ, setMorphQ, time, timeRef, setShapeAt, editProp, removeKeyframe, setKeyframe, setSelKf, flowText, brand, SW, addPathTo, patchPath, animateAlongPath, kfNav, selectedKfData, setSegmentEase, applyPreset, fileRef }) {
+export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detachAudio, fmt, cameraLaneSel, camera, editCameraProp, setCameraKeyframe, removeCameraKeyframe, cameraKfNav, resetCamera, selCamKfData, setCameraSegmentEase, applyCameraPreset, applyCameraAction, selMany, groupSelection, align, duplicateSelected, removeSelected, inClip, ctx, sel, patchObject, toggleHide, toggleLock, stage, stageBg, setStageBg, applyStagePreset, stageIsPreset, enterClip, patchProps, ctxDur, stretchClipDur, stretchClips, setStretchClips, ungroupClip, morphQ, setMorphQ, time, timeRef, setShapeAt, editProp, removeKeyframe, setKeyframe, setSelKf, flowText, brand, SW, addPathTo, patchPath, animateAlongPath, kfNav, selectedKfData, setSegmentEase, applyPreset, fileRef }) {
   /* camera as a valueAt-compatible pseudo-object for the shared PropRow UI */
   const camObj = camTrackHost(camera);
   const camVals = cameraAt(camera, time);
@@ -131,12 +127,13 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
     if (p.id === "outline" && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(sel.props.fill || "")) patch.stroke = sel.props.fill;
     patchProps(sel.id, patch);
   };
-  /* x/y/w/h/rotation moved on-canvas (direct manipulation) — Transform keeps only
-     the props that aren't canvas-editable; the card collapses if that list is empty */
-  /* Keyframeable transform props. x/y/rotation VALUES are edited on-canvas
-     (direct manipulation) — these rows exist so users can set/jump/ease their
-     KEYFRAMES; the on-canvas grips write the same base props. */
-  const tProps = !sel || sel.type === "confetti" ? [] : sel.type === "world" ? (sel.props.autoZoom !== false ? ["scale", "opacity"] : ["scale", "opacity", "focus"]) : sel.props.path ? ["prog", "x", "y", "rotation", "scale", "opacity"] : ["x", "y", "rotation", "scale", "opacity"];
+  /* Keyframeable rows shown in the Transform card (R8w3 purge): x/y/rotation/
+     scale are GONE — transforms live on the canvas (move/resize/rotate grips
+     write their ◆ to the timeline directly) per the user's request. What
+     remains has NO canvas control: opacity everywhere, path progress for
+     path-riders, zoom focus for a manual world map. The card collapses when
+     the list is empty (confetti). */
+  const tProps = !sel || sel.type === "confetti" ? [] : sel.type === "world" ? (sel.props.autoZoom !== false ? ["opacity"] : ["opacity", "focus"]) : sel.props.path ? ["prog", "opacity"] : ["opacity"];
   return (
         <div style={{ width: 280, background: C.bg1, borderLeft: `1px solid ${C.line}`, overflowY: "auto", flexShrink: 0, padding: "12px 12px 30px" }}>
           {audioLaneSel ? (
@@ -256,6 +253,35 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                 </button>
               </div>
               <div style={{ color: C.faint, fontSize: 11, marginBottom: 10 }}>{sel.type}{sel.type === "clip" ? ` · ${sel.children.length} layers` : ""}{sel.locked ? " · locked" : ""}{sel.hidden ? " · hidden" : ""}</div>
+
+              {/* R8w3 — OBJECT-LEVEL camera operation: friendly one-click moves
+                  that WRITE the camera keyframes for the user (anchor at the
+                  playhead, land eased one beat later). Root scene only — the
+                  camera never applies inside clips, so the card hides there. */}
+              {!inClip && (
+                <Card title="Camera" hint="one click · writes the ◆ for you">
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 6 }}>
+                    <button className="gd-btn" onClick={() => applyCameraAction(sel.id, "focus")}
+                      title="Pan the camera so THIS object sits centered — current framing anchored at the playhead, lands one beat later"
+                      style={{ ...chipStyle, cursor: "pointer", padding: "7px 4px", fontSize: 11, textAlign: "center" }}>◎ Focus here</button>
+                    <button className="gd-btn" onClick={() => applyCameraAction(sel.id, "fit")}
+                      title="Zoom + pan so THIS object fills the frame (80%) — keyframes at the playhead, lands one beat later"
+                      style={{ ...chipStyle, cursor: "pointer", padding: "7px 4px", fontSize: 11, textAlign: "center" }}>⤢ Zoom to fit</button>
+                    <button className="gd-btn" onClick={() => applyCameraAction(sel.id, "push")}
+                      title="Ease the scene zoom IN one step (×1.25) over one beat from the playhead"
+                      style={{ ...chipStyle, cursor: "pointer", padding: "7px 4px", fontSize: 11, textAlign: "center" }}>＋ Push in</button>
+                    <button className="gd-btn" onClick={() => applyCameraAction(sel.id, "pull")}
+                      title="Ease the scene zoom OUT one step (÷1.25) over one beat from the playhead"
+                      style={{ ...chipStyle, cursor: "pointer", padding: "7px 4px", fontSize: 11, textAlign: "center" }}>－ Pull out</button>
+                  </div>
+                  <button className="gd-btn" onClick={() => applyCameraAction(sel.id, "reset")}
+                    title="Remove every camera keyframe — the scene renders exactly as before"
+                    style={{ ...chipStyle, cursor: "pointer", color: C.danger, width: "100%", padding: "6px 0" }}>⟲ Reset camera</button>
+                  <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.5, marginTop: 7 }}>
+                    Writes smooth eased camera keyframes at the playhead (landing +0.6s) — scrub to watch the move. How strongly THIS layer rides the camera is its <b style={{ color: C.txt }}>Depth</b> below.
+                  </div>
+                </Card>
+              )}
 
               {sel.type === "clip" && (
                 <Card title="Clip">
@@ -407,7 +433,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                   <Row label="Text"><input value={sel.props.text} onChange={(e) => patchProps(sel.id, { text: e.target.value })} style={inputStyle} /></Row>
                   <FontControls P={sel.props} onChange={(patch) => patchProps(sel.id, patch)} showSpacing brand={brand} />
                   <ColorKfRow label="Color" obj={sel} time={time} sw={SW} onEdit={(v) => editProp(sel.id, "fill", v)} onKf={(has, v) => { if (has) removeKeyframe(sel.id, "fill", Math.round(time / 10) * 10); else { const T = setKeyframe(sel.id, "fill", time, v); setSelKf({ objId: sel.id, prop: "fill", t: T }); } }} />
-                  {flowText && <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.5, margin: "8px 0" }}>Flowing on a path — animate with <b style={{ color: C.txt }}>Path progress</b>, <b style={{ color: C.txt }}>Rotation</b> (spins around the loop), <b style={{ color: C.txt }}>Scale</b> and <b style={{ color: C.txt }}>Opacity</b> (flow in, fade out). Text FX and boxes apply in normal or Travel mode.</div>}
+                  {flowText && <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.5, margin: "8px 0" }}>Flowing on a path — animate with <b style={{ color: C.txt }}>Path progress</b> and <b style={{ color: C.txt }}>Opacity</b> below (flow in, fade out). Text FX and boxes apply in normal or Travel mode.</div>}
                   {!flowText && <div style={{ ...sectionLabel, margin: "10px 0 6px" }}>TEXT FX · starts at playhead</div>}
                   {!flowText && sel.props.textFx && <SliderRow label="FX speed" min={0.25} max={3} step={0.05} value={sel.props.textFx.speed || 1} onChange={(v) => patchProps(sel.id, { textFx: { ...sel.props.textFx, speed: v } })} />}
                   {!flowText && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
@@ -464,7 +490,9 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                   {counterStyleOf(sel.props) && (
                     <Row label="Accent"><input type="color" value={(sel.props.ringC || "#FFB224").slice(0, 7)} onChange={(e) => patchProps(sel.id, { ringC: e.target.value })} /></Row>
                   )}
-                  {(sel.props.style === "dotted" || sel.props.style === "progressring") && (
+                  {(sel.props.style === "dotted" || sel.props.style === "progressring") && (sel.props.ring || "none") === "none" && (
+                    /* R8w3 purge: hidden while a Counter ring is on — the ring section
+                       below already renders this exact same ringW slider (duplicated control) */
                     <SliderRow label="Ring W" min={3} max={22} value={sel.props.ringW} onChange={(v) => patchProps(sel.id, { ringW: v })} />
                   )}
                   <SliderRow label="Start" min={0} max={Math.max(100, ctxDur - 300)} step={10} value={sel.props.start} onChange={(v) => patchProps(sel.id, { start: v })} />
@@ -682,10 +710,9 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
               )}
 
               {tProps.length > 0 && (
-                <Card title="Transform" hint="◆ keyframe · ‹ › jump · drag on canvas to edit">
+                <Card title="Transform" hint="◆ keyframe · ‹ › jump · move/resize/rotate on canvas">
                   {tProps.map((p) => (
                     <PropRow key={p} obj={sel} prop={p} time={time} ctxDur={ctxDur} stage={stage}
-                      readOnly={TRANSFORM_RO_PROPS.includes(p)}
                       onEdit={(v) => editProp(sel.id, p, v)}
                       onKfToggle={(has, v) => { if (has) removeKeyframe(sel.id, p, Math.round(time / 10) * 10); else { const T = setKeyframe(sel.id, p, time, v); setSelKf({ objId: sel.id, prop: p, t: T }); } }}
                       onNav={(dir) => kfNav(sel, p, dir)} />
