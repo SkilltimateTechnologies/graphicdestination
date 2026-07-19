@@ -43,7 +43,7 @@ function Thumb({ def, time }) {
     id: `chthumb-${def.id}`, type: "chart", name: def.name, tracks: {}, locked: false, hidden: false,
     props: {
       x: THUMB_W / 2, y: THUMB_H / 2, scale: 1, rotation: 0, opacity: 1, fill: "#F9F9F9", inT: 0, outT: null, path: null, prog: 0,
-      w: THUMB_W - 12, h: THUMB_H - 12, chartType: def.id, dataStr: def.data, start: 120, dur: 3400, showVals: false,
+      w: THUMB_W - 12, h: THUMB_H - 12, chartType: def.id, dataStr: def.data, start: 120, dur: 3400, showVals: false, hideLabels: true,
       bg: "#141824", bgOp: 1, radius: 10, borderC: "#2B3140", borderW: 1, pad: 5,
     },
   };

@@ -881,7 +881,11 @@ export function chartModel(P, time) {
   const grads = [];
   const items = [];
   const lgrad = (x1, y1, x2, y2, stops) => { const id = "g" + grads.length; grads.push({ id, type: "linear", x1, y1, x2, y2, stops }); return id; };
-  const txt = (role, x, y, s, o) => items.push({ k: "text", role, x: r2(x), y: r2(y), s: String(s), fill: o.fill || CH_INK, size: o.size || 12.5, fam: o.fam || "'JetBrains Mono'", wt: o.wt || 600, anchor: o.anchor || "middle", ...(o.ls ? { ls: o.ls } : {}), ...(o.tnum === false ? {} : { tnum: true }), op: r3(o.op == null ? 1 : o.op), ...(o.tr ? { tr: o.tr } : {}) });
+  /* hideLabels (panel thumbnails): suppress ALL chart text — axis/category
+     labels, values, legends, captions — for a clean shape-only preview. Off by
+     default, so inserted charts on the canvas keep every label unchanged. */
+  const hideLabels = !!(P && P.hideLabels);
+  const txt = (role, x, y, s, o) => { if (hideLabels) return; items.push({ k: "text", role, x: r2(x), y: r2(y), s: String(s), fill: o.fill || CH_INK, size: o.size || 12.5, fam: o.fam || "'JetBrains Mono'", wt: o.wt || 600, anchor: o.anchor || "middle", ...(o.ls ? { ls: o.ls } : {}), ...(o.tnum === false ? {} : { tnum: true }), op: r3(o.op == null ? 1 : o.op), ...(o.tr ? { tr: o.tr } : {}) }); };
   const axisTxt = (x, y, s, anchor, op) => txt("axis", x, y, String(s).toUpperCase(), { fill: CH_DIM, size: 10, fam: "'Inter'", ls: 1.1, tnum: false, anchor: anchor || "middle", op });
   const scaleTr = (cx, cy, s) => `translate(${r2(cx)} ${r2(cy)}) scale(${r3(s)}) translate(${r2(-cx)} ${r2(-cy)})`;
 

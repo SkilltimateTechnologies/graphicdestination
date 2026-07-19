@@ -1930,6 +1930,108 @@ function buildToast(opts) {
   ], D);
 }
 
+/* ---------- 14 · REACTION BAR — glass pill, reaction bubbles pop + wave ---------- */
+function buildReactionBar(opts) {
+  const { D, S } = uiCtx(opts);
+  const cy = 358, cx = 640, gap = 66, x0 = cx - gap * 2;
+  const glyphs = ["heart", "star", "heart", "diamond", "bolt"];
+  const cols = [CORAL, AMBER, "#C084FC", BLUE, MINT];
+  const kids = glassParts(cx, cy, 372, 94, 47, D, { inT: 160 });
+  glyphs.forEach((g, i) => {
+    const x = x0 + i * gap, t0 = 380 + i * 78;
+    const bob = { type: "bob", amp: i % 2 ? 5 : -5, period: 940 + i * 30 };
+    kids.push(S(`Bubble ${i + 1}`, { shape: "ellipse", x, y: cy, w: 52, h: 52, fill: "#FFFFFF", opacity: 0.94 }, 0, { enter: "pop", inT: t0, hold: bob }));
+    kids.push(S(`Icon ${i + 1}`, { shape: g, x, y: cy, w: 25, h: 25, fill: cols[i] }, 0, { enter: "pop", inT: t0 + 46, hold: bob }));
+  });
+  return kitClip("Reaction Bar", kids, D);
+}
+
+/* ---------- 15 · LIKE BURST — heart pop + radial spark burst + heartbeat ---------- */
+function buildLikeBurst(opts) {
+  const { D, S } = uiCtx(opts);
+  const cx = 640, cy = 356, bt = 940;
+  const kids = [];
+  kids.push(S("Ring", { shape: "ellipse", x: cx, y: cy, w: 64, h: 64, fillMode: "stroke", sC: CORAL, sW: 7, fill: CORAL }, 0, {
+    enter: "none", exit: false, inT: bt - 30, outT: bt + 520,
+    tracks: { scale: [kf(bt - 30, 0.5, "easeOutCubic"), kf(bt + 380, 3.6, "linear")], opacity: [kf(bt - 30, 0.75, "linear"), kf(bt + 380, 0, "linear")] },
+  }));
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2, r = 128;
+    const px = cx + Math.cos(a) * r, py = cy + Math.sin(a) * r;
+    kids.push(S(`Spark ${i + 1}`, { shape: i % 2 ? "star" : "diamond", x: cx, y: cy, w: 15, h: 15, fill: i % 2 ? AMBER : CORAL }, 0, {
+      enter: "none", exit: false, inT: bt, outT: bt + 540,
+      tracks: {
+        x: [kf(bt, cx, "easeOutCubic"), kf(bt + 430, px, "linear")],
+        y: [kf(bt, cy, "easeOutCubic"), kf(bt + 430, py, "linear")],
+        scale: [kf(bt, 0.3, "easeOutBack"), kf(bt + 200, 1, "linear"), kf(bt + 540, 0.2, "linear")],
+        opacity: [kf(bt, 0, "linear"), kf(bt + 70, 1, "linear"), kf(bt + 320, 1, "easeInQuad"), kf(bt + 540, 0, "linear")],
+      },
+    }));
+  }
+  kids.push(S("Heart", { shape: "heart", x: cx, y: cy, w: 118, h: 118, fill: CORAL }, 0, { enter: "pop", inT: 280, hold: { type: "heartbeat", period: 1150 } }));
+  return kitClip("Like Burst", kids, D);
+}
+
+/* ---------- 16 · SEGMENTED TABS — pill slides between tabs, active label lifts ---------- */
+function buildSegmentedTabs(opts) {
+  const { accent, D, S, T } = uiCtx(opts);
+  const cy = 360, cx = 640, seg = 118, w = seg * 3;
+  const centers = [cx - seg, cx, cx + seg];
+  const labels = ["Design", "Motion", "Export"];
+  const t1 = 820, t2 = 1440, t3 = 2060, tb = D - 900;
+  const mids = [(t1 + t2) / 2, (t2 + t3) / 2, (t3 + tb) / 2];
+  const pillX = [kf(560, centers[0], "easeOutBack"), kf(t1, centers[0], "easeInOutCubic"), kf(t2, centers[1], "easeInOutCubic"), kf(t3, centers[2], "easeInOutCubic"), kf(tb, centers[0], "easeInOutCubic")];
+  const pillS = [kf(t1, 1, "easeInOutSine"), kf(mids[0], 1.07, "easeInOutSine"), kf(t2, 1, "easeInOutSine"), kf(mids[1], 1.07, "easeInOutSine"), kf(t3, 1, "easeInOutSine"), kf(mids[2], 1.07, "easeInOutSine"), kf(tb, 1, "easeInOutSine")];
+  /* fill: INK while the pill sits under this label, DIM otherwise */
+  const lf = (on) => on === 0
+    ? [kf(500, INK, "linear"), kf(t2, INK, "easeInOutSine"), kf(t2 + 200, DIM, "linear"), kf(tb, DIM, "easeInOutSine"), kf(tb + 220, INK, "linear")]
+    : on === 1
+      ? [kf(500, DIM, "linear"), kf(t2, DIM, "easeInOutSine"), kf(t2 + 200, INK, "linear"), kf(t3, INK, "easeInOutSine"), kf(t3 + 200, DIM, "linear")]
+      : [kf(500, DIM, "linear"), kf(t3, DIM, "easeInOutSine"), kf(t3 + 200, INK, "linear"), kf(tb, INK, "easeInOutSine"), kf(tb + 200, DIM, "linear")];
+  const kids = [
+    S("Track", { shape: "rect", x: cx, y: cy, w: w + 16, h: 68, cornerR: 40, fill: "#171B24", fillMode: "both", sC: LINE, sW: 1.5 }, 0, { inT: 160, exit: "fade" }),
+    S("Pill", { shape: "rect", x: centers[0], y: cy, w: seg - 6, h: 56, cornerR: 34, fill: accent }, 0, { enter: "pop", inT: 480, tracks: { x: pillX, scale: pillS } }),
+  ];
+  labels.forEach((lbl, i) => kids.push(T(`Tab ${i + 1}`, lbl, centers[i], cy, 18, 700, INK, 0, { enter: "fade", inT: 300 + i * 90, tracks: { fill: lf(i) } })));
+  return kitClip("Segmented Tabs", kids, D);
+}
+
+/* ---------- 17 · RATING STARS — stars pop in sequence + gentle shimmer ---------- */
+function buildRatingStars(opts) {
+  const { accent, D, S } = uiCtx(opts);
+  const cy = 360, cx = 640, gap = 66, x0 = cx - gap * 2;
+  const kids = [];
+  for (let i = 0; i < 5; i++) {
+    const x = x0 + i * gap, t0 = 520 + i * 150;
+    kids.push(S(`Outline ${i + 1}`, { shape: "star", x, y: cy, w: 54, h: 54, fillMode: "stroke", sC: LINE, sW: 3, fill: LINE }, 0, { inT: 220, exit: "fade" }));
+    kids.push(S(`Star ${i + 1}`, { shape: "star", x, y: cy, w: 54, h: 54, fill: accent }, 0, { enter: "pop", inT: t0, hold: { type: "pulse", amp: 1.07, period: 1500 } }));
+  }
+  return kitClip("Rating Stars", kids, D);
+}
+
+/* ---------- 18 · STEP PROGRESS — line fills through nodes, checks pop ---------- */
+function buildStepProgress(opts) {
+  const { accent, D, S } = uiCtx(opts);
+  const cy = 360, gap = 150, x0 = 640 - gap, xs = [x0, x0 + gap, x0 + gap * 2];
+  const fillW = gap * 2, tReach = [760, 1440, 2120];
+  const kids = [
+    S("Rail", { shape: "rect", x: 640, y: cy, w: fillW, h: 6, cornerR: 3, fill: LINE }, 0, { inT: 180, exit: "fade" }),
+    S("Fill", { shape: "rect", x: xs[0], y: cy, w: fillW, h: 6, cornerR: 3, fill: accent }, 0, {
+      enter: "none", exit: "fade", inT: 700,
+      tracks: {
+        scale: [kf(tReach[0], 0.004, "easeInOutCubic"), kf(tReach[1], 0.5, "easeInOutCubic"), kf(tReach[2], 1, "easeInOutCubic")],
+        x: [kf(tReach[0], xs[0] + fillW * 0.004 / 2, "easeInOutCubic"), kf(tReach[1], xs[0] + fillW * 0.5 / 2, "easeInOutCubic"), kf(tReach[2], xs[0] + fillW / 2, "easeInOutCubic")],
+      },
+    }),
+  ];
+  xs.forEach((x, i) => {
+    kids.push(S(`Node ${i + 1}`, { shape: "ellipse", x, y: cy, w: 46, h: 46, fill: CARD, fillMode: "both", sC: LINE, sW: 3 }, 0, { inT: 220 + i * 40, exit: "fade" }));
+    kids.push(S(`Active ${i + 1}`, { shape: "ellipse", x, y: cy, w: 46, h: 46, fill: accent }, 0, { enter: "pop", exit: "fade", inT: tReach[i] }));
+    kids.push(S(`Check ${i + 1}`, { shape: "cross", x, y: cy, w: 16, h: 16, fill: INK, rotation: 45 }, 0, { enter: "pop", exit: "fade", inT: tReach[i] + 90 }));
+  });
+  return kitClip("Step Progress", kids, D);
+}
+
 export const UI_ELEMENTS = [
   { id: "notification-ios", name: "iOS Notification", category: "Feedback", tags: ["notification", "ios", "glass", "alert", "banner"], recipe: "back-pop drop + glassmorphism", build: buildNotification },
   { id: "toggle-switch", name: "Toggle Switch", category: "Controls", tags: ["toggle", "switch", "ios", "control", "settings"], recipe: "squash-stretch knob + color flip", build: buildToggle },
@@ -1944,6 +2046,11 @@ export const UI_ELEMENTS = [
   { id: "search-bar", name: "Search Bar", category: "Controls", tags: ["search", "bar", "input", "field", "query"], recipe: "pop + blinking cursor", build: buildSearchBar },
   { id: "slider-bright", name: "Brightness Slider", category: "Controls", tags: ["slider", "brightness", "volume", "control", "knob"], recipe: "synced fill + knob + sun", build: buildSlider },
   { id: "toast", name: "Toast", category: "Feedback", tags: ["toast", "snackbar", "confirm", "saved", "undo"], recipe: "slide up · mirrored exit", build: buildToast },
+  { id: "reaction-bar", name: "Reaction Bar", category: "Feedback", tags: ["reactions", "emoji", "like", "social", "bar"], recipe: "bubbles pop + wave bob", build: buildReactionBar },
+  { id: "like-burst", name: "Like Burst", category: "Feedback", tags: ["like", "heart", "burst", "love", "celebrate"], recipe: "heart pop + spark burst + heartbeat", build: buildLikeBurst },
+  { id: "segmented-tabs", name: "Segmented Tabs", category: "Controls", tags: ["tabs", "segmented", "switch", "pill", "control"], recipe: "sliding pill + active label", build: buildSegmentedTabs },
+  { id: "rating-stars", name: "Rating Stars", category: "Feedback", tags: ["rating", "stars", "review", "feedback", "score"], recipe: "sequential star pop + shimmer", build: buildRatingStars },
+  { id: "step-progress", name: "Step Progress", category: "Feedback", tags: ["steps", "progress", "onboarding", "wizard", "stepper"], recipe: "line fill + step checks", build: buildStepProgress },
 ];
 
 /* ============================================================

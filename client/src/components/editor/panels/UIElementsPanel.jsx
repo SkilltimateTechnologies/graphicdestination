@@ -14,7 +14,7 @@
 import { memo, useMemo } from "react";
 import { C, inputStyle, chipStyle, sectionLabel } from "../model";
 import { StageObject } from "../../StageObject";
-import { UI_ELEMENTS, UI_CATS, KIT_COLORS, frameOf } from "../../../engine/kits.js";
+import { UI_ELEMENTS, UI_CATS, frameOf } from "../../../engine/kits.js";
 import { useHoverPlay } from "../TemplateThumb";
 
 const THUMB_W = 100, THUMB_H = 74;
@@ -74,12 +74,6 @@ export default function UIElementsPanel({ uiQ, setUiQ, uiCat, setUiCat, insertKi
             style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, background: C.bg1, border: `1px solid ${C.line}`, borderRadius: 8, padding: 8, cursor: "pointer" }}>
             <KitThumb kit={k} />
             <span style={{ fontSize: 11, fontWeight: 700, color: C.txt, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{k.name}</span>
-            <span style={{ display: "flex", gap: 4 }} onClick={(e) => e.stopPropagation()}>
-              {KIT_COLORS.map((col) => (
-                <span key={col} title={`Insert with ${col} accent`} onClick={() => insertKitClip(k, { accent: col })}
-                  style={{ width: 11, height: 11, borderRadius: "50%", cursor: "pointer", background: col, border: "1.5px solid rgba(255,255,255,.22)", boxSizing: "border-box" }} />
-              ))}
-            </span>
           </button>
         ))}
         {!list.length && <div style={{ gridColumn: "1 / -1", color: C.faint, fontSize: 11, textAlign: "center", padding: "14px 0" }}>No UI elements match.</div>}
