@@ -18,6 +18,25 @@
  */
 
 import { packRows, layerSpan } from "./src/components/editor/model.js";
+import fs from "node:fs";
+
+/* the R8w1 timeline helpers are pure functions exported from Timeline.jsx —
+   extract them from source (node can't import JSX) and exercise them for real */
+const TL_SRC = fs.readFileSync(new URL("./src/components/editor/Timeline.jsx", import.meta.url), "utf8");
+function grabFn(name) {
+  const at = TL_SRC.indexOf(`export function ${name}(`);
+  if (at < 0) throw new Error(`Timeline.jsx is missing export function ${name}`);
+  let depth = 0;
+  for (let j = at; j < TL_SRC.length; j++) {
+    const ch = TL_SRC[j];
+    if (ch === "{") depth++;
+    else if (ch === "}") { depth--; if (!depth) return TL_SRC.slice(at, j + 1).replace(/^export /, ""); }
+  }
+  throw new Error(`unterminated function ${name}`);
+}
+const { rowJumpTarget, rowGaps, rippleShift, gapKey } = new Function(
+  `${grabFn("rowJumpTarget")}\n${grabFn("rowGaps")}\n${grabFn("gapKey")}\n${grabFn("rippleShift")}\nreturn { rowJumpTarget, rowGaps, rippleShift, gapKey };`
+)();
 
 let passed = 0, failed = 0;
 function check(name, cond, extra = "") {
@@ -70,6 +89,47 @@ check("demo root packs Scene 1 + Scene 2 together", eq(
     { id: "s2", ...Object.fromEntries([["start", 2750], ["end", 6000]]) },
   ].map((o) => S(o.id, o.start, o.end))),
   [["mex"], ["s1", "s2"]]));
+
+/* ---------- R8w1: row-jump deadzone ---------- */
+console.log("rowJumpTarget — vertical deadzone for bar drags (30px rows)");
+const ROW = 30;
+check("pointer mid-row stays put", rowJumpTarget(45, ROW, 1) === 1);
+check("1px past the lower edge stays put (deadzone)", rowJumpTarget(61, ROW, 1) === 1);
+check("17px past the lower edge still stays (< 60% AND < 20px)", rowJumpTarget(77, ROW, 1) === 1);
+check("18px into the next row = 60% → row changes", rowJumpTarget(78, ROW, 1) === 2);
+check("20px past the edge trips the px threshold", rowJumpTarget(80, ROW, 1) === 2);
+check("deep into a far row jumps straight there", rowJumpTarget(105, ROW, 1) === 3);
+check("1px past the upper edge stays put (deadzone)", rowJumpTarget(29, ROW, 1) === 1);
+check("into the top 40% of the row above = 60% into it → row changes", rowJumpTarget(11, ROW, 1) === 0);
+check("20px above the edge trips the px threshold", rowJumpTarget(10, ROW, 1) === 0);
+check("far above jumps straight there (caller clamps to row 0)", rowJumpTarget(-5, ROW, 2) === -1);
+check("horizontal-only drag (y fixed mid-row) never changes row", [10, 100, 500, 1000].every(() => rowJumpTarget(45, ROW, 1) === 1));
+
+/* ---------- R8w1: empty-gap detection ---------- */
+console.log("rowGaps — gaps between two clips of one row");
+check("no members → no gaps", eq(rowGaps([]), []));
+check("one member → no gaps (gaps live BETWEEN clips)", eq(rowGaps([S("a", 0, 100)]), []));
+check("touching spans have no gap", eq(rowGaps([S("a", 0, 100), S("b", 100, 300)]), []));
+check("one real gap with both neighbour ids + bounds", eq(rowGaps([S("a", 0, 100), S("b", 250, 300)]), [{ leftId: "a", rightId: "b", start: 100, end: 250 }]));
+check("two gaps in a three-clip row", eq(rowGaps([S("a", 0, 100), S("b", 150, 200), S("c", 400, 500)]).map((g) => [g.start, g.end]), [[100, 150], [200, 400]]));
+check("input order does not matter", eq(rowGaps([S("b", 250, 300), S("a", 0, 100)]), [{ leftId: "a", rightId: "b", start: 100, end: 250 }]));
+check("1ms gap is a gap (minGap default)", rowGaps([S("a", 0, 100), S("b", 101, 200)]).length === 1);
+check("contained span (drag-pin transient) produces no false gap", eq(rowGaps([S("a", 0, 200), S("b", 100, 150), S("c", 200, 300)]), []));
+check("max-end sweep: gap is measured from the furthest end, not the previous span", eq(rowGaps([S("a", 0, 200), S("b", 100, 150), S("c", 250, 300)]), [{ leftId: "a", rightId: "c", start: 200, end: 250 }]));
+check("gapKey identifies a gap by its neighbours", gapKey({ leftId: "a", rightId: "b" }) === "a|b");
+
+/* ---------- R8w1: ripple-close math ---------- */
+console.log("rippleShift — closing a gap shifts later clips left");
+{
+  const spans = [S("a", 0, 100), S("b", 250, 400), S("c", 400, 600)];
+  const gap = rowGaps(spans)[0]; /* 100..250 */
+  const shifts = rippleShift(spans, gap);
+  check("shift = -(gap width)", shifts.every((s) => s.dt === -150));
+  check("only the clips at/after the gap shift", eq(shifts.map((s) => s.id), ["b", "c"]));
+  check("applying it closes the gap exactly (b.start lands on a.end)", spans.find((s) => s.id === "b").start - 150 === 100);
+  check("left clip untouched — other rows never enter the list", !shifts.some((s) => s.id === "a"));
+  check("zero-width gap → no shifts", eq(rippleShift(spans, { leftId: "a", rightId: "a", start: 50, end: 50 }), []));
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (!failed) console.log("All timeline checks pass.");

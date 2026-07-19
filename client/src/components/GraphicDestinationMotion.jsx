@@ -10,7 +10,7 @@ import { cameraAt, cameraTransform, cameraFromJson, cameraToJson, clampZoom } fr
 import { normHi } from "../engine/maps.js";
 import { FONT_IMPORT } from "../engine/fx.js";
 import { kitRenderSpec } from "../engine/kits.js";
-import { C, KF_PROPS, STAGE_PRESETS, kfAt, layerOut, objSize, reframeClipToContent } from "./editor/model";
+import { C, KF_PROPS, STAGE_PRESETS, kfAt, layerOut, layerSpan, packRows, objSize, reframeClipToContent } from "./editor/model";
 import { computeSnap, SNAP_THRESHOLD } from "./editor/snapping";
 import TopBar from "./editor/TopBar";
 import IconRail from "./editor/IconRail";
@@ -28,8 +28,8 @@ import BackgroundsPanel from "./editor/panels/BackgroundsPanel";
 import { BACKDROP_VARIANTS, backdropDefaults, themeOf, variantOf } from "../engine/backdrops.js";
 import StageView from "./editor/StageView";
 import Inspector from "./editor/Inspector";
-import Timeline from "./editor/Timeline";
-import { ContextMenu, BrandModal, IOModal } from "./editor/modals";
+import Timeline, { rowJumpTarget, TL_ROW_H, rippleShift } from "./editor/Timeline";
+import { ContextMenu, BrandModal } from "./editor/modals";
 
 /* Re-export the pure engine API so the export pipeline
    (export/frameRenderer.js, export/exportWebm.js, export/validateFrameMath.mjs)
@@ -59,10 +59,16 @@ const TL_H_DEFAULT = 240;
 const TL_H_MIN = 160;
 const clampTlH = (h) => Math.max(TL_H_MIN, Math.min(window.innerHeight * 0.45, h));
 const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5];
-/* auto-keyframe mode (top-bar ◆ toggle, persisted): canvas edits to props that
-   already have a track write/replace a ◆ at the playhead instead of patching base */
-const AUTOKEY_KEY = "gd:autokey";
-const readAutokey = () => { try { const v = localStorage.getItem(AUTOKEY_KEY); return v === null ? true : v === "1"; } catch { return true; } };
+/* auto-keyframe is ALWAYS-ON (R8w1 — the user found the toggle confusing and
+   asked for it to be removed; a later wave depends on canvas-transform edits
+   keyframing unconditionally). The constant below keeps the edit sites reading
+   exactly as before: edits to props that already have a track write/replace a
+   ◆ at the playhead instead of patching base. */
+const AUTOKEY_ALWAYS_ON = true;
+/* canvas alignment grid (timeline-bar toggle, persisted): a subtle 40px
+   lattice overlay on the stage — pure visual aid, never exported */
+const GRID_KEY = "gd:grid";
+const readGrid = () => { try { return localStorage.getItem(GRID_KEY) === "1"; } catch { return false; } };
 /* smart snapping (stage zoom-cluster magnet toggle, persisted): body-drags and
    resize-grip drags snap to sibling edges/centers + canvas center/edges with
    alignment guides; Alt-drag inverts the toggle for the gesture */
@@ -229,7 +235,7 @@ function audioErrorText(err) {
 /* ============================================================
    APP
    ============================================================ */
-export default function GraphicDestinationMotion({ initialProject, onChange } = {}) {
+export default function GraphicDestinationMotion({ initialProject, onChange, saveState, onSaveNow } = {}) {
   const [objects, setObjects] = useState(demoProject);
   const [stage, setStage] = useState({ w: 1280, h: 720 });
   const [compDur, setCompDur] = useState(6000);
@@ -243,7 +249,9 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [loop, setLoop] = useState(true);
-  const [autokey, setAutokey] = useState(readAutokey);
+  /* autokey: ALWAYS-ON (R8w1) — see AUTOKEY_ALWAYS_ON above; the top-bar and
+     timeline toggles were removed at the user's request. */
+  const autokey = AUTOKEY_ALWAYS_ON;
   const [stageBg, setStageBg] = useState("#101218");
   const [stageScale, setStageScale] = useState(0.6);
   const [zoomMode, setZoomMode] = useState("fit"); /* "fit" (auto) or a manual factor from ZOOM_STEPS */
@@ -292,18 +300,19 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   const [clipCount, setClipCount] = useState(0);
   const [menu, setMenu] = useState(null); // context menu {x,y,kind,...}
   const [stretchClips, setStretchClips] = useState(true);
-  const [ioOpen, setIoOpen] = useState(false);
-  const [ioCopied, setIoCopied] = useState(false);
-  const [importText, setImportText] = useState("");
-  const [importErr, setImportErr] = useState("");
-  const [name, setName] = useState("Untitled project");
+  const [name] = useState("Untitled project"); /* title lives in the editor shell header (R8w1) — still feeds the export dialog */
   const [exportOpen, setExportOpen] = useState(false);
+  const [showGrid, setShowGrid] = useState(readGrid); /* canvas alignment grid overlay (StageView) */
+  const [selGap, setSelGap] = useState(null); /* selected empty-gap pill: { leftId, rightId, start, end } */
+  const [barDrag, setBarDrag] = useState(null); /* live bar body-drag row pin: { id, row } — deadzone keeps horizontal drags in-row */
 
   const timeRef = useRef(0);
   timeRef.current = time;
   const stageWrapRef = useRef(null);
   const stageScrollRef = useRef(null);
   const rulerRef = useRef(null);
+  const rowsRef = useRef(null); /* packed-lanes container — the row-jump deadzone maps pointer y through its rect */
+  const barDragRef = useRef(null); /* live drag pin { id, row, rowCount } — read inside the pointermove closure */
   const fileRef = useRef(null);
   const assetFileRef = useRef(null);
   const audioFileRef = useRef(null);
@@ -404,10 +413,10 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     patchProps(id, { [prop]: v });
   }, [ctxLayers, autokey, setKeyframe, patchProps, patchObject]);
 
-  /* auto-keyframe toggle (top bar ◆ + timeline Animate share it), persisted */
-  const setAutokeyPersist = useCallback((v) => {
-    setAutokey(v);
-    try { localStorage.setItem(AUTOKEY_KEY, v ? "1" : "0"); } catch { /* storage unavailable — the toggle just won't persist */ }
+  /* canvas grid toggle (timeline bar), persisted */
+  const setShowGridPersist = useCallback((v) => {
+    setShowGrid(v);
+    try { localStorage.setItem(GRID_KEY, v ? "1" : "0"); } catch { /* storage unavailable — the toggle just won't persist */ }
   }, []);
   /* snapping toggle (stage zoom-cluster magnet), persisted */
   const setSnapOnPersist = useCallback((v) => {
@@ -575,19 +584,25 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
         if (menu) setMenu(null);
         else if (selKf) setSelKf(null);
         else if (selCamKf) setSelCamKf(null);
+        else if (selGap) setSelGap(null);
         else if (selIds.length) setSelIds([]);
         else if (audioSel) setAudioSel(false);
         else if (cameraSel) setCameraSel(false);
         else if (path.length) exitToDepth(path.length - 1);
       }
       if (e.key === "Delete" || e.key === "Backspace") {
-        if (selKf) { removeKeyframe(selKf.objId, selKf.prop, selKf.t); setSelKf(null); }
+        if (selGap) closeGap();
+        else if (selKf) { removeKeyframe(selKf.objId, selKf.prop, selKf.t); setSelKf(null); }
         else if (selIds.length) removeSelected();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
+  /* gap selection is exclusive: picking any layer (or diving into a clip)
+     drops it; closeGap revalidates against the live packing anyway */
+  useEffect(() => { if (selIds.length) setSelGap(null); }, [selIds]);
+  useEffect(() => { setSelGap(null); setBarDrag(null); barDragRef.current = null; }, [path]);
   useEffect(() => {
     const close = () => setMenu(null);
     window.addEventListener("pointerdown", close);
@@ -713,6 +728,32 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   });
   const toggleLock = (id) => patchObject(id, (o) => ({ ...o, locked: !o.locked }));
   const toggleHide = (id) => patchObject(id, (o) => ({ ...o, hidden: !o.hidden }));
+
+  /* ---------- empty-gap pills (R8w1) ----------
+     A gap pill selects the empty stretch between two clips of ONE packed
+     row; closing it ripples that row's later clips left by the gap width
+     (same shiftLayerTimes path a bar move uses — keyframes travel). Other
+     rows and the playhead are untouched; locked layers never move. */
+  const onGapDown = (e, g) => {
+    if (e.button === 2) return;
+    e.stopPropagation();
+    setSelGap(g);
+    setSelIds([]); setSelKf(null); setSelCamKf(null); setAudioSel(false); setCameraSel(false);
+  };
+  const closeGap = useCallback(() => {
+    const g = selGap;
+    if (!g) return;
+    const spans = ctxLayers.map((o) => { const [start, end] = layerSpan(o, ctxDur); return { id: o.id, start, end }; });
+    const rowIds = packRows(spans).find((ids) => ids.includes(g.leftId) && ids.includes(g.rightId));
+    if (rowIds) {
+      const shifts = rippleShift(rowIds.map((id) => spans.find((s) => s.id === id)), g);
+      if (shifts.length) {
+        const dtById = new Map(shifts.map((s) => [s.id, s.dt]));
+        setLayers((ls) => ls.map((o) => (dtById.has(o.id) && !o.locked ? shiftLayerTimes(o, dtById.get(o.id), ctxDur) : o)));
+      }
+    }
+    setSelGap(null);
+  }, [selGap, ctxLayers, ctxDur, setLayers]);
 
   const groupSelection = () => {
     if (!selIds.length) return;
@@ -937,20 +978,11 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
      unset (audio: no track attached · camera: no camera keyframes), so old
      projects keep byte-identical JSON. Both restore through sanitizers on load. */
   const projectJson = () => JSON.stringify({ app: "graphic-destination-motion", v: 5, stage: { ...stage, dur: compDur, bg: stageBg }, brands, brandId, objects, ...(audioToJson(audioTrack) ? { audio: audioToJson(audioTrack) } : {}), ...(cameraToJson(camera) ? { camera: cameraToJson(camera) } : {}) }, null, 2);
-  const copyProject = async () => {
-    const txt = projectJson();
-    try { await navigator.clipboard.writeText(txt); setIoCopied(true); }
-    catch {
-      const ta = document.createElement("textarea");
-      ta.value = txt; document.body.appendChild(ta); ta.select();
-      try { document.execCommand("copy"); setIoCopied(true); } catch { setIoCopied(false); }
-      document.body.removeChild(ta);
-    }
-    setTimeout(() => setIoCopied(false), 1800);
-  };
+  /* restore a serialized project (cloud load on mount). The top-bar
+     Save/Load modal was removed in R8w1 — this is now the only import path. */
   const importProject = (raw) => {
     try {
-      const data = JSON.parse(typeof raw === "string" ? raw : importText);
+      const data = JSON.parse(raw);
       if (!Array.isArray(data.objects)) throw new Error("no objects array");
       const walk = (l) => { const m = /^ob(\d+)$/.exec(l.id || ""); if (m) _uid = Math.max(_uid, parseInt(m[1]) + 1); (l.children || []).forEach(walk); };
       data.objects.forEach(walk);
@@ -961,14 +993,14 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
       setAudioSel(false);
       setCamera(cameraFromJson(data.camera)); /* restore scene camera (null when the field is absent) */
       setCameraSel(false); setSelCamKf(null);
-      setPath([]); setSelIds([]); setSelKf(null); setTime(0); setImportErr(""); setIoOpen(false); setImportText("");
-    } catch (err) { setImportErr("Couldn't parse that JSON: " + err.message); }
+      setPath([]); setSelIds([]); setSelKf(null); setTime(0);
+    } catch { /* malformed project JSON — keep the current project */ }
   };
 
   /* ---------- cloud project seam (dashboard load/save) ----------
-     initialProject: restore once on mount through the SAME code path as the
-     Save/Load "Load project" button above (importProject). onChange: single
-     central notification fired with projectJson() after any project mutation. */
+     initialProject: restore once on mount through importProject above.
+     onChange: single central notification fired with projectJson() after any
+     project mutation (the shell autosaves + the timeline save control). */
   useEffect(() => {
     if (initialProject) importProject(JSON.stringify(initialProject));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1393,6 +1425,19 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
     if (obj.locked) return;
     const r = rulerRef.current.getBoundingClientRect();
     const sx = e.clientX;
+    /* ROW-JUMP DEADZONE (move drags only): pin the bar to its current packed
+       row for the gesture. The pin changes only when the pointer crosses a
+       row boundary with intent (rowJumpTarget: ≥60% into another row or ≥20px
+       past the edge) — a purely horizontal drag can no longer hop lanes just
+       because the bar re-packs over a neighbour. Display-only: the pin is
+       released on pointer-up and normal packing resumes. */
+    if (mode === "move") {
+      const startSpans = ctxLayers.map((o) => { const [s0, s1] = layerSpan(o, ctxDur); return { id: o.id, start: s0, end: s1 }; });
+      const startRows = packRows(startSpans);
+      const startRow = Math.max(0, startRows.findIndex((ids) => ids.includes(obj.id)));
+      barDragRef.current = { id: obj.id, row: startRow, rowCount: startRows.length };
+      setBarDrag({ id: obj.id, row: startRow });
+    }
     const isClip = obj.type === "clip";
     const startIn = isClip ? obj.props.start : obj.props.inT || 0;
     const startOut = isClip ? obj.props.start + obj.props.dur / (obj.props.speed || 1) : layerOut(obj, ctxDur);
@@ -1423,6 +1468,14 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
       return n;
     };
     const move = (ev) => {
+      /* deadzone tracking runs on EVERY move (even below the 10ms time
+         threshold) so vertical intent is never swallowed by a horizontal drag */
+      if (mode === "move" && barDragRef.current && rowsRef.current) {
+        const rr = rowsRef.current.getBoundingClientRect();
+        const b = barDragRef.current;
+        const target = Math.max(0, Math.min(b.rowCount, rowJumpTarget(ev.clientY - rr.top, TL_ROW_H, b.row)));
+        if (target !== b.row) { b.row = target; setBarDrag({ id: b.id, row: target }); }
+      }
       const dt = Math.round(((ev.clientX - sx) / r.width) * ctxDur / 10) * 10;
       if (mode === "move") {
         if (Math.abs(dt) < 10) return;
@@ -1440,7 +1493,12 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
         patchObject(obj.id, () => remap(startIn, no));
       }
     };
-    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      barDragRef.current = null;
+      setBarDrag(null); /* release the row pin — natural packing resumes */
+    };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
@@ -1564,13 +1622,22 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
   const audioAssets = (assets || []).filter((a) => a.kind === "audio");
   const fmtBytes = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
+  /* save control relocated into the docked timeline bar (R8w1): the editor
+     shell (Editor.jsx) passes saveState + onSaveNow; the standalone/demo
+     route passes neither and the button stays hidden. */
+  const saveCtl = saveState && onSaveNow ? { state: saveState, onSave: onSaveNow } : null;
   const stageCX = stage.w / 2, stageCY = stage.h / 2;
   /* stage size preset picker (top bar + inspector share it): apply by "WxH" value */
   const applyStagePreset = (v) => { const p = STAGE_PRESETS.find((s) => `${s.w}x${s.h}` === v); if (p) setStage({ w: p.w, h: p.h }); };
   const stageIsPreset = STAGE_PRESETS.some((s) => s.w === stage.w && s.h === stage.h);
   const flowText = !!(sel && sel.type === "text" && sel.props.path && (sel.props.pathMode || "flow") === "flow");
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: C.bg0, color: C.txt, fontFamily: "'Inter', system-ui, sans-serif", fontSize: 13, userSelect: "none", overflow: "hidden" }}>
+    /* height:100% (not 100vh) — the editor shell renders its own 44px header
+       above this component; 100vh here overflowed the shell by 44px, pushing
+       the docked timeline below the fold and making the page scroll (which is
+       what hid the header). 100% keeps header, stage and timeline inside the
+       viewport at all times. */
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg0, color: C.txt, fontFamily: "'Inter', system-ui, sans-serif", fontSize: 13, userSelect: "none", overflow: "hidden" }}>
       <style>{`
         @import url('${FONT_IMPORT}');
         *::-webkit-scrollbar{width:8px;height:8px} *::-webkit-scrollbar-thumb{background:${C.line};border-radius:4px}
@@ -1603,10 +1670,9 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
       <input ref={audioFileRef} type="file" accept={AUDIO_ACCEPT_ATTR} style={{ display: "none" }} onChange={onPickAudioAsset} />
 
       {/* ============ TOP BAR ============ */}
-      <TopBar name={name} setName={setName} exitToDepth={exitToDepth} inClip={inClip} ctx={ctx}
+      <TopBar exitToDepth={exitToDepth} inClip={inClip} ctx={ctx}
         stage={stage} applyStagePreset={applyStagePreset} stageIsPreset={stageIsPreset} brand={brand}
-        autokey={autokey} setAutokey={setAutokeyPersist}
-        setBrandOpen={setBrandOpen} setIoOpen={setIoOpen} setImportErr={setImportErr} setExportOpen={setExportOpen} />
+        setBrandOpen={setBrandOpen} setExportOpen={setExportOpen} />
 
       {/* ============ MAIN ============ */}
       <div style={{ display: "flex", flex: 1, minHeight: 0, position: "relative" }}>
@@ -1662,6 +1728,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
           setSelIds={setSelIds} setSelKf={setSelKf} setAudioSel={setAudioSel} setShapesOpen={setShapesOpen} setMapsOpen={setMapsOpen} setImagesOpen={setImagesOpen} setAudioOpen={setAudioOpen}
           camera={camera} cameraLaneSel={cameraLaneSel} onStageEmptyDown={onStageEmptyDown}
           snapGuides={snapGuides} snapOn={snapOn} onToggleSnap={() => setSnapOnPersist(!snapOn)}
+          showGrid={showGrid}
           stepZoom={stepZoom} cycleZoom={cycleZoom} setZoom={setZoom} />
 
         {/* ---- inspector ---- */}
@@ -1681,12 +1748,14 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
       {/* ============ TIMELINE ============ */}
       <Timeline tlH={tlH} tlDragging={tlDragging} onTlHandleDown={onTlHandleDown} resetTlH={resetTlH}
         setPlaying={setPlaying} setTime={setTime} playing={playing} time={time} fmt={fmt} ctxDur={ctxDur} setCtxDurMs={setCtxDurMs}
-        stretchClips={stretchClips} setStretchClips={setStretchClips} loop={loop} setLoop={setLoop} autokey={autokey} setAutokey={setAutokeyPersist}
+        stretchClips={stretchClips} setStretchClips={setStretchClips} loop={loop} setLoop={setLoop}
         selMany={selMany} groupSelection={groupSelection} ctxLayers={ctxLayers} selIds={selIds} setSelIds={setSelIds} setSelKf={setSelKf}
         enterClip={enterClip} exitToDepth={exitToDepth} crumbs={ctx.names} onLayerContext={onLayerContext} onLaneContext={onLaneContext} toggleHide={toggleHide} toggleLock={toggleLock}
         reorder={reorder} duplicateSelected={duplicateSelected} removeSelected={removeSelected}
         inClip={inClip} onAudioLaneDown={onAudioLaneDown} audioTrack={audioTrack} audioLaneSel={audioLaneSel} audioBarMs={audioBarMs} onAudioBarDown={onAudioBarDown}
         camera={camera} cameraLaneSel={cameraLaneSel} onCameraLaneDown={onCameraLaneDown} onCameraKfDown={onCameraKfDown} selCamKf={selCamKf}
+        rowsRef={rowsRef} barDrag={barDrag} selGap={selGap} onGapDown={onGapDown} onCloseGap={closeGap}
+        saveCtl={saveCtl} showGrid={showGrid} onToggleGrid={() => setShowGridPersist(!showGrid)}
         rulerRef={rulerRef} onRulerDown={onRulerDown} onBarDown={onBarDown} onKfDown={onKfDown} selKf={selKf} onWorldKfDown={onWorldKfDown} />
 
       {/* ============ CONTEXT MENU ============ */}
@@ -1694,9 +1763,6 @@ export default function GraphicDestinationMotion({ initialProject, onChange } = 
 
       {/* ============ BRAND MODAL ============ */}
       {brandOpen && <BrandModal setBrandOpen={setBrandOpen} brands={brands} brandId={brandId} setBrandId={setBrandId} setBrands={setBrands} brand={brand} />}
-
-      {/* ============ SAVE / LOAD MODAL ============ */}
-      {ioOpen && <IOModal setIoOpen={setIoOpen} copyProject={copyProject} ioCopied={ioCopied} importText={importText} setImportText={setImportText} importErr={importErr} importProject={importProject} />}
 
       {/* ============ EXPORT DIALOG ============ */}
       {exportOpen && (

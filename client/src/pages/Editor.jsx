@@ -3,7 +3,6 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../AuthContext";
 import { api } from "../api";
 import GraphicDestinationMotion from "../components/GraphicDestinationMotion";
-import ShareDialog from "../components/ShareDialog";
 
 export default function Editor() {
   const { id } = useParams();
@@ -13,8 +12,6 @@ export default function Editor() {
   const [proj, setProj] = useState(null); // { id, name, data, shareToken } once loaded
   const [loadErr, setLoadErr] = useState("");
   const [saveState, setSaveState] = useState("saved"); // "saved" | "dirty" | "saving" | "error"
-  const [shareOpen, setShareOpen] = useState(false);
-  const [shared, setShared] = useState(false); // whether a public link is live
   const lastSavedRef = useRef(null);   // engine-serialized JSON last known to be on the server
   const skipFirstRef = useRef(false);  // swallow the engine's first onChange (echo of the loaded project)
   const timerRef = useRef(null);
@@ -27,12 +24,11 @@ export default function Editor() {
     setProj(null);
     setLoadErr("");
     setSaveState("saved");
-    setShared(false);
     lastSavedRef.current = null;
     pendingRef.current = null;
     skipFirstRef.current = true;
     api.getProject(id)
-      .then((p) => { if (alive) { setProj(p); setShared(!!p.shareToken); } })
+      .then((p) => { if (alive) setProj(p); })
       .catch((err) => { if (alive) setLoadErr(err.status === 404 ? "Project not found." : err.message || "Couldn't load that project."); });
     return () => { alive = false; };
   }, [id]);
@@ -94,31 +90,20 @@ export default function Editor() {
     navigate("/login");
   };
 
-  /* after any dialog action, re-read the project so the Shared pill matches
-     the persisted state (the dialog itself stays authoritative while open) */
-  const closeShare = useCallback(() => {
-    setShareOpen(false);
-    if (id) api.getProject(id).then((p) => setShared(!!p.shareToken)).catch(() => {});
-  }, [id]);
-
-  const status =
-    saveState === "saving" ? { text: "Saving…", color: "#939BAD" }
-    : saveState === "dirty" ? { text: "Unsaved changes", color: "#F5A524" }
-    : saveState === "error" ? { text: "Couldn't save — will retry on next change", color: "#E5636A" }
-    : { text: "Saved", color: "#3FB68B" };
-
+  /* R8w1 shell layout: the root is a fixed 100vh column with overflow hidden,
+     so NOTHING on this page scrolls — the header can never be scrolled away
+     (and it is sticky as a belt-and-braces fallback), and the editor below
+     docks its timeline at the bottom of the viewport. The top bar was purged
+     per the user request: no Share button (collaboration later), no Save
+     button + "saved" text here (the save control + save-state indicator moved
+     into the timeline transport bar via saveState/onSaveNow below). */
   return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#0A0C10" }}>
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#0A0C10", overflow: "hidden" }}>
       <style>{`
         .gd-signout { transition: background 120ms ease-out, border-color 120ms ease-out; }
         .gd-signout:hover { background: #1E2330; }
         .gd-back { transition: color 120ms ease-out; }
         .gd-back:hover { color: #E9ECF3; }
-        .gd-save { transition: background 120ms ease-out, color 120ms ease-out, border-color 120ms ease-out, opacity 120ms ease-out; }
-        .gd-save-active:hover:not(:disabled) { background: #B87A18 !important; }
-        .gd-save:disabled { cursor: default; }
-        .gd-sharedpill { transition: background 120ms ease-out, border-color 120ms ease-out; }
-        .gd-sharedpill:hover { background: rgba(245,165,36,0.2); border-color: #F5A524; }
       `}</style>
       <div style={barStyle}>
         {/* left — back + brand mark */}
@@ -130,42 +115,13 @@ export default function Editor() {
           </span>
           <span style={{ color: "#E9ECF3", fontWeight: 800, fontSize: 13, letterSpacing: "-0.01em", whiteSpace: "nowrap" }}>Zwoosh</span>
         </div>
-        {/* center — project name + save status + shared pill */}
+        {/* center — project name (the single place the title is shown) */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, minWidth: 0, fontSize: 12.5 }}>
           {id && proj && <span style={{ color: "#E9ECF3", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 320 }}>{proj.name}</span>}
-          {id && (
-            <span style={{ display: "flex", alignItems: "center", gap: 6, color: status.color, fontSize: 11.5, whiteSpace: "nowrap" }}>
-              <span style={{ width: 6, height: 6, borderRadius: "50%", background: status.color, flexShrink: 0 }} />
-              {status.text}
-            </span>
-          )}
-          {id && shared && (
-            <button onClick={() => setShareOpen(true)} title="A public link is live — click to manage" className="gd-sharedpill" style={sharedPill}>
-              <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M5 7 7 5M4.2 6.6 2.9 7.9a1.9 1.9 0 0 1-2.7-2.7l2.6-2.6a1.9 1.9 0 0 1 2.7 0M7.8 5.4l1.3-1.3a1.9 1.9 0 0 1 2.7 2.7L9.2 9.4a1.9 1.9 0 0 1-2.7 0" />
-              </svg>
-              Shared
-            </button>
-          )}
         </div>
-        {/* right — share + save + user + sign out */}
+        {/* right — user + sign out (Share/Save removed: collaboration later,
+            saving lives in the timeline bar) */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 12 }}>
-          {id && (
-            <button onClick={() => setShareOpen(true)} className="gd-signout" style={signoutBtn}>
-              Share
-            </button>
-          )}
-          {id && (
-            <button
-              onClick={saveNow}
-              disabled={saveState !== "dirty" && saveState !== "error"}
-              className={saveState === "dirty" ? "gd-save gd-save-active" : "gd-save"}
-              style={{ ...saveBtn, ...saveBtnState[saveState] }}
-              title={saveState === "dirty" ? "Save your changes" : saveState === "saved" ? "Everything is saved" : saveState === "error" ? "Save failed — click to retry" : "Saving"}
-            >
-              {saveState === "saving" ? "Saving…" : saveState === "dirty" ? "Save" : saveState === "error" ? "Retry save" : "Saved ✓"}
-            </button>
-          )}
           <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#939BAD", fontSize: 12.5 }}>
             <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#3FB68B", boxShadow: "0 0 6px rgba(63,182,139,0.7)", flexShrink: 0 }} />
             <span style={{ color: "#E9ECF3", fontWeight: 600 }}>{user?.username}</span>
@@ -173,7 +129,6 @@ export default function Editor() {
           <button onClick={doLogout} className="gd-signout" style={signoutBtn}>Sign out</button>
         </div>
       </div>
-      {id && proj && <ShareDialog open={shareOpen} onClose={closeShare} projectId={id} projectName={proj.name} />}
       <div style={{ flex: 1, minHeight: 0 }}>
         {!id ? (
           <GraphicDestinationMotion />
@@ -187,37 +142,22 @@ export default function Editor() {
             Loading project…
           </div>
         ) : (
-          <GraphicDestinationMotion key={proj.id} initialProject={proj.data} onChange={onEngineChange} />
+          <GraphicDestinationMotion key={proj.id} initialProject={proj.data} onChange={onEngineChange} saveState={saveState} onSaveNow={saveNow} />
         )}
       </div>
     </div>
   );
 }
 
+/* sticky + zIndex: even if a future layout change re-introduces page scroll,
+   the header stays pinned to the top of the viewport */
 const barStyle = {
   height: 44, flexShrink: 0, display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center",
   padding: "0 14px", background: "#10131A", borderBottom: "1px solid #232936",
   fontFamily: "'Inter', system-ui, sans-serif",
+  position: "sticky", top: 0, zIndex: 50,
 };
 const signoutBtn = {
   background: "transparent", border: "1px solid #2E3546", color: "#E9ECF3", borderRadius: 6,
   padding: "5px 13px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
-};
-const saveBtn = {
-  borderRadius: 6, border: "none",
-  padding: "5px 16px", fontSize: 12, fontWeight: 700, fontFamily: "inherit",
-};
-/* per-state look: dirty = accent call-to-action; saving = muted; saved = calm
-   success tint; error = danger (clickable retry) */
-const saveBtnState = {
-  dirty: { background: "#F5A524", color: "#1A1405", cursor: "pointer" },
-  saving: { background: "#2A2415", color: "#939BAD" },
-  saved: { background: "rgba(63,182,139,0.12)", color: "#3FB68B", border: "1px solid rgba(63,182,139,0.35)" },
-  error: { background: "#E5636A", color: "#FFFFFF", cursor: "pointer" },
-};
-const sharedPill = {
-  display: "flex", alignItems: "center", gap: 5, background: "rgba(245,165,36,0.12)",
-  border: "1px solid rgba(245,165,36,0.45)", color: "#F5A524", borderRadius: 999,
-  padding: "3px 10px", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.04em",
-  cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0,
 };

@@ -4,27 +4,151 @@
    Rows are AUTO-PACKED: objects whose time spans don't overlap share a
    lane (packRows in ./model) — only the vertical assignment is computed;
    bars, diamonds and every interaction render exactly as before.
+   R8w1: row-jump deadzone (a horizontal drag keeps the bar's row unless
+   the pointer crosses a boundary with intent), dashed empty-gap pills
+   (click selects, Delete / Close-gap ripples the row left), explicit
+   eye/lock icon toggles, an enable-grid toggle and the relocated save
+   control in the transport bar.
    ============================================================ */
 import { Fragment } from "react";
 import { C, PROP_LABEL, KF_PROPS, TYPE_BAR, layerSpan, packRows, transportBtn, chipStyle, inputStyle } from "./model";
-import { NoteIcon, MiniBtn, CamIcon, LockIcon } from "./ui";
+import { NoteIcon, MiniBtn, CamIcon } from "./ui";
 import { EASE_LABEL } from "../../engine/easing.js";
 import { colorAt } from "../../engine/keyframes.js";
 import { normHi, worldZoomWindow, WORLD } from "../../engine/maps.js";
 import { CAM_PROPS, cameraKeyCount } from "../../engine/camera.js";
 
+/* ============================================================
+   PURE TIMELINE HELPERS — no JSX, no imports, self-contained so the
+   node check scripts (check-timeline.mjs / check-r8w1.mjs) can extract
+   and exercise them directly. Keep them free of module-scope refs.
+   ============================================================ */
+/* lane height (px) — every packed row lane + its label render at this */
+export const TL_ROW_H = 30;
+
+/* ROW-JUMP DEADZONE — decide which row a bar-drag belongs to from the
+   pointer's y inside the rows area. Rows are auto-packed, so a purely
+   HORIZONTAL drag that starts overlapping a neighbour would re-pack the
+   bar into a different lane mid-gesture (the "row jump"). The deadzone
+   keeps the bar in `curRow` until the pointer crosses a row boundary
+   with clear intent: ≥ `frac` (60%) INTO the target row, or ≥ `px`
+   (20px) beyond the current row's edge — whichever trips first. */
+export function rowJumpTarget(y, rowH, curRow, px = 20, frac = 0.6) {
+  const naive = Math.floor(y / rowH);
+  if (naive === curRow) return curRow;
+  const into = y - naive * rowH; /* px below the naive row's top edge */
+  if (naive < curRow) {
+    const beyond = curRow * rowH - y; /* px past the shared boundary, upward */
+    return into <= rowH * (1 - frac) || beyond >= px ? naive : curRow;
+  }
+  const beyond = y - (curRow + 1) * rowH; /* px past the shared boundary, downward */
+  return into >= rowH * frac || beyond >= px ? naive : curRow;
+}
+
+/* EMPTY GAPS — the idle stretches BETWEEN two clips of one packed row
+   (rows are auto-packed, so a row's spans never overlap; touching spans
+   have no gap). Input: the row's [{ id, start, end }] (any order).
+   Output: [{ leftId, rightId, start, end }] with end - start >= minGap.
+   A max-end sweep (not just pairwise) keeps the math honest even when a
+   drag-pin briefly parks an overlapping bar in the row. */
+export function rowGaps(spans, minGap = 1) {
+  const s = spans.slice().sort((a, b) => (a.start - b.start) || (a.end - b.end));
+  const gaps = [];
+  let maxEnd = -Infinity;
+  let maxId = null;
+  for (const c of s) {
+    if (maxId !== null && c.start - maxEnd >= minGap) gaps.push({ leftId: maxId, rightId: c.id, start: maxEnd, end: c.start });
+    if (c.end > maxEnd) { maxEnd = c.end; maxId = c.id; }
+  }
+  return gaps;
+}
+
+/* stable identity of a gap (selection survives re-renders/re-packs) */
+export function gapKey(g) {
+  return `${g.leftId}|${g.rightId}`;
+}
+
+/* RIPPLE-CLOSE — deleting a gap shifts the row's LATER clips left by the
+   gap width so it closes. Input: the row's spans + the gap; output:
+   [{ id, dt }] (dt always negative) for every member starting at/after
+   the gap's end — the right-hand clip and everything behind it. Other
+   rows are never part of the row's span list, so they stay untouched. */
+export function rippleShift(spans, gap) {
+  const dt = -(gap.end - gap.start);
+  if (!dt) return [];
+  return spans.filter((s) => s.start >= gap.end - 0.5).map((s) => ({ id: s.id, dt }));
+}
+
+/* ---------- explicit two-state lane icons (R8w1) ----------
+   Eye: open eye (visible) vs crossed-out eye (hidden) — not just a tint.
+   Padlock: open shackle + outline body (unlocked) vs closed shackle +
+   solid body + keyhole (locked). */
+export function EyeIcon({ off, size = 12, color = C.faint }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: "block" }}>
+      <path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12z" />
+      {off
+        ? <path d="M4.5 4.5l15 15" />
+        : <circle cx="12" cy="12" r="2.6" fill={color} stroke="none" />}
+    </svg>
+  );
+}
+export function PadlockIcon({ locked, size = 11, color = C.faint }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: "block" }}>
+      {locked
+        ? <path d="M7.5 11V7.5a4.5 4.5 0 0 1 9 0V11" />
+        : <path d="M7.5 11V7.5a4.5 4.5 0 0 1 8.8-1.4" />}
+      <rect x="5" y="11" width="14" height="9" rx="2" fill={locked ? color : "none"} fillOpacity={locked ? 0.9 : 0} />
+      {locked && <circle cx="12" cy="15.3" r="1.4" fill={C.bg1} stroke="none" />}
+    </svg>
+  );
+}
+/* tiny grid glyph for the enable-grid toggle */
+export function GridIcon({ size = 12, color = "currentColor" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" style={{ display: "block" }}>
+      <path d="M4 4h16v16H4z" />
+      <path d="M9.3 4v16M14.7 4v16M4 9.3h16M4 14.7h16" />
+    </svg>
+  );
+}
+
 /* camera lane diamond colors: x amber · y teal · zoom blue */
 const CAM_KF_COLOR = { x: C.amber, y: "#6EE7B7", zoom: C.info };
 const CAM_PROP_LABEL = { x: "Camera X", y: "Camera Y", zoom: "Camera zoom" };
+/* relocated save control (transport bar): per-state look — dirty = accent
+   call-to-action, saving = muted, saved = calm success tint, error = danger */
+const SAVE_BTN_STATE = {
+  dirty: { background: C.amber, color: "#1A1405" },
+  saving: { background: "#2A2415", color: C.dim },
+  saved: { background: "rgba(63,182,139,0.12)", color: "#3FB68B" },
+  error: { background: C.danger, color: "#FFFFFF" },
+};
 
-export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, setPlaying, setTime, playing, time, fmt, ctxDur, setCtxDurMs, stretchClips, setStretchClips, loop, setLoop, autokey, setAutokey, selMany, groupSelection, ctxLayers, selIds, setSelIds, setSelKf, enterClip, exitToDepth, crumbs, onLayerContext, onLaneContext, toggleHide, toggleLock, reorder, duplicateSelected, removeSelected, inClip, onAudioLaneDown, audioTrack, audioLaneSel, audioBarMs, onAudioBarDown, camera, cameraLaneSel, onCameraLaneDown, onCameraKfDown, selCamKf, rulerRef, onRulerDown, onBarDown, onKfDown, selKf, onWorldKfDown }) {
+export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, setPlaying, setTime, playing, time, fmt, ctxDur, setCtxDurMs, stretchClips, setStretchClips, loop, setLoop, selMany, groupSelection, ctxLayers, selIds, setSelIds, setSelKf, enterClip, exitToDepth, crumbs, onLayerContext, onLaneContext, toggleHide, toggleLock, reorder, duplicateSelected, removeSelected, inClip, onAudioLaneDown, audioTrack, audioLaneSel, audioBarMs, onAudioBarDown, camera, cameraLaneSel, onCameraLaneDown, onCameraKfDown, selCamKf, rulerRef, onRulerDown, onBarDown, onKfDown, selKf, onWorldKfDown, rowsRef, barDrag, selGap, onGapDown, onCloseGap, saveCtl, showGrid, onToggleGrid }) {
   /* ---------- auto-packed rows (visual only) ----------
      spanById holds each object's [start, end] exactly as its bar renders it;
      packRows groups non-overlapping objects (touching boundaries can share). */
   const spans = ctxLayers.map((o) => { const [start, end] = layerSpan(o, ctxDur); return { id: o.id, start, end }; });
   const spanById = new Map(spans.map((s) => [s.id, [s.start, s.end]]));
   const byId = new Map(ctxLayers.map((o) => [o.id, o]));
-  const rows = packRows(spans).map((ids) => ids.map((id) => byId.get(id)).filter(Boolean));
+  let rows = packRows(spans).map((ids) => ids.map((id) => byId.get(id)).filter(Boolean));
+  /* ROW-JUMP DEADZONE (display pin): while a bar body-drag is live, the
+     dragged bar stays in its pinned row (chosen by rowJumpTarget's deadzone
+     in GraphicDestinationMotion.onBarDown) instead of re-packing mid-drag
+     when it starts overlapping a neighbour. The pin is display-only and
+     ends on pointer-up, when normal packing resumes. The bar is appended
+     LAST in its row so it paints above row-mates it now overlaps; a pin at
+     index rows.length opens a fresh lane at the bottom. Rows the pin
+     vacated keep their slot for the gesture (indices stay stable). */
+  if (barDrag && byId.has(barDrag.id)) {
+    const dragObj = byId.get(barDrag.id);
+    rows = rows.map((r) => r.filter((o) => o.id !== barDrag.id));
+    const ri = Math.max(0, Math.min(barDrag.row, rows.length));
+    if (ri === rows.length) rows.push([dragObj]);
+    else rows[ri] = [...rows[ri], dragObj];
+  }
   /* cursor time within the lanes (same math the ruler scrub uses) */
   const laneT = (e) => {
     const r = rulerRef.current.getBoundingClientRect();
@@ -82,13 +206,36 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
           </label>
           <div style={{ width: 1, height: 20, background: C.line }} />
           <button className="gd-btn" onClick={() => setLoop(!loop)} style={{ background: C.bg2, border: `1px solid ${C.line}`, color: loop ? C.txt : C.faint, borderRadius: 6, padding: "5px 10px", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>Loop</button>
-          <button className="gd-btn" onClick={() => setAutokey(!autokey)} title="Animate — ON: edits & drags record keyframes at the playhead. OFF: edits move the layer (or its whole animation) without adding keyframes."
-            style={{ display: "flex", alignItems: "center", gap: 6, background: autokey ? C.amberSoft : C.bg2, border: `1px solid ${autokey ? C.amber : C.line}`, color: autokey ? C.amber : C.dim, borderRadius: 6, padding: "5px 10px", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
-            <span style={{ width: 7, height: 7, borderRadius: "50%", background: autokey ? C.amber : C.faint, boxShadow: autokey ? `0 0 8px ${C.amber}` : "none" }} />Animate
+          {/* enable-grid toggle (sits where the old Animate/autokey control was):
+              a subtle alignment grid on the canvas — pure visual aid, gated
+              out of the export render path (StageView only). */}
+          <button className="gd-btn gd-grid-toggle" onClick={onToggleGrid} aria-pressed={!!showGrid}
+            title={showGrid ? "Grid ON — subtle alignment grid on the canvas (visual aid only, never exported)" : "Enable grid — show a subtle alignment grid on the canvas (visual aid only, never exported)"}
+            style={{ display: "flex", alignItems: "center", gap: 6, background: showGrid ? C.amberSoft : C.bg2, border: `1px solid ${showGrid ? C.amber : C.line}`, color: showGrid ? C.amber : C.dim, borderRadius: 6, padding: "5px 10px", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
+            <GridIcon size={12} color={showGrid ? C.amber : C.dim} />Grid
           </button>
           <div style={{ flex: 1 }} />
+          {selGap && (
+            <button className="gd-btn gd-gap-delete" onClick={onCloseGap}
+              title="Close this gap — the row's later clips ripple left (Delete key works too). Other rows and the playhead are untouched."
+              style={{ ...chipStyle, cursor: "pointer", borderColor: C.amber, color: C.amber, display: "flex", alignItems: "center", gap: 6 }}>
+              ✕ Close gap · {fmt(selGap.end - selGap.start)}
+            </button>
+          )}
           {selMany.length > 1 && <button className="gd-btn" onClick={groupSelection} style={{ ...chipStyle, cursor: "pointer", borderColor: C.amber, color: C.amber }}>⌘G Group {selMany.length} → Clip</button>}
           <span style={{ color: C.faint, fontSize: 10.5 }}>drag bar = move · edges = trim · right-click = easing</span>
+          {/* relocated save control (was the top-bar Save button + "saved" text):
+              one click away in the docked timeline bar; the button itself IS
+              the save-state indicator (dirty amber / saving muted / saved green
+              / error red). Rendered only when the host page wires saving up. */}
+          {saveCtl && (
+            <button className="gd-btn gd-tl-save" data-state={saveCtl.state} onClick={saveCtl.onSave}
+              disabled={saveCtl.state !== "dirty" && saveCtl.state !== "error"}
+              title={saveCtl.state === "dirty" ? "Unsaved changes — click to save now" : saveCtl.state === "saving" ? "Saving…" : saveCtl.state === "error" ? "Couldn't save — click to retry" : "Everything is saved"}
+              style={{ marginLeft: 8, borderRadius: 6, border: saveCtl.state === "saved" ? "1px solid rgba(63,182,139,0.35)" : "none", padding: "5px 14px", cursor: saveCtl.state === "dirty" || saveCtl.state === "error" ? "pointer" : "default", fontWeight: 700, fontSize: 12, fontFamily: "inherit", flexShrink: 0, ...(SAVE_BTN_STATE[saveCtl.state] || SAVE_BTN_STATE.saved) }}>
+              {saveCtl.state === "saving" ? "Saving…" : saveCtl.state === "dirty" ? "● Save" : saveCtl.state === "error" ? "Retry save" : "Saved ✓"}
+            </button>
+          )}
         </div>
 
         <div style={{ flex: 1, display: "flex", minHeight: 0, overflowY: "auto" }}>
@@ -121,11 +268,16 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
                       onContextMenu={(e) => onLayerContext(e, o)}
                       title={o.name}
                       style={{ height: 30, display: "flex", alignItems: "center", gap: solo ? 6 : 4, padding: solo ? "0 6px" : "0 4px", flex: solo ? "1 1 auto" : "1 1 0", minWidth: 0, overflow: "hidden", cursor: "pointer", background: isSel ? C.bg3 : "transparent", borderLeft: isSel ? `2px solid ${C.amber}` : "2px solid transparent", boxSizing: "border-box", opacity: o.hidden ? 0.45 : o.locked ? 0.65 : 1 }}>
-                      <button title={o.hidden ? "Show" : "Hide"} onClick={(e) => { e.stopPropagation(); toggleHide(o.id); }}
-                        style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, padding: 0, width: 15, flexShrink: 0, color: o.hidden ? C.amber : C.faint }}>{o.hidden ? "⊘" : "◉"}</button>
-                      <button title={o.locked ? "Unlock" : "Lock"} onClick={(e) => { e.stopPropagation(); toggleLock(o.id); }}
+                      {/* explicit two-state toggles: eye / eye-off (visibility)
+                          and open / solid-closed padlock (lock) — wired to the
+                          existing toggleHide / toggleLock mechanisms. */}
+                      <button className="gd-tl-hide" aria-label={o.hidden ? `Show ${o.name}` : `Hide ${o.name}`} aria-pressed={!!o.hidden} title={o.hidden ? "Show layer" : "Hide layer"} onClick={(e) => { e.stopPropagation(); toggleHide(o.id); }}
                         style={{ background: "none", border: "none", cursor: "pointer", padding: 0, width: 15, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                        <LockIcon locked={o.locked} size={11} color={o.locked ? C.amber : C.faint} />
+                        <EyeIcon off={!!o.hidden} size={12} color={o.hidden ? C.amber : C.faint} />
+                      </button>
+                      <button className="gd-tl-lock" aria-label={o.locked ? `Unlock ${o.name}` : `Lock ${o.name}`} aria-pressed={!!o.locked} title={o.locked ? "Unlock layer" : "Lock layer"} onClick={(e) => { e.stopPropagation(); toggleLock(o.id); }}
+                        style={{ background: "none", border: "none", cursor: "pointer", padding: 0, width: 15, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <PadlockIcon locked={!!o.locked} size={11} color={o.locked ? C.amber : C.faint} />
                       </button>
                       {o.type === "clip"
                         ? <span style={{ width: 11, height: 10, flexShrink: 0, position: "relative" }}><span style={{ position: "absolute", inset: "0 2px 2px 0", border: `1.5px solid ${C.amber}`, borderRadius: 2 }} /><span style={{ position: "absolute", inset: "2px 0 0 2px", border: `1.5px solid ${C.amber}`, borderRadius: 2, background: C.bg1 }} /></span>
@@ -191,6 +343,10 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
                   )}
                 </div>
               )}
+              {/* rowsRef wraps ONLY the packed lanes (camera/audio lanes live
+                  outside it) so the bar-drag deadzone can map pointer y → row
+                  index with a single getBoundingClientRect. */}
+              <div ref={rowsRef}>
               {rows.map((row, ri) => {
                 const anySel = row.some((o) => selIds.includes(o.id));
                 return (
@@ -202,6 +358,18 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
                     onDoubleClick={(e) => { const o = objAtTime(row, laneT(e)); if (o && o.type === "clip") enterClip(o.id); }}
                     onContextMenu={(e) => { const o = objAtTime(row, laneT(e)); if (o) onLaneContext(e, o); }}
                     style={{ height: 30, position: "relative", borderBottom: `1px solid ${C.bg2}`, background: anySel ? "rgba(245,165,36,.04)" : "transparent" }}>
+                    {/* empty-gap pills: dashed "empty" spans between two clips of
+                        THIS row. Click selects the gap; the ✕ Close gap chip in the
+                        transport bar (or Delete) ripples the row's later clips left. */}
+                    {rowGaps(row.map((o) => { const [g0, g1] = spanById.get(o.id); return { id: o.id, start: g0, end: g1 }; })).map((g) => {
+                      const isSelG = !!selGap && gapKey(selGap) === gapKey(g);
+                      return (
+                        <button key={gapKey(g)} type="button" className={isSelG ? "gd-gap-pill gd-gap-sel" : "gd-gap-pill"} data-left={g.leftId} data-right={g.rightId}
+                          onPointerDown={(e) => onGapDown(e, g)}
+                          title={`Empty gap · ${fmt(g.end - g.start)} — click to select, then Delete (or ✕ Close gap above) ripples this row's later clips left`}
+                          style={{ position: "absolute", left: `${(g.start / ctxDur) * 100}%`, width: `${((g.end - g.start) / ctxDur) * 100}%`, minWidth: 10, top: 8, height: 14, background: isSelG ? C.amberSoft : "transparent", border: `1px dashed ${isSelG ? C.amber : C.faint}`, borderRadius: 7, cursor: "pointer", opacity: isSelG ? 1 : 0.5, padding: 0, zIndex: 1 }} />
+                      );
+                    })}
                     {row.map((o) => {
                       const isClip = o.type === "clip";
                       const [bIn, bOut] = spanById.get(o.id);
@@ -213,7 +381,7 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
                           {/* layer bar: dark, draggable, trim handles */}
                           <div onPointerDown={(e) => onBarDown(e, o, "move")}
                             title={o.locked ? `${o.name} · locked` : isClip ? `${o.name} · drag to retime · dbl-click to open` : "Drag to move (keyframes travel with the bar) · drag edges to trim"}
-                            style={{ position: "absolute", left: `${(bIn / ctxDur) * 100}%`, width: `${((bOut - bIn) / ctxDur) * 100}%`, top: 5, height: 20, background: TYPE_BAR[o.type] || "#3A4356", filter: isSel ? "brightness(1.35)" : "none", border: `1px solid ${isSel ? C.amber : "rgba(255,255,255,.2)"}`, borderRadius: 6, cursor: o.locked ? "not-allowed" : "grab", overflow: "hidden" }}>
+                            style={{ position: "absolute", left: `${(bIn / ctxDur) * 100}%`, width: `${((bOut - bIn) / ctxDur) * 100}%`, top: 5, height: 20, background: TYPE_BAR[o.type] || "#3A4356", filter: isSel ? "brightness(1.35)" : "none", border: `1px solid ${isSel ? C.amber : "rgba(255,255,255,.2)"}`, borderRadius: 6, cursor: o.locked ? "not-allowed" : barDrag && barDrag.id === o.id ? "grabbing" : "grab", overflow: "hidden", zIndex: barDrag && barDrag.id === o.id ? 6 : 0, boxShadow: barDrag && barDrag.id === o.id ? "0 4px 14px rgba(0,0,0,.5)" : "none" }}>
 
                             {isClip && <span style={{ position: "absolute", left: 7, top: 3, fontSize: 9.5, fontWeight: 700, color: C.amber, whiteSpace: "nowrap", pointerEvents: "none" }}>{o.name}{o.props.speed !== 1 ? ` · ${o.props.speed}×` : ""}{o.props.end === "loop" ? " · ∞" : ""}</span>}
                             {!o.locked && <>
@@ -261,6 +429,7 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
                   </div>
                 );
               })}
+              </div>
               {/* audio lane — flat labeled bar (waveform deliberately deferred); drag the bar to retime startT */}
               {!inClip && (
                 <div onPointerDown={onAudioLaneDown} title={audioTrack ? undefined : "No audio attached — click to open the Audio panel"}

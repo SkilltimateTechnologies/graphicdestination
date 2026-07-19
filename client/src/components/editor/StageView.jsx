@@ -28,7 +28,7 @@ function CameraCorners() {
   );
 }
 
-export default function StageView({ stageWrapRef, stageScrollRef, tlDragging, zoomed, stage, stageScale, stageBg, inClip, ctx, ctxLayers, time, selIds, sel, overflowShow, zoomMode, playing, rotLive, onObjectDown, enterClip, displayValue, onResizeDown, onRotateDown, onClipScaleDown, onPathPtDown, patchPath, setOverflowShow, camera, cameraLaneSel, onStageEmptyDown, snapGuides, snapOn, onToggleSnap, stepZoom, cycleZoom, setZoom }) {
+export default function StageView({ stageWrapRef, stageScrollRef, tlDragging, zoomed, stage, stageScale, stageBg, inClip, ctx, ctxLayers, time, selIds, sel, overflowShow, zoomMode, playing, rotLive, onObjectDown, enterClip, displayValue, onResizeDown, onRotateDown, onClipScaleDown, onPathPtDown, patchPath, setOverflowShow, camera, cameraLaneSel, onStageEmptyDown, snapGuides, snapOn, onToggleSnap, stepZoom, cycleZoom, setZoom, showGrid }) {
   /* the scene camera applies at the ROOT scene level only — inside-clip
      editing shows raw clip space (documented in engine/camera.js) */
   const cam = !inClip && camera ? camera : null;
@@ -44,6 +44,16 @@ export default function StageView({ stageWrapRef, stageScrollRef, tlDragging, zo
             {ctxLayers.map((obj) => (
               <StageObject key={obj.id} obj={obj} time={time} stage={stage} camera={cam} selected={selIds.includes(obj.id)} onDown={onObjectDown} onEnterClip={enterClip} displayValue={displayValue} onResize={onResizeDown} onRotate={onRotateDown} onClipScale={onClipScaleDown} stageScale={stageScale} playing={playing} selCount={selIds.length} rotLive={rotLive} interactive />
             ))}
+            {/* alignment GRID overlay (enable-grid toggle in the timeline bar):
+                a subtle 40px lattice over the canvas — a pure editing aid.
+                It lives ONLY in this editor component: the export render path
+                (export/frameRenderer.js) draws StageObject trees directly and
+                never mounts StageView, so the grid can never leak into an
+                exported frame. pointerEvents:none — it never intercepts. */}
+            {showGrid && (
+              <div className="gd-grid-overlay" aria-hidden="true"
+                style={{ position: "absolute", inset: 0, zIndex: 60, pointerEvents: "none", backgroundImage: "linear-gradient(rgba(255,255,255,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.05) 1px, transparent 1px)", backgroundSize: "40px 40px" }} />
+            )}
             {overflowShow && <>
               <div style={{ position: "absolute", left: -4000, top: -4000, width: 9000, height: 4000, background: "rgba(8,10,14,.58)", zIndex: 70, pointerEvents: "none" }} />
               <div style={{ position: "absolute", left: -4000, top: "100%", width: 9000, height: 4000, background: "rgba(8,10,14,.58)", zIndex: 70, pointerEvents: "none" }} />
