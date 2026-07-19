@@ -103,6 +103,26 @@ export function layerSpan(o, ctxDur) {
   return [o.props.inT || 0, Math.min(ctxDur, layerOut(o, ctxDur))];
 }
 
+/* ---------- marquee hit-test ----------
+   Ids of objects whose on-stage bounding box intersects `rect` (stage coords
+   {x0,y0,x1,y1}, any corner order) at time t. Mirrors the align() box math
+   (center = posOf, half-extent = objSize·scale/2). Locked/hidden objects are
+   never selectable. Pure — used by the canvas marquee drag. */
+export function objectsInRect(objects, rect, t) {
+  const x0 = Math.min(rect.x0, rect.x1), x1 = Math.max(rect.x0, rect.x1);
+  const y0 = Math.min(rect.y0, rect.y1), y1 = Math.max(rect.y0, rect.y1);
+  const ids = [];
+  for (const o of objects || []) {
+    if (!o || o.locked || o.hidden) continue;
+    const s = valueAt(o, "scale", t);
+    const [px, py] = posOf(o, t);
+    const { w, h } = objSize(o, t);
+    const hw = (w * s) / 2, hh = (h * s) / 2;
+    if (px + hw >= x0 && px - hw <= x1 && py + hh >= y0 && py - hh <= y1) ids.push(o.id);
+  }
+  return ids;
+}
+
 /* ---------- timeline row packing (visual only — schema untouched) ----------
    Greedy first-fit interval packing: sort spans by start (then end, then
    front-most first for identical spans so all-overlapping stacks keep the

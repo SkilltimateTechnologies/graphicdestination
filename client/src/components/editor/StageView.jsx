@@ -28,7 +28,7 @@ function CameraCorners() {
   );
 }
 
-export default function StageView({ stageWrapRef, stageScrollRef, tlDragging, zoomed, stage, stageScale, stageBg, inClip, ctx, ctxLayers, time, selIds, sel, overflowShow, zoomMode, playing, rotLive, onObjectDown, enterClip, displayValue, onResizeDown, onRotateDown, onClipScaleDown, onPathPtDown, patchPath, setOverflowShow, camera, cameraLaneSel, onStageEmptyDown, snapGuides, snapOn, onToggleSnap, stepZoom, cycleZoom, setZoom, showGrid }) {
+export default function StageView({ stageWrapRef, stageScrollRef, stageElRef, marquee, tlDragging, zoomed, stage, stageScale, stageBg, inClip, ctx, ctxLayers, time, selIds, sel, overflowShow, zoomMode, playing, rotLive, onObjectDown, enterClip, displayValue, onResizeDown, onRotateDown, onClipScaleDown, onPathPtDown, patchPath, setOverflowShow, camera, cameraLaneSel, onStageEmptyDown, snapGuides, snapOn, onToggleSnap, stepZoom, cycleZoom, setZoom, showGrid }) {
   /* the scene camera applies at the ROOT scene level only — inside-clip
      editing shows raw clip space (documented in engine/camera.js) */
   const cam = !inClip && camera ? camera : null;
@@ -39,7 +39,7 @@ export default function StageView({ stageWrapRef, stageScrollRef, tlDragging, zo
               floating overlays stay pinned because the scroller is a sibling. fit mode: display:contents = zero layout change */}
           <div ref={stageScrollRef} style={zoomed ? { position: "absolute", inset: 0, overflow: "auto", display: "flex" } : { display: "contents" }}>
           <div style={zoomed ? { width: stage.w * stageScale + STAGE_PAD * 2, height: stage.h * stageScale + STAGE_PAD * 2, margin: "auto", flexShrink: 0, position: "relative", overflow: "hidden" } : { display: "contents" }}>
-          <div style={{ width: stage.w, height: stage.h, transform: `scale(${stageScale})`, background: stageBg, borderRadius: 6, boxShadow: inClip ? `0 0 0 2px ${C.amber}55, 0 8px 50px rgba(0,0,0,.55)` : "0 8px 50px rgba(0,0,0,.55)", position: zoomed ? "absolute" : "relative", overflow: overflowShow ? "visible" : "hidden", flexShrink: 0, backgroundImage: "radial-gradient(rgba(255,255,255,.045) 1px, transparent 1px)", backgroundSize: "36px 36px", ...(zoomed ? { left: STAGE_PAD, top: STAGE_PAD, transformOrigin: "0 0" } : null) }}>
+          <div ref={stageElRef} style={{ width: stage.w, height: stage.h, transform: `scale(${stageScale})`, background: stageBg, borderRadius: 6, boxShadow: inClip ? `0 0 0 2px ${C.amber}55, 0 8px 50px rgba(0,0,0,.55)` : "0 8px 50px rgba(0,0,0,.55)", position: zoomed ? "absolute" : "relative", overflow: overflowShow ? "visible" : "hidden", flexShrink: 0, backgroundImage: "radial-gradient(rgba(255,255,255,.045) 1px, transparent 1px)", backgroundSize: "36px 36px", ...(zoomed ? { left: STAGE_PAD, top: STAGE_PAD, transformOrigin: "0 0" } : null) }}>
             {inClip && ctx.clip?.props.bg && <div style={{ position: "absolute", inset: 0, background: ctx.clip.props.bg, pointerEvents: "none" }} />}
             {ctxLayers.map((obj) => (
               <StageObject key={obj.id} obj={obj} time={time} stage={stage} camera={cam} selected={selIds.includes(obj.id)} onDown={onObjectDown} onEnterClip={enterClip} displayValue={displayValue} onResize={onResizeDown} onRotate={onRotateDown} onClipScale={onClipScaleDown} stageScale={stageScale} playing={playing} selCount={selIds.length} rotLive={rotLive} interactive />
@@ -100,6 +100,13 @@ export default function StageView({ stageWrapRef, stageScrollRef, tlDragging, zo
           </div>
           </div>
           </div>
+          {/* marquee rubber-band (viewport coords → position:fixed). Non-interactive
+              overlay drawn while a plain drag on empty canvas selects objects. */}
+          {marquee && (() => {
+            const l = Math.min(marquee.x0, marquee.x1), tp = Math.min(marquee.y0, marquee.y1);
+            const w = Math.abs(marquee.x1 - marquee.x0), h = Math.abs(marquee.y1 - marquee.y0);
+            return <div style={{ position: "fixed", left: l, top: tp, width: w, height: h, border: `1px solid ${C.amber}`, background: "rgba(245,165,36,0.12)", zIndex: 200, pointerEvents: "none", borderRadius: 2 }} />;
+          })()}
           {/* clip-context indicator moved to the slim breadcrumb bar directly
               above the timeline (editor/Timeline.jsx) — Esc still exits a level */}
           {/* ---- zoom controls (bottom-right) ---- */}

@@ -10,7 +10,7 @@ import { cameraAt, cameraTransform, cameraFromJson, cameraToJson, clampZoom, dep
 import { normHi } from "../engine/maps.js";
 import { FONT_IMPORT } from "../engine/fx.js";
 import { kitRenderSpec } from "../engine/kits.js";
-import { C, KF_PROPS, STAGE_PRESETS, kfAt, layerOut, layerSpan, packRows, objSize, reframeClipToContent } from "./editor/model";
+import { C, KF_PROPS, STAGE_PRESETS, kfAt, layerOut, layerSpan, packRows, objSize, reframeClipToContent, objectsInRect } from "./editor/model";
 import { computeSnap, SNAP_THRESHOLD } from "./editor/snapping";
 import TopBar from "./editor/TopBar";
 import IconRail from "./editor/IconRail";
@@ -421,6 +421,8 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   timeRef.current = time;
   const stageWrapRef = useRef(null);
   const stageScrollRef = useRef(null);
+  const stageElRef = useRef(null); /* the scaled stage div — screen↔stage mapping for the marquee */
+  const [marquee, setMarquee] = useState(null); /* rubber-band select rect (viewport coords) while dragging empty canvas */
   const rulerRef = useRef(null);
   const rowsRef = useRef(null); /* packed-lanes container — the row-jump deadzone maps pointer y through its rect */
   const barDragRef = useRef(null); /* live drag pin { id, row, rowCount } — read inside the pointermove closure */
@@ -1337,22 +1339,52 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
      also a camera pan scrub: the camera follows the pointer (drag right = the
      camera view moves right, the scene shifts left) and both axes record ◆ at
      the playhead — the same write path the inspector sliders use. */
+  /* Empty-canvas pointer-down. Plain left-drag = MARQUEE select (rubber-band);
+     middle-mouse or Alt+left-drag = CAMERA PAN (the former plain-drag gesture,
+     moved so marquee can be the intuitive default). Space stays play/pause. */
   const onStageEmptyDown = (e) => {
-    setSelIds([]); setSelKf(null); setSelCamKf(null); setAudioSel(false); setCameraSel(false);
+    setSelKf(null); setSelCamKf(null); setAudioSel(false); setCameraSel(false);
     setShapesOpen(false); setMapsOpen(false); setImagesOpen(false); setAudioOpen(false); setNumbersOpen(false);
-    if (e.button !== 0 || path.length > 0 || selIds.length > 0) return;
-    const t = timeRef.current;
-    const c0 = cameraAt(camera, t);
+    if (e.button !== 0 && e.button !== 1) return; /* ignore right-click etc. */
+    if (path.length > 0) return; /* path-editing mode keeps its own gestures */
+
+    /* ---- camera pan: middle-mouse OR Alt+left-drag ---- */
+    if (e.button === 1 || e.altKey) {
+      e.preventDefault();
+      const t = timeRef.current;
+      const c0 = cameraAt(camera, t);
+      const sx = e.clientX, sy = e.clientY;
+      let moved = false;
+      const move = (ev) => {
+        const dx = (ev.clientX - sx) / stageScale, dy = (ev.clientY - sy) / stageScale;
+        if (!moved && Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+        if (!moved) return;
+        setCameraKeyframe("x", t, Math.round(c0.x + dx));
+        setCameraKeyframe("y", t, Math.round(c0.y + dy));
+      };
+      const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      return;
+    }
+
+    /* ---- marquee select (plain left-drag) ---- */
+    setSelIds([]);
+    const rectEl = stageElRef.current?.getBoundingClientRect();
     const sx = e.clientX, sy = e.clientY;
     let moved = false;
+    /* viewport px → stage coords: getBoundingClientRect already folds in the
+       scale/zoom transform, so dividing the offset by stageScale is exact. */
+    const toStage = (cx, cy) => [rectEl ? (cx - rectEl.left) / stageScale : 0, rectEl ? (cy - rectEl.top) / stageScale : 0];
     const move = (ev) => {
-      const dx = (ev.clientX - sx) / stageScale, dy = (ev.clientY - sy) / stageScale;
-      if (!moved && Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+      if (!moved && Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) > 3) moved = true;
       if (!moved) return;
-      setCameraKeyframe("x", t, Math.round(c0.x + dx));
-      setCameraKeyframe("y", t, Math.round(c0.y + dy));
+      setMarquee({ x0: sx, y0: sy, x1: ev.clientX, y1: ev.clientY });
+      const [ax, ay] = toStage(sx, sy);
+      const [bx, by] = toStage(ev.clientX, ev.clientY);
+      setSelIds(objectsInRect(ctxLayers, { x0: ax, y0: ay, x1: bx, y1: by }, timeRef.current));
     };
-    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    const up = () => { setMarquee(null); window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
@@ -1985,7 +2017,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
           onClipScaleDown={onClipScaleDown}
           onPathPtDown={onPathPtDown} patchPath={patchPath} setOverflowShow={setOverflowShow}
           setSelIds={setSelIds} setSelKf={setSelKf} setAudioSel={setAudioSel} setShapesOpen={setShapesOpen} setMapsOpen={setMapsOpen} setImagesOpen={setImagesOpen} setAudioOpen={setAudioOpen}
-          camera={camera} cameraLaneSel={cameraLaneSel} onStageEmptyDown={onStageEmptyDown}
+          camera={camera} cameraLaneSel={cameraLaneSel} onStageEmptyDown={onStageEmptyDown} stageElRef={stageElRef} marquee={marquee}
           snapGuides={snapGuides} snapOn={snapOn} onToggleSnap={() => setSnapOnPersist(!snapOn)}
           showGrid={showGrid}
           stepZoom={stepZoom} cycleZoom={cycleZoom} setZoom={setZoom} />
