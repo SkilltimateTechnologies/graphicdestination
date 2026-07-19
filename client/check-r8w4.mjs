@@ -316,7 +316,18 @@ async function main() {
       const names = await laneNames();
       check(`insert ${label} → new lane (${before} → ${after})`, after === before + 1 && (!expectName || names.some((n) => n.toLowerCase().includes(expectName.toLowerCase()))), names.join(" · "));
     };
-    await insert("icon kit", "Icons", 'button[title^="Insert tinted"]');
+    /* emoji: rail → compact teaser → "Browse all" → library modal → click a card */
+    {
+      const before = await laneCount();
+      await page.locator('button:has(span:text-is("Emoji"))').first().click();
+      await page.waitForTimeout(260);
+      await page.locator('[data-emoji-browse]').first().click();
+      await page.waitForTimeout(320);
+      await page.locator('[data-emoji-card]').first().click();
+      await page.waitForTimeout(340);
+      const after = await laneCount();
+      check(`insert emoji → new lane (${before} → ${after})`, after === before + 1, (await laneNames()).join(" · "));
+    }
     await insert("UI element", "UI", 'button[title$="as a locked, movable kit object"]');
     await insert("chart", "Charts", 'button[title$="Click to insert."]');
     await insert("counter", "Number", '.gd-panel button:has-text("Count Up")', "Count Up");

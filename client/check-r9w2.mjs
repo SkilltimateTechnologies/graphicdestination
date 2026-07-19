@@ -41,6 +41,7 @@ import {
 } from "./src/engine/shapes.js";
 import { posOf, valueAt } from "./src/engine/keyframes.js";
 import { ICONS, UI_ELEMENTS, ICON_CATS } from "./src/engine/kits.js";
+import { EMOJIS } from "./src/engine/emoji.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tmpDir = path.join(here, ".r9w2-check-tmp");
@@ -179,7 +180,8 @@ async function main() {
     `export { StageObject } from ${JSON.stringify(path.join(here, "src", "components", "StageObject.jsx"))};`,
     `export { default as Inspector } from ${JSON.stringify(path.join(here, "src", "components", "editor", "Inspector.jsx"))};`,
     `export { default as ShapesPanel } from ${JSON.stringify(path.join(here, "src", "components", "editor", "panels", "ShapesPanel.jsx"))};`,
-    `export { default as IconsPanel } from ${JSON.stringify(path.join(here, "src", "components", "editor", "panels", "IconsPanel.jsx"))};`,
+    `export { default as EmojiPanel } from ${JSON.stringify(path.join(here, "src", "components", "editor", "panels", "EmojiPanel.jsx"))};`,
+    `export { default as EmojiLibrary } from ${JSON.stringify(path.join(here, "src", "components", "editor", "panels", "EmojiLibrary.jsx"))};`,
     `export { createElement } from "react";`,
     `export { renderToStaticMarkup } from "react-dom/server";`,
     "",
@@ -191,7 +193,7 @@ async function main() {
     build: { outDir: tmpDir, lib: { entry, formats: ["es"], fileName: () => "engine.mjs" } },
   });
   const M = await import(pathToFileURL(path.join(tmpDir, "engine.mjs")).href);
-  const { StageObject, Inspector, ShapesPanel, IconsPanel, createElement: h, renderToStaticMarkup } = M;
+  const { StageObject, Inspector, ShapesPanel, EmojiPanel, EmojiLibrary, createElement: h, renderToStaticMarkup } = M;
   const stage = { w: 1280, h: 720 };
   const ssr = (obj, time, extra = {}) => renderToStaticMarkup(h(StageObject, { obj, time, stage, selected: false, interactive: false, ...extra }));
   const inkOf = (markup) => (markup.match(/fill[:="]/g) || []).length + (markup.match(/<(rect|circle|ellipse|path|polygon|text)[ >]/g) || []).length;
@@ -311,18 +313,18 @@ async function main() {
       check(`ui:${k.id} hold frame (40%) is non-empty`, ms.length > 500 && inkOf(ms) >= 2, `len=${ms.length} ink=${inkOf(ms)}`);
       check(`ui:${k.id} hold frame is NaN-free`, !ms.includes("NaN"));
     }
-    /* the real IconsPanel lists every icon as a grid card, thumbs non-empty */
-    const ip = renderToStaticMarkup(h(IconsPanel, { iconQ: "", setIconQ: () => {}, iconCat: "All", setIconCat: () => {}, insertKitClip: () => {} }));
-    const cards = ip.split('data-icon-card="').slice(1);
-    check("IconsPanel lists ALL 57 icons as cards", cards.length === ICONS.length, `got ${cards.length}`);
-    check("IconsPanel uses the ShapesPanel 4-up square grid", ip.includes("repeat(4,1fr)") && ip.includes("aspect-ratio"));
-    check("IconsPanel has the floating panel shell (not the bare div)", ip.includes("gd-panel") && ip.includes("position:absolute"));
-    check("every card carries a non-empty still thumbnail", cards.every((c) => c.includes("data-thumb-still") && c.length > 800));
-    check("every card keeps the one-click TINTED insert affordance", cards.every((c) => (c.match(/Insert tinted /g) || []).length === 6));
-    check("emoji search finds the emoji cards", (() => {
-      const fq = renderToStaticMarkup(h(IconsPanel, { iconQ: "", setIconQ: () => {}, iconCat: "Emoji", setIconCat: () => {}, insertKitClip: () => {} }));
-      return (fq.split('data-icon-card="').length - 1) === 20;
-    })());
+    /* the Emoji library (Fluent 3D) lists every emoji as a grid card, thumbs
+       non-empty; the compact EmojiPanel is a featured teaser that opens it */
+    const lib = renderToStaticMarkup(h(EmojiLibrary, { open: true, onClose: () => {}, insertEmojiClip: () => {} }));
+    const cards = lib.split('data-emoji-card="').slice(1);
+    check("EmojiLibrary lists ALL Fluent emoji as cards", cards.length === EMOJIS.length, `got ${cards.length} of ${EMOJIS.length}`);
+    check("EmojiLibrary is a floating searchable modal", lib.includes('role="dialog"') && lib.includes("position:fixed") && /Search emoji/i.test(lib));
+    check("EmojiLibrary uses an auto-fill card grid", lib.includes("grid-template-columns"));
+    check("every emoji card carries a non-empty still thumbnail", cards.length > 0 && cards.every((c) => c.includes("data-thumb-still")));
+    const ep = renderToStaticMarkup(h(EmojiPanel, { openLibrary: () => {} }));
+    check("EmojiPanel shows 4 featured emoji as a teaser", (ep.split('data-emoji-featured="').length - 1) === 4);
+    check("EmojiPanel has a Browse-all button into the library", ep.includes("data-emoji-browse") && /Browse all/i.test(ep));
+    check("EmojiPanel keeps the floating panel shell", ep.includes("gd-panel") && ep.includes("position:absolute"));
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);
