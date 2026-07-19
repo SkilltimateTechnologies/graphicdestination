@@ -20,7 +20,8 @@ This file exists because features that were **100% working have been accidentall
 | Charts | lifecycle maps to object's timeline span: play-once entrance (≤1400ms), static hold, animated exit (≤1100ms); NO start/dur in Inspector | `check-charts` (240) |
 | Counters | 6 counter styles via pure `counterModel`; `cdStyle` wins over `style` | `check-counter` (97) |
 | Backdrops | 11 variants incl. `procedural` column-noise; pure f(t,seed), seamless f(0)=f(dur) | `check-backdrops` (166) |
-| Kits (icons/UI) | locked `"kit"` object type (single layer, variant + color-only Inspector); 57 bezier icons × animated/static; UI elements unchanged when icons change | `check-kits` (1203), `check-r7a` (98) |
+| Kits (UI) + legacy icons | locked `"kit"` object type (single layer, variant + color-only Inspector). UI elements are offered in the UI panel. The 57 bezier icons remain engine-side (`kitRenderSpec`) for BACK-COMPAT of old projects but are no longer in any picker — the Emoji rail replaced the Icons picker | `check-kits` (1203), `check-r7a` (98) |
+| Emoji (Fluent 3D) | 169 Microsoft Fluent Emoji (MIT, "Smileys & Emotion") as 3D PNGs in `client/public/emoji/fluent/3d/`; `engine/emoji.js` `buildEmojiClip` wraps ONE image layer in a seamlessly-looping clip with the in→hold→out motion grammar (heartbeat/spin/rock/bob/pulse by keyword); inserts as a movable clip. Compact rail `EmojiPanel` (featured teaser) → `EmojiLibrary` modal (search + cats). Assets fetched by `scripts/fetch-fluent-emoji.mjs` | `check-emoji` (30) |
 | Maps | 239 countries / 7 continents (mapdata.js 154KB); country trace-close-stay; timed color-coded highlights `{id,color,inT,outT}` + legend | `check-maps` (97) |
 | Camera | `project.camera.tracks` {x,y,zoom} + per-object `props.depth` (f=1+depth); object-level Camera card writes eased keyframes | `check-editor-camera` (13), `check-r8w3` |
 | Timeline | row-jump deadzone (60%/20px), gap pills + ripple-close, lock/hide icon toggles, scrub-follow playhead chase, per-prop kf glyphs | `check-timeline` (45), `check-r8w1`, `check-r9w1` |
@@ -38,7 +39,8 @@ This file exists because features that were **100% working have been accidentall
 - **Canvas-taint empty exports** (v2.1): blob-URL SVGs taint the canvas; all assets inlined as data-URIs.
 
 ## Architecture map (modules ARE separated)
-- `client/src/engine/` — pure modules: `fx.js` (charts/numbers/counters/confetti), `kits.js` (icons+UI), `maps.js`+`mapdata.js`, `backdrops.js`, `shapes.js`, `easing.js`, `random.js`, `camera.js`, `keyframes.js`
+- `client/src/engine/` — pure modules: `fx.js` (charts/numbers/counters/confetti), `kits.js` (UI + legacy bezier icons), `emoji.js` + `emojiData.js` (Fluent 3D emoji, generated manifest), `maps.js`+`mapdata.js`, `backdrops.js`, `shapes.js`, `easing.js`, `random.js`, `camera.js`, `keyframes.js`
+- Emoji assets: `client/public/emoji/fluent/3d/*.png` (Fluent Emoji, MIT — see that dir's LICENSE.txt); regenerate with `node scripts/fetch-fluent-emoji.mjs`. Panels: `EmojiPanel.jsx` (compact) + `EmojiLibrary.jsx` (modal). `IconsPanel.jsx` was removed.
 - `client/src/components/StageObject.jsx` — the ONE renderer (editor preview + SSR + export)
 - `client/src/components/editor/panels/` — one panel per widget family
 - `client/src/components/GraphicDestinationMotion.jsx` — editor state owner (cloud seam: `initialProject`, `onChange`)
