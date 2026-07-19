@@ -176,7 +176,6 @@ export default function Dashboard() {
             </div>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
-            <Link to="/templates" className="gd-ghost" style={{ background: "transparent", border: `1px solid ${T.borderStrong}`, color: T.text, borderRadius: 6, padding: "9px 16px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>Browse templates</Link>
             <button onClick={createNew} disabled={creating} className="gd-new" style={{ background: T.accent, color: "#1A1405", border: "none", borderRadius: 6, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: creating ? "default" : "pointer", fontFamily: "inherit", opacity: creating ? 0.75 : 1 }}>
               {creating ? "Creating…" : "New project"}
             </button>
@@ -215,7 +214,6 @@ export default function Dashboard() {
               <button onClick={createNew} disabled={creating} className="gd-new" style={{ background: T.accent, color: "#1A1405", border: "none", borderRadius: 6, padding: "10px 20px", fontSize: 13.5, fontWeight: 700, cursor: creating ? "default" : "pointer", fontFamily: "inherit", opacity: creating ? 0.75 : 1 }}>
                 {creating ? "Creating…" : "Create your first project"}
               </button>
-              <Link to="/templates" className="gd-ghost" style={{ background: "transparent", border: `1px solid ${T.borderStrong}`, color: T.text, borderRadius: 6, padding: "9px 16px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>Browse templates</Link>
             </div>
           </div>
         ) : (
