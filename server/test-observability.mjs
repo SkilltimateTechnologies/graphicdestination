@@ -7,6 +7,7 @@
  */
 import { validateConfig } from "./config.js";
 import { redact, formatLine, REDACT_KEYS } from "./logger.js";
+import { initErrorTracking, errorTrackingStatus, captureError } from "./errorTracking.js";
 
 let passed = 0;
 let failed = 0;
@@ -91,6 +92,32 @@ console.log("logger — secret redaction");
   const line = formatLine("error", "boom", circular, "2026-01-01T00:00:00.000Z");
   const parsed = JSON.parse(line);
   check("formatLine survives unserializable fields", parsed._logError === "unserializable fields");
+}
+
+/* ---------- error tracking (optional, gracefully degrading) ---------- */
+console.log("errorTracking — safe no-op when disabled");
+
+{
+  const status = await initErrorTracking({}); // no SENTRY_DSN
+  check("init without SENTRY_DSN reports disabled", status.enabled === false && /SENTRY_DSN not set/.test(status.reason));
+  check("errorTrackingStatus reflects disabled", errorTrackingStatus().enabled === false);
+}
+{
+  // @sentry/node is not a declared dependency, so with a DSN but no package it
+  // must still degrade to disabled rather than throw.
+  const status = await initErrorTracking({ SENTRY_DSN: "https://examplePublicKey@o0.ingest.sentry.io/0" });
+  check("init with DSN but no @sentry/node package degrades to disabled", status.enabled === false && /unavailable/.test(status.reason));
+}
+{
+  let threw = false;
+  try {
+    captureError(new Error("boom"), { requestId: "abc" });
+    captureError("string error");
+    captureError(null);
+  } catch {
+    threw = true;
+  }
+  check("captureError never throws when disabled", threw === false);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

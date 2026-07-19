@@ -63,16 +63,18 @@ The "if this is live, do these first" list.
 | # | Item | Effort | Status | Why |
 |---|---|---|---|---|
 | 1.1 | **Structured logging** — zero-dep JSON logger (`server/logger.js`); per-request `request_id`; secret redaction. | S | ✅ done | Nothing is debuggable in prod without it. Prereq for everything else in this phase. |
-| 1.2 | **Error tracking** — Sentry (or equivalent) on client + server; source maps uploaded on build. | S | ⬜ | Catch the regressions AGENTS.md keeps warning about, in the field. |
+| 1.2 | **Error tracking** — server hook (`server/errorTracking.js`) wired into the error handler + process guards; optional/degrading (no-op unless `SENTRY_DSN` set + `@sentry/node` installed). **Client-side** Sentry + source-map upload still pending. | S | 🟡 partial | Catch the regressions AGENTS.md keeps warning about, in the field. |
 | 1.3 | **Centralized Express error handler + graceful shutdown** — one error middleware (no stack leaks, preserves body-parser status), `SIGTERM` drain, uncaught-rejection guard. | S | ✅ done | An unhandled route error could crash or leak. |
 | 1.4 | **Readiness vs liveness probes** — `/api/health` (liveness) + `/api/ready` (DB reachable). | S | ✅ done | Prevents routing traffic to a booting/broken instance. |
 | 1.5 | **CSRF protection** — double-submit token (or origin check) on state-changing routes, layered on the existing `sameSite=lax`. Needs a coordinated client change. | S | ⬜ | Closes the one notable app-security gap for cookie auth. |
 | 1.6 | **Secrets & config validation at boot** — fail fast if `JWT_SECRET` unset/weak in `NODE_ENV=production` (`server/config.js`). | S | ✅ done | The ephemeral-secret fallback is a dev convenience that must never silently run in prod. |
 | 1.7 | **Uptime + latency monitoring** — external probe (BetterStack/Pingdom) + basic RED metrics (`prom-client` `/metrics`). Access logs already emit per-request latency. | S | ⬜ | Know about downtime before customers report it. |
-| 1.8 | **Backup & restore runbook for Turso** — scheduled dumps, a tested restore drill, documented RPO/RTO. | M | ⬜ | User projects are the business. No backup = no enterprise. |
+| 1.8 | **Backup & restore runbook for Turso** — documented RPO/RTO, dump procedure, restore steps, quarterly drill ([docs/backup-restore.md](docs/backup-restore.md)). Automating the scheduled off-site dump job remains. | M | 🟡 doc done | User projects are the business. No backup = no enterprise. |
 
-**Progress:** 4 / 8 shipped (1.1, 1.3, 1.4, 1.6). Remaining before this phase
-closes: error tracking (1.2), CSRF (1.5), monitoring (1.7), backups (1.8).
+**Progress:** 5 / 8 shipped (1.1, 1.3, 1.4, 1.6, 1.8-doc); 1.2 partial (server
+done, client pending). Remaining before this phase closes: client error
+tracking + source maps (1.2), CSRF (1.5), external uptime/metrics (1.7), and
+automating the backup job (1.8).
 
 **Exit criteria:** an on-call engineer can detect, diagnose, and recover from a
 production incident using logs, error reports, metrics, and a restore runbook.

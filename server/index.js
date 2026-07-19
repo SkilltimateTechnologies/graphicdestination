@@ -11,9 +11,14 @@ import { db, initSchema, usingTurso } from "./db.js";
 import { hashPassword, verifyPassword, signSession, requireAuth, COOKIE_NAME, COOKIE_OPTS } from "./auth.js";
 import { authLimiter, shareLimiter, createRateLimiter } from "./ratelimit.js";
 import { logger } from "./logger.js";
+import { initErrorTracking, captureError } from "./errorTracking.js";
 
 // Validate env & fail-fast in production before the app starts serving traffic.
 enforceConfig();
+
+// Optional error tracking (no-op unless SENTRY_DSN set + @sentry/node installed).
+const tracking = await initErrorTracking();
+logger.info("error_tracking", tracking);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CRED_FILE = path.join(__dirname, "data", "admin-credentials.json");
@@ -580,6 +585,7 @@ app.use((err, req, res, next) => {
   const level = status >= 500 ? "error" : "warn";
   req.log?.[level]("request_error", { path: req.path, status, err: String(err?.stack || err) });
   if (status >= 500) {
+    captureError(err, { requestId: req.id, path: req.path, method: req.method });
     return res.status(500).json({ error: "Internal server error", requestId: req.id });
   }
   res.status(status).json({ error: err.type === "entity.too.large" ? "Payload too large" : "Bad request", requestId: req.id });
@@ -609,5 +615,11 @@ process.on("SIGINT", () => shutdown("SIGINT"));
 
 // Last-resort guards: log (don't silently swallow) async faults that escaped a
 // route. These indicate a bug to fix, not normal flow.
-process.on("unhandledRejection", (reason) => logger.error("unhandled_rejection", { err: String(reason?.stack || reason) }));
-process.on("uncaughtException", (err) => logger.error("uncaught_exception", { err: String(err?.stack || err) }));
+process.on("unhandledRejection", (reason) => {
+  logger.error("unhandled_rejection", { err: String(reason?.stack || reason) });
+  captureError(reason, { kind: "unhandledRejection" });
+});
+process.on("uncaughtException", (err) => {
+  logger.error("uncaught_exception", { err: String(err?.stack || err) });
+  captureError(err, { kind: "uncaughtException" });
+});

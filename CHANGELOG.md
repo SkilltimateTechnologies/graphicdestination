@@ -28,7 +28,13 @@ release tags (Rn-Wn "round/week") rather than strict SemVer for feature work.
   - Centralized Express error handler (no stack leaks; preserves body-parser
     status codes) + graceful `SIGTERM`/`SIGINT` shutdown + process-level
     unhandled-rejection / uncaught-exception logging.
-  - New guard suite `server/test-observability.mjs`.
+  - Optional error tracking (`server/errorTracking.js`) wired into the error
+    handler + process guards — activates only when `SENTRY_DSN` is set **and**
+    `@sentry/node` is installed (undeclared, like the `hyperframes` pattern); a
+    safe no-op otherwise, so it adds no required dependency.
+  - New guard suite `server/test-observability.mjs` (22 assertions).
+  - Backup & restore runbook ([docs/backup-restore.md](docs/backup-restore.md))
+    — RPO/RTO targets, Turso + local-SQLite procedures, quarterly restore drill.
 
 ### Changed
 - Root `npm test` now runs the **entire** battery via `scripts/run-checks.mjs`

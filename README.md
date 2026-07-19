@@ -82,6 +82,7 @@ command on every push/PR. See [CONTRIBUTING.md](CONTRIBUTING.md#testing).
 | `NODE_ENV` | prod | `production` enables fail-fast config validation |
 | `PORT` | no | Default 8787 |
 | `LOG_LEVEL` | no | Structured-log verbosity: `debug`/`info`/`warn`/`error` (default `info`) |
+| `SENTRY_DSN` | no | Enables error tracking (no-op unless set **and** `@sentry/node` installed) |
 | `ENABLE_ADMIN_HINT` | no | `1` exposes the seeded-admin bootstrap endpoint (dev only; **rejected in production**) |
 | `CLIENT_ORIGIN` | no | CORS origin for the client |
 
@@ -110,4 +111,5 @@ balancers / orchestrators at `/api/ready`.
 | [ROADMAP.md](ROADMAP.md) | Enterprise-grade roadmap — current-state assessment + prioritized phases |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Setup, testing, code style, PR process |
 | [SECURITY.md](SECURITY.md) | Security posture, known gaps, vulnerability reporting |
+| [docs/backup-restore.md](docs/backup-restore.md) | Backup/restore runbook — RPO/RTO, drills |
 | [CHANGELOG.md](CHANGELOG.md) | Notable changes per release |

@@ -43,5 +43,5 @@ This file exists because features that were **100% working have been accidentall
 - `client/src/components/editor/panels/` — one panel per widget family
 - `client/src/components/GraphicDestinationMotion.jsx` — editor state owner (cloud seam: `initialProject`, `onChange`)
 - `server/index.js` — auth, projects, assets, share, settings (additive routes only). Also: request-id + structured access logging, `/api/ready` readiness probe, centralized error handler (preserves body-parser status codes), graceful SIGTERM shutdown
-- `server/config.js` — boot-time env validation (fail-fast in production); `validateConfig(env)` is pure/testable. `server/logger.js` — zero-dep structured JSON logger with key-based secret redaction. Guard: `server/test-observability.mjs`
+- `server/config.js` — boot-time env validation (fail-fast in production); `validateConfig(env)` is pure/testable. `server/logger.js` — zero-dep structured JSON logger with key-based secret redaction. `server/errorTracking.js` — optional Sentry hook (undeclared dep, no-op unless `SENTRY_DSN` set + `@sentry/node` installed — same pattern as `hyperframes`). Guard: `server/test-observability.mjs`
 - Run the whole battery with `node scripts/run-checks.mjs` (root) — auto-discovers every `check-*.mjs`, `src/export/test-*.mjs`, `src/lib/*.check.mjs`, and `server/test-*.mjs`
