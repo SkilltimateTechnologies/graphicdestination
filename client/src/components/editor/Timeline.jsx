@@ -249,7 +249,7 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
   const spans = ctxLayers.map((o) => { const [start, end] = layerSpan(o, ctxDur); return { id: o.id, start, end }; });
   const spanById = new Map(spans.map((s) => [s.id, [s.start, s.end]]));
   const byId = new Map(ctxLayers.map((o) => [o.id, o]));
-  let rows = packRows(spans).map((ids) => ids.map((id) => byId.get(id)).filter(Boolean));
+  let rows = packRows(spans, { stable: true }).map((ids) => ids.map((id) => byId.get(id)).filter(Boolean));
   /* ROW-JUMP DEADZONE (display pin): while a bar body-drag is live, the
      dragged bar stays in its pinned row (chosen by rowJumpTarget's deadzone
      in GraphicDestinationMotion.onBarDown) instead of re-packing mid-drag

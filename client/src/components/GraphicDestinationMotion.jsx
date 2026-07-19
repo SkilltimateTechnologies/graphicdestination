@@ -1713,7 +1713,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
        released on pointer-up and normal packing resumes. */
     if (mode === "move") {
       const startSpans = ctxLayers.map((o) => { const [s0, s1] = layerSpan(o, ctxDur); return { id: o.id, start: s0, end: s1 }; });
-      const startRows = packRows(startSpans);
+      const startRows = packRows(startSpans, { stable: true });
       const startRow = Math.max(0, startRows.findIndex((ids) => ids.includes(obj.id)));
       barDragRef.current = { id: obj.id, row: startRow, rowCount: startRows.length };
       setBarDrag({ id: obj.id, row: startRow });
@@ -1753,7 +1753,10 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
       if (mode === "move" && barDragRef.current && rowsRef.current) {
         const rr = rowsRef.current.getBoundingClientRect();
         const b = barDragRef.current;
-        const target = Math.max(0, Math.min(b.rowCount, rowJumpTarget(ev.clientY - rr.top, TL_ROW_H, b.row)));
+        /* stickier deadzone than the default (0.85 into the next row, or 44px
+           past the edge) so a horizontal drag with a little vertical drift no
+           longer hops lanes — professional-timeline feel. */
+        const target = Math.max(0, Math.min(b.rowCount, rowJumpTarget(ev.clientY - rr.top, TL_ROW_H, b.row, 44, 0.85)));
         if (target !== b.row) { b.row = target; setBarDrag({ id: b.id, row: target }); }
       }
       const dt = Math.round(((ev.clientX - sx) / r.width) * ctxDur / 10) * 10;

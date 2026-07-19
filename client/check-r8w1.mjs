@@ -75,9 +75,9 @@ console.log("row-jump deadzone (rowJumpTarget)");
   check("thresholds are parameters (px, frac) with 20 / 0.6 defaults", rowJumpTarget(79, R, 1, 100, 0.9) === 1 && rowJumpTarget(79, R, 1) === 2);
 }
 check("Timeline.jsx exports the TL_ROW_H lane constant (30)", /export const TL_ROW_H = 30;/.test(TL));
-check("GDM pins the row on bar move-drags via rowJumpTarget + rowsRef", (() => {
+check("GDM pins the row on bar move-drags via rowJumpTarget + rowsRef (stickier 44px/0.85 deadzone)", (() => {
   const gdm = read("src/components/GraphicDestinationMotion.jsx");
-  return gdm.includes("rowJumpTarget(ev.clientY - rr.top, TL_ROW_H, b.row)") && gdm.includes("barDragRef.current = { id: obj.id, row: startRow, rowCount: startRows.length }");
+  return gdm.includes("rowJumpTarget(ev.clientY - rr.top, TL_ROW_H, b.row, 44, 0.85)") && gdm.includes("barDragRef.current = { id: obj.id, row: startRow, rowCount: startRows.length }");
 })());
 check("the pin releases on pointer-up (packing resumes)", read("src/components/GraphicDestinationMotion.jsx").includes("setBarDrag(null); /* release the row pin"));
 check("Timeline re-pins the dragged bar into its pinned row (display-only)", TL.includes("if (barDrag && byId.has(barDrag.id))"));

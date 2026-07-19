@@ -63,6 +63,17 @@ check("first-fit reuses a row only when the LATEST end allows it", eq(packRows([
 check("contained span opens a new row, later span reuses it", eq(packRows([S("big", 0, 1000), S("small", 100, 200), S("mid", 300, 400)]), [["big"], ["small", "mid"]]));
 check("zero-length span touches on both sides", eq(packRows([S("a", 0, 100), S("z", 100, 100), S("b", 100, 200)]), [["a", "z", "b"]]));
 
+/* ---------- stable mode (timeline: pack in layer order, no start-sort) ---------- */
+console.log("packRows — stable (layer-order) mode");
+/* default start-sorts b before a (b starts earlier), so they SHARE a row;
+   stable keeps input/layer order — a is processed first, b(0-50) can't precede
+   it, so b opens its own row. A clip's row is now a function of layer order,
+   not of its current time → dragging in time never reshuffles other rows. */
+check("stable packs in the GIVEN order (not start-sorted)", eq(packRows([S("a", 100, 200), S("b", 0, 50)], { stable: true }), [["a"], ["b"]]));
+check("default (unset) still start-sorts the same spans onto one row", eq(packRows([S("a", 100, 200), S("b", 0, 50)]), [["b", "a"]]));
+check("stable still shares a row for in-order non-overlapping clips", eq(packRows([S("a", 0, 100), S("b", 100, 200)], { stable: true }), [["a", "b"]]));
+check("stable keeps overlapping clips in layer order (no time-based swap)", eq(packRows([S("a", 0, 100), S("b", 50, 150)], { stable: true }), [["a"], ["b"]]));
+
 /* ---------- order + determinism ---------- */
 console.log("packRows — order & determinism");
 check("rows come out ordered by ascending start (overlapping pair)", eq(packRows([S("late", 500, 900), S("early", 0, 600)]), [["early"], ["late"]]));

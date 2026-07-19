@@ -130,9 +130,17 @@ export function objectsInRect(objects, rect, t) {
    <= its start — touching at a boundary (a.end === b.start) is NOT an overlap,
    so it can share — otherwise it opens a new row below.
    `spans`: [{ id, start, end }] → array of rows, each an array of ids in
-   placement order. Rows come out ordered by ascending start. */
-export function packRows(spans) {
-  const sorted = spans.map((s, i) => ({ ...s, i })).sort((a, b) => (a.start - b.start) || (a.end - b.end) || (b.i - a.i));
+   placement order. Rows come out ordered by ascending start.
+
+   `opts.stable` (timeline): pack in the GIVEN order (layer/z order) instead of
+   sorting by start. This makes a bar's row a stable function of layer order,
+   not of its current time — so dragging a clip in time no longer reshuffles
+   rows (After-Effects/CapCut behaviour). Default (unset) is the classic
+   start-sorted packing that every existing guard asserts. */
+export function packRows(spans, opts) {
+  const sorted = opts && opts.stable
+    ? spans.map((s, i) => ({ ...s, i }))
+    : spans.map((s, i) => ({ ...s, i })).sort((a, b) => (a.start - b.start) || (a.end - b.end) || (b.i - a.i));
   const rows = []; /* [{ end, ids }] — end = latest end among the row's spans */
   for (const s of sorted) {
     let row = null;
