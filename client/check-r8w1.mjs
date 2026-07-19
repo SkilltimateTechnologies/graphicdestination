@@ -12,8 +12,9 @@
  *   4. STICKY HEADER + DOCKED TIMELINE — the shell can't scroll the header
  *      away; the timeline is docked with only its track area scrolling.
  *   5. TOP-BAR PURGE — logo / duplicate title / "saved" text / Save+Load /
- *      Share / autokey all gone from the top bar; autokey is ALWAYS-ON;
- *      the save control + state indicator lives in the timeline bar.
+ *      Share / autokey all gone from the top bar; the save control + state
+ *      indicator lives in the timeline bar. R9w1: the Animate arm toggle
+ *      was restored beside Grid and Export moved into the timeline bar.
  *   6. GRID — enable-grid toggle renders a StageView-only overlay that the
  *      export render path can never include.
  *
@@ -148,11 +149,15 @@ console.log("top-bar purge + save relocation");
   check("Share button removed from the editor chrome", !tb.includes("Share") && !ed.includes("ShareDialog") && !ed.includes("shareOpen") && !ed.includes("sharedPill"));
   check('"saved" status text removed from the shell header', !ed.includes("status.text") && !ed.includes("saveBtnState") && !ed.includes("gd-save"));
   check("autokey control removed from the top bar", !/autokey/i.test(tb));
-  check("autokey control removed from the timeline too (was the Animate button)", !TL.includes("setAutokey") && !TL.includes(">Animate<"));
-  check("autokey behavior is ALWAYS-ON (constant, no persistence key)", gdm.includes("const autokey = AUTOKEY_ALWAYS_ON;") && !gdm.includes("gd:autokey"));
-  check("canvas keyframing sites still consult `autokey` (now constant true)", gdm.includes("if (autokey && (obj.tracks.rotation || []).length)") && gdm.includes("if (!autokey) { editProp(id, prop, v); return; }"));
+  /* R9w1: the Animate arm toggle was RESTORED beside the Grid toggle (the
+     user asked for it back with explicit arm/disarm behavior) */
+  check("R9w1: the Animate arm toggle is restored beside the Grid toggle", TL.includes("gd-animate-toggle") && TL.includes("aria-pressed={!!animateArm}") && TL.indexOf("gd-grid-toggle") < TL.indexOf("gd-animate-toggle"));
+  check("R9w1: autokey follows the arm (no constant, no old gd:autokey pref)", gdm.includes("const autokey = animateArm;") && !gdm.includes("AUTOKEY_ALWAYS_ON") && !gdm.includes('getItem("gd:autokey")'));
+  check("canvas keyframing sites still consult `autokey` (the arm state)", gdm.includes("if (autokey && (obj.tracks.rotation || []).length)") && gdm.includes("if (!autokey) { patchProps(id, { [prop]: v }); return; }"));
   check("Save/Load modal fully disconnected (no IOModal usage)", !gdm.includes("IOModal") && !/\bioOpen\b/.test(gdm) && !gdm.includes("copyProject"));
-  check("Export stays prominent in the top bar", tb.includes("gd-btn-accent") && tb.includes("Export"));
+  /* R9w1: Export moved from the top bar into the timeline transport bar,
+     beside the save control, keeping the amber accent treatment */
+  check("R9w1: Export left the top bar for the timeline transport bar (still prominent)", !tb.includes(">Export<") && TL.includes("gd-tl-export") && TL.includes("gd-btn-accent"));
   check("stage preset + Brand survive the purge", tb.includes("STAGE_PRESETS") && tb.includes("Brand"));
   check("shell still shows the project title once (center of the sticky header)", ed.includes("{proj.name}"));
   check("shell passes saveState + onSaveNow into the editor", ed.includes("saveState={saveState}") && ed.includes("onSaveNow={saveNow}"));
@@ -160,7 +165,10 @@ console.log("top-bar purge + save relocation");
   check("save control renders in the timeline transport bar", TL.includes("gd-tl-save") && TL.includes("saveCtl.onSave"));
   check("save button IS the state indicator (4 color states)", TL.includes("SAVE_BTN_STATE") && ["dirty", "saving", "saved", "error"].every((s) => TL.includes(`${s}: {`)));
   check("save button clickability matches the old top-bar rule (dirty/error only)", TL.includes('disabled={saveCtl.state !== "dirty" && saveCtl.state !== "error"}'));
-  check("demo route passes no save props (saveCtl stays null → no button)", ed.includes("!id ? (\n          <GraphicDestinationMotion />"));
+  check("demo route passes no save props (saveCtl stays null → no button)", (() => {
+    const demoLine = ed.split("!id ? (")[1].split(") : loadErr")[0];
+    return demoLine.includes("<GraphicDestinationMotion") && !demoLine.includes("saveState") && !demoLine.includes("onSaveNow");
+  })());
 }
 
 /* ================= 6. grid toggle ================= */

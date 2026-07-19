@@ -244,9 +244,12 @@ console.log("\nbase+◆ end state (the move-drag model, now uniform)");
 console.log("\nGDM source wiring");
 {
   const cep = GDM.slice(GDM.indexOf("const canvasEditProp"), GDM.indexOf("const patchPath"));
-  check("canvasEditProp (the move-drop path) writes setKeyframe unconditionally", cep.includes("setKeyframe(id, prop, timeRef.current, v);"));
-  check("canvasEditProp: the old silent base-patch fallback is GONE", !cep.includes("patchProps(id, { [prop]: v })"));
-  check("canvasEditProp keeps the R8w1-pinned autokey guard", cep.includes("if (!autokey) { editProp(id, prop, v); return; }"));
+  check("canvasEditProp (the move-drop path) writes setKeyframe when ARMED", cep.includes("setKeyframe(id, prop, timeRef.current, v);"));
+  /* R9w1: the Animate arm toggle is BACK — the disarm path is now an EXPLICIT
+     base patch without keyframes (the user's requested behavior); the R8w3
+     rule (armed canvas edits ALWAYS key, never a silent base patch) holds. */
+  check("canvasEditProp: the base patch exists ONLY as the explicit DISARM path (R9w1)", cep.includes("if (!autokey) { patchProps(id, { [prop]: v }); return; }"));
+  check("canvasEditProp keeps the arm guard: disarmed → base patch, armed → ◆ at the playhead", cep.includes("if (!autokey) { patchProps(id, { [prop]: v }); return; }") && cep.indexOf("patchProps(id, { [prop]: v })") < cep.indexOf("setKeyframe(id, prop, timeRef.current, v);"));
   check("move drop lands x ◆ AND y ◆ through canvasEditProp", GDM.includes('canvasEditProp(m.id, "x", lv.x); canvasEditProp(m.id, "y", lv.y);'));
   const rot = GDM.slice(GDM.indexOf("const onRotateDown"), GDM.indexOf("const onClipScaleDown"));
   check("rotate drag keeps the R8w1-pinned existing-track site", rot.includes("if (autokey && (obj.tracks.rotation || []).length)"));

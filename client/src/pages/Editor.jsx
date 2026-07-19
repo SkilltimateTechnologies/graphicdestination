@@ -106,14 +106,10 @@ export default function Editor() {
         .gd-back:hover { color: #E9ECF3; }
       `}</style>
       <div style={barStyle}>
-        {/* left — back + brand mark */}
+        {/* left — back (R9w1: the Zwoosh logo/wordmark moved to the slim
+            brand bar directly above the timeline, inside the editor) */}
         <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
           <Link to="/dashboard" className="gd-back" style={{ color: "#939BAD", textDecoration: "none", fontSize: 12.5, fontWeight: 600, whiteSpace: "nowrap" }}>← Dashboard</Link>
-          <span style={{ width: 1, height: 16, background: "#2E3546", flexShrink: 0 }} />
-          <span style={{ width: 20, height: 20, borderRadius: 8, background: "#F5A524", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <svg width="10" height="10" viewBox="0 0 12 12"><path d="M3 2.2v7.6c0 .7.8 1.1 1.4.7l6-3.8c.5-.3.5-1 0-1.4l-6-3.8c-.6-.3-1.4.1-1.4.7z" fill="#1A1405" /></svg>
-          </span>
-          <span style={{ color: "#E9ECF3", fontWeight: 800, fontSize: 13, letterSpacing: "-0.01em", whiteSpace: "nowrap" }}>Zwoosh</span>
         </div>
         {/* center — project name (the single place the title is shown) */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, minWidth: 0, fontSize: 12.5 }}>
@@ -131,7 +127,7 @@ export default function Editor() {
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
         {!id ? (
-          <GraphicDestinationMotion />
+          <GraphicDestinationMotion user={user} onLogout={doLogout} onProfile={() => navigate("/dashboard")} />
         ) : loadErr ? (
           <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, fontFamily: "'Inter', system-ui, sans-serif" }}>
             <div style={{ color: "#E5636A", fontSize: 14, fontWeight: 600 }}>{loadErr}</div>
@@ -142,7 +138,7 @@ export default function Editor() {
             Loading project…
           </div>
         ) : (
-          <GraphicDestinationMotion key={proj.id} initialProject={proj.data} onChange={onEngineChange} saveState={saveState} onSaveNow={saveNow} />
+          <GraphicDestinationMotion key={proj.id} initialProject={proj.data} onChange={onEngineChange} saveState={saveState} onSaveNow={saveNow} user={user} onLogout={doLogout} onProfile={() => navigate("/dashboard")} />
         )}
       </div>
     </div>

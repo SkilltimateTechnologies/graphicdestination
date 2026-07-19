@@ -28,7 +28,7 @@ import BackgroundsPanel from "./editor/panels/BackgroundsPanel";
 import { BACKDROP_VARIANTS, backdropDefaults, themeOf, variantOf } from "../engine/backdrops.js";
 import StageView from "./editor/StageView";
 import Inspector from "./editor/Inspector";
-import Timeline, { rowJumpTarget, TL_ROW_H, rippleShift } from "./editor/Timeline";
+import Timeline, { rowJumpTarget, TL_ROW_H, rippleShift, TAG_PALETTE } from "./editor/Timeline";
 import { ContextMenu, BrandModal } from "./editor/modals";
 
 /* Re-export the pure engine API so the export pipeline
@@ -59,12 +59,14 @@ const TL_H_DEFAULT = 240;
 const TL_H_MIN = 160;
 const clampTlH = (h) => Math.max(TL_H_MIN, Math.min(window.innerHeight * 0.45, h));
 const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5];
-/* auto-keyframe is ALWAYS-ON (R8w1 — the user found the toggle confusing and
-   asked for it to be removed; a later wave depends on canvas-transform edits
-   keyframing unconditionally). The constant below keeps the edit sites reading
-   exactly as before: edits to props that already have a track write/replace a
-   ◆ at the playhead instead of patching base. */
-const AUTOKEY_ALWAYS_ON = true;
+/* Animate arm (R9w1 — restored at the user's request, beside the Grid toggle
+   in the timeline transport bar). ARMED (default): every canvas-transform
+   drop writes/replaces a ◆ at the playhead through the one withKeyframe /
+   setKeyframe path (the R8 always-on behavior). DISARMED: canvas edits patch
+   the base layer and write NO keyframes. Persisted under its own key — the
+   removed R8 autokey pref ("gd:autokey") stays gone for good. */
+const ARM_KEY = "gd:animateArm";
+const readArm = () => { try { const v = localStorage.getItem(ARM_KEY); return v === null ? true : v === "1"; } catch { return true; } };
 /* canvas alignment grid (timeline-bar toggle, persisted): a subtle 40px
    lattice overlay on the stage — pure visual aid, never exported */
 const GRID_KEY = "gd:grid";
@@ -292,7 +294,7 @@ function audioErrorText(err) {
 /* ============================================================
    APP
    ============================================================ */
-export default function GraphicDestinationMotion({ initialProject, onChange, saveState, onSaveNow } = {}) {
+export default function GraphicDestinationMotion({ initialProject, onChange, saveState, onSaveNow, user, onLogout, onProfile } = {}) {
   const [objects, setObjects] = useState(demoProject);
   const [stage, setStage] = useState({ w: 1280, h: 720 });
   const [compDur, setCompDur] = useState(6000);
@@ -306,9 +308,14 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [loop, setLoop] = useState(true);
-  /* autokey: ALWAYS-ON (R8w1) — see AUTOKEY_ALWAYS_ON above; the top-bar and
-     timeline toggles were removed at the user's request. */
-  const autokey = AUTOKEY_ALWAYS_ON;
+  /* autokey follows the Animate arm (R9w1): armed = keyframe every canvas
+     edit (R8 behavior), disarmed = patch the base layer without keyframes. */
+  const [animateArm, setAnimateArm] = useState(readArm);
+  const autokey = animateArm;
+  const setAnimateArmPersist = useCallback((v) => {
+    setAnimateArm(v);
+    try { localStorage.setItem(ARM_KEY, v ? "1" : "0"); } catch { /* storage unavailable — the arm just won't persist */ }
+  }, []);
   const [stageBg, setStageBg] = useState("#101218");
   const [stageScale, setStageScale] = useState(0.6);
   const [zoomMode, setZoomMode] = useState("fit"); /* "fit" (auto) or a manual factor from ZOOM_STEPS */
@@ -549,18 +556,19 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   }, []);
 
   /* AUTO-KEYFRAME mode — CANVAS gestures only (move / rotate / clip-scale):
-     autokey is ALWAYS-ON, so EVERY canvas drop writes/replaces a ◆ at the
-     playhead through the exact setKeyframe path (default easing) — R8w3:
-     previously a fresh prop silently patched its base value instead, so a
-     first canvas edit left NO keyframe on the timeline (the user's text
+     with the Animate toggle ARMED (default), EVERY canvas drop writes/replaces
+     a ◆ at the playhead through the exact setKeyframe path (default easing) —
+     R8w3: previously a fresh prop silently patched its base value instead, so
+     a first canvas edit left NO keyframe on the timeline (the user's text
      test). A repeated drop at the same playhead updates that ◆ in place
-     (withKeyframe ±5ms replace), identical for every object type. */
+     (withKeyframe ±5ms replace), identical for every object type.
+     DISARMED (R9w1): the edit patches the BASE layer and writes NO keyframes. */
   const canvasEditProp = useCallback((id, prop, v) => {
-    if (!autokey) { editProp(id, prop, v); return; }
     const obj = ctxLayers.find((o) => o.id === id);
     if (!obj || obj.locked) return;
+    if (!autokey) { patchProps(id, { [prop]: v }); return; }
     setKeyframe(id, prop, timeRef.current, v);
-  }, [autokey, editProp, ctxLayers, setKeyframe]);
+  }, [autokey, patchProps, ctxLayers, setKeyframe]);
 
   const setShapeAt = (id, shapeId) => {
     const obj = ctxLayers.find((o) => o.id === id);
@@ -853,6 +861,35 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   });
   const toggleLock = (id) => patchObject(id, (o) => ({ ...o, locked: !o.locked }));
   const toggleHide = (id) => patchObject(id, (o) => ({ ...o, hidden: !o.hidden }));
+  /* R9w1 lane quick actions — per-OBJECT duplicate/delete for the timeline
+     lane-label hover cluster (duplicateSelected/removeSelected act on the
+     selection; these act on the hovered lane's object directly). Delete
+     respects the lock; duplicate lands offset like the selection variant. */
+  const removeLayer = (id) => {
+    const o = ctxLayers.find((x) => x.id === id);
+    if (!o || o.locked) return;
+    setLayers((ls) => ls.filter((x) => x.id !== id));
+    setSelIds((s) => s.filter((i) => i !== id));
+  };
+  const duplicateLayer = (id) => {
+    const o = ctxLayers.find((x) => x.id === id);
+    if (!o) return;
+    const c = cloneLayer(o);
+    c.name = o.name + " copy";
+    c.locked = false;
+    c.props = { ...c.props, x: c.props.x + 24, y: c.props.y + 24 };
+    if (c.props.path) c.props.path = { ...c.props.path, pts: c.props.path.pts.map(([px, py]) => [px + 24, py + 24]) };
+    setLayers((ls) => [...ls, c]);
+    setSelIds([c.id]);
+  };
+  /* lane color tag — click cycles TAG_PALETTE; "" removes the key entirely
+     so untagged objects keep their old JSON shape. */
+  const cycleTag = (id) => patchObject(id, (o) => {
+    const i = TAG_PALETTE.indexOf(o.tag || "");
+    const next = TAG_PALETTE[(i + 1) % TAG_PALETTE.length];
+    if (!next) { const rest = { ...o }; delete rest.tag; return rest; }
+    return { ...o, tag: next };
+  });
 
   /* ---------- empty-gap pills (R8w1) ----------
      A gap pill selects the empty stretch between two clips of ONE packed
@@ -1234,10 +1271,11 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
       window.removeEventListener("pointerup", up);
       setSnapGuides(null); /* guides live only for the duration of the drag */
       if (!d || !d.moved) return;
-      /* drop lands through the auto-keyframe path: autokey is always-on, so
-         every move writes/updates an x ◆ and a y ◆ at the playhead (R8w3 —
-         identical for every object type; path-dragged members shift their
-         path points instead, position comes from the path) */
+      /* drop lands through the auto-keyframe path: with the Animate toggle
+         ARMED every move writes/updates an x ◆ and a y ◆ at the playhead
+         (R8w3 — identical for every object type); DISARMED it patches the
+         base x/y only (R9w1). Path-dragged members shift their path points
+         instead, position comes from the path. */
       d.members.forEach((m) => { const lv = d.live[m.id]; if (lv && !m.hasPath) { canvasEditProp(m.id, "x", lv.x); canvasEditProp(m.id, "y", lv.y); } });
     };
     window.addEventListener("pointermove", move);
@@ -1816,7 +1854,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
         .gd-btn:hover{background:${C.bg3} !important}
         .gd-btn-accent{transition:background 120ms ease-out}
         .gd-btn-accent:hover{background:${C.amberDim} !important}
-        .gd-kf:hover{transform:translate(-50%,-50%) rotate(45deg) scale(1.3) !important}
+        .gd-kf:hover{transform:translate(-50%,-50%) scale(1.3) !important}
         .gd-kfc:hover{transform:translate(-50%,-50%) scale(1.3) !important}
         @keyframes gdPanelIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
         .gd-panel{animation:gdPanelIn 160ms ease-out}
@@ -1835,9 +1873,12 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
       <input ref={audioFileRef} type="file" accept={AUDIO_ACCEPT_ATTR} style={{ display: "none" }} onChange={onPickAudioAsset} />
 
       {/* ============ TOP BAR ============ */}
+      {/* R9w1: Export moved to the timeline transport bar; the top bar now
+          ends with the avatar account menu (Profile / Logout — wired by the
+          Editor shell; standalone renders stub-disabled items). */}
       <TopBar exitToDepth={exitToDepth} inClip={inClip} ctx={ctx}
         stage={stage} applyStagePreset={applyStagePreset} stageIsPreset={stageIsPreset} brand={brand}
-        setBrandOpen={setBrandOpen} setExportOpen={setExportOpen} />
+        setBrandOpen={setBrandOpen} user={user} onProfile={onProfile} onLogout={onLogout} />
 
       {/* ============ MAIN ============ */}
       <div style={{ display: "flex", flex: 1, minHeight: 0, position: "relative" }}>
@@ -1916,11 +1957,14 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
         stretchClips={stretchClips} setStretchClips={setStretchClips} loop={loop} setLoop={setLoop}
         selMany={selMany} groupSelection={groupSelection} ctxLayers={ctxLayers} selIds={selIds} setSelIds={setSelIds} setSelKf={setSelKf}
         enterClip={enterClip} exitToDepth={exitToDepth} crumbs={ctx.names} onLayerContext={onLayerContext} onLaneContext={onLaneContext} toggleHide={toggleHide} toggleLock={toggleLock}
-        reorder={reorder} duplicateSelected={duplicateSelected} removeSelected={removeSelected}
+        reorder={reorder}
         inClip={inClip} onAudioLaneDown={onAudioLaneDown} audioTrack={audioTrack} audioLaneSel={audioLaneSel} audioBarMs={audioBarMs} onAudioBarDown={onAudioBarDown}
         camera={camera} cameraLaneSel={cameraLaneSel} onCameraLaneDown={onCameraLaneDown} onCameraKfDown={onCameraKfDown} selCamKf={selCamKf}
         rowsRef={rowsRef} barDrag={barDrag} selGap={selGap} onGapDown={onGapDown} onCloseGap={closeGap}
         saveCtl={saveCtl} showGrid={showGrid} onToggleGrid={() => setShowGridPersist(!showGrid)}
+        animateArm={animateArm} onToggleAnimate={() => setAnimateArmPersist(!animateArm)}
+        exportCtl={{ onExport: () => setExportOpen(true) }}
+        duplicateLayer={duplicateLayer} removeLayer={removeLayer} cycleTag={cycleTag}
         rulerRef={rulerRef} onRulerDown={onRulerDown} onBarDown={onBarDown} onKfDown={onKfDown} selKf={selKf} onWorldKfDown={onWorldKfDown} />
 
       {/* ============ CONTEXT MENU ============ */}

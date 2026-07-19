@@ -144,11 +144,27 @@ async function main() {
 
     /* ==================== #2 new shell — purge + timeline-bar controls ==== */
     console.log("\n#2 new shell — top-bar purge, timeline save control + grid toggle");
-    check("top bar keeps the Main breadcrumb + stage preset + Brand + Export",
+    check("top bar keeps the Main breadcrumb + stage preset + Brand (R9w1: + avatar, NO Export)",
       await page.locator('button:has-text("Main")').count() >= 1
       && await page.locator('select[aria-label="Stage size preset"]').count() >= 1
       && await page.locator('button:has-text("Brand")').count() >= 1
-      && await page.locator('button:has-text("Export")').count() >= 1);
+      && await page.locator("button.gd-avatar").count() === 1
+      && await page.locator('button:has-text("Export")').count() === 1 /* the ONE Export now lives in the timeline bar */);
+    /* R9w1: Export moved into the timeline transport bar beside the save control */
+    check("Export sits in the timeline transport bar beside the save control", await page.locator("button.gd-tl-export").count() === 1 && await page.locator("button.gd-tl-save").count() === 1);
+    /* R9w1: the Zwoosh wordmark moved to the slim brand bar above the timeline */
+    check("the Zwoosh wordmark sits in the brand bar above the timeline", await page.locator(".gd-brandbar .gd-brandmark").count() === 1);
+    /* R9w1: avatar menu — circular initial button, Profile / Logout items
+       (standalone harness wires no handlers → disabled stubs) */
+    const avatar = page.locator("button.gd-avatar");
+    check("the avatar is a circular button showing one initial", (await avatar.evaluate((el) => getComputedStyle(el).borderRadius)) === "50%" && (await avatar.textContent()).trim().length === 1);
+    await avatar.click();
+    await page.waitForTimeout(150);
+    check("avatar menu opens with Profile + Logout", await page.locator('.gd-avatar-menu button:has-text("Profile")').count() === 1 && await page.locator('.gd-avatar-menu button:has-text("Logout")').count() === 1);
+    check("standalone harness: menu items render as disabled stubs", await page.locator(".gd-avatar-menu button[disabled]").count() === 2);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(120);
+    check("Escape closes the avatar menu", await page.locator(".gd-avatar-menu").count() === 0);
     check("top-bar purge: NO Save/Load, share or auto-keyframe controls anywhere",
       await page.locator('button:has-text("Save / Load")').count() === 0
       && await page.locator('button:has-text("Share")').count() === 0
@@ -242,6 +258,77 @@ async function main() {
     const rotKf = (shape().tracks.rotation || []).find((k) => k.t >= 900 && k.t <= 1100);
     check("auto-key: rotate drag STARTED the rotation track with a ◆ at the playhead", !!rotKf && rotKf.v > 10, JSON.stringify(shape().tracks.rotation || []));
     check("auto-key: the rotation base mirrors the drop", Math.abs((shape().props.rotation || 0) - rotKf.v) <= 1, `rot=${shape().props.rotation}`);
+
+    /* ==================== R9w1 Animate arm/disarm ==================== */
+    console.log("\nR9w1 Animate toggle — disarm patches base without ◆, re-arm keys again");
+    const animBtn = page.locator("button.gd-animate-toggle");
+    check("Animate toggle lives in the timeline bar, ARMED by default", await animBtn.count() === 1 && (await animBtn.getAttribute("aria-pressed")) === "true");
+    check("armed state shows the unmistakable On label", (await animBtn.textContent()).includes("On"));
+    /* the shape's VISIBLE position follows its x/y ◆ (single keyframe = a
+       constant) — capture it before the disarm experiment */
+    p = await proj(page);
+    const visX = shape().props.x, visY = shape().props.y;
+    const kfCountXY = () => { const s = shape(); return (s.tracks.x || []).length + (s.tracks.y || []).length; };
+    const nKfBefore = kfCountXY();
+    await animBtn.click(); /* disarm */
+    await page.waitForTimeout(150);
+    check("disarm flips aria-pressed + persists gd:animateArm=0", (await animBtn.getAttribute("aria-pressed")) === "false" && await page.evaluate(() => localStorage.getItem("gd:animateArm") === "0"));
+    check("disarmed state shows the Off label", (await animBtn.textContent()).includes("Off"));
+    r = await stageRect(page);
+    await drag(page, toScreen(r, visX, visY), 60, 30); /* drag the shape body while DISARMED */
+    p = await proj(page);
+    check("DISARMED: the drag patched the base x/y", Math.abs(shape().props.x - (visX + 60 / r.scale)) <= 3 && Math.abs(shape().props.y - (visY + 30 / r.scale)) <= 3, `x=${shape().props.x} y=${shape().props.y}`);
+    check("DISARMED: NO new keyframes were written", kfCountXY() === nKfBefore, `kf x+y count ${nKfBefore} → ${kfCountXY()}`);
+    await scrubTo(page, 2500 / 6000); /* a fresh playhead away from the 1s ◆ */
+    await animBtn.click(); /* re-arm */
+    await page.waitForTimeout(150);
+    check("re-arm restores aria-pressed + persists gd:animateArm=1", (await animBtn.getAttribute("aria-pressed")) === "true" && await page.evaluate(() => localStorage.getItem("gd:animateArm") === "1"));
+    await drag(page, toScreen(r, visX, visY), 40, 20); /* the visible body still sits at the ◆ position */
+    p = await proj(page);
+    const armKf = (prop) => (shape().tracks[prop] || []).find((k) => k.t >= 2400 && k.t <= 2600);
+    check("RE-ARMED: the drag wrote ◆ at the new playhead (x AND y)", !!armKf("x") && !!armKf("y"), `x=${JSON.stringify(shape().tracks.x)}`);
+
+    /* ==================== R9w1 scrub-follow ==================== */
+    console.log("\nR9w1 scrub-follow — a long comp overflows; the playhead is chased into view");
+    await page.locator("input.gd-dur-input").fill("30");
+    await page.waitForTimeout(300);
+    const dims = await page.evaluate(() => { const el = document.querySelector(".gd-tl-scroll"); return { cw: el.scrollWidth, vw: el.clientWidth }; });
+    check("a 30s comp overflows the lane viewport (100px/s min density)", dims.cw > dims.vw, JSON.stringify(dims));
+    /* pan right (as a trackpad/scrollbar user would), then scrub NEAR the
+       visible right edge — the follow rule must chase the playhead */
+    await page.evaluate(() => { document.querySelector(".gd-tl-scroll").scrollLeft = 1400; });
+    const laneBox = await page.evaluate(() => { const el = document.querySelector(".gd-tl-scroll").getBoundingClientRect(); return { left: el.left, right: el.right, top: el.top }; });
+    await page.mouse.click(laneBox.right - 24, laneBox.top + 13); /* ruler is 26px tall */
+    await page.waitForTimeout(250);
+    const chase1 = await page.evaluate(() => {
+      const el = document.querySelector(".gd-tl-scroll");
+      const ph = document.querySelector(".gd-playhead").getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      return { sl: el.scrollLeft, phL: ph.left, left: r.left, right: r.right };
+    });
+    check("scrubbing near the right edge auto-scrolls (playhead chased into view)", chase1.sl > 1400 && chase1.phL >= chase1.left - 2 && chase1.phL <= chase1.right + 2, JSON.stringify(chase1));
+    await page.mouse.click(laneBox.left + 24, laneBox.top + 13); /* near the visible LEFT edge */
+    await page.waitForTimeout(250);
+    const chase2 = await page.evaluate(() => {
+      const el = document.querySelector(".gd-tl-scroll");
+      const ph = document.querySelector(".gd-playhead").getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      return { sl: el.scrollLeft, phL: ph.left, left: r.left, right: r.right };
+    });
+    check("scrubbing near the left edge scrolls back (playhead stays visible)", chase2.sl < chase1.sl && chase2.phL >= chase2.left - 2 && chase2.phL <= chase2.right + 2, JSON.stringify(chase2));
+    await page.locator("input.gd-dur-input").fill("6");
+    await page.waitForFunction(() => { const el = document.querySelector(".gd-tl-scroll"); return el && el.scrollWidth <= el.clientWidth + 1 && el.scrollLeft <= 1; }, null, { timeout: 4000 }).catch(() => {});
+    check("restoring a short comp removes the overflow (scroll returns home)", await page.evaluate(() => { const el = document.querySelector(".gd-tl-scroll"); return el.scrollWidth <= el.clientWidth + 1 && el.scrollLeft <= 1; }),
+      await page.evaluate(() => { const el = document.querySelector(".gd-tl-scroll"); return `scrollWidth=${el.scrollWidth} clientWidth=${el.clientWidth} scrollLeft=${el.scrollLeft}`; }));
+
+    /* R9w1 keyframe glyphs: every .gd-kf marker wraps a per-prop SVG glyph —
+       the shape currently carries x/y ◆ (diamond), rotation ▲ (triangle)
+       and opacity ◐ (half) */
+    check("R9w1: object keyframes render distinct per-prop SVG glyphs", await page.evaluate(() => {
+      const ks = [...document.querySelectorAll(".gd-kf")];
+      const glyphs = new Set(ks.map((k) => k.querySelector("svg")?.getAttribute("data-glyph")).filter(Boolean));
+      return ks.length > 0 && ks.every((k) => !!k.querySelector("svg")) && glyphs.has("diamond") && glyphs.has("triangle") && glyphs.has("half");
+    }));
 
     /* ==================== #8 number card: no Mode chips ==================== */
     console.log("\n#8 number card — mode chips removed");
@@ -352,6 +439,14 @@ async function runPart2(page, { check, proj, stageRect, toScreen, drag }) {
   await page.waitForTimeout(250);
   const inClip = await page.evaluate(() => document.body.textContent.includes("Editing clip — Esc to go back") && document.body.textContent.includes("Scene 2 · Stats"));
   check("double-click still enters the clip after transforms", inClip);
+  /* R9w1: the clip breadcrumb moved INTO the timeline transport bar (beside Grid/Animate) */
+  check("R9w1: the clip breadcrumb renders inside the timeline transport bar", await page.locator("button.gd-tl-crumb").count() >= 1
+    && await page.evaluate(() => document.body.textContent.includes("Editing clip — Esc to go back")));
+  /* R9w1: the kf markers inside the clip render as SVG glyphs too */
+  check("R9w1: in-clip keyframe markers render SVG glyphs", await page.evaluate(() => {
+    const ks = [...document.querySelectorAll(".gd-kf")];
+    return ks.length > 0 && ks.every((k) => !!k.querySelector("svg"));
+  }));
   /* Escape back to the root — one press per layer of UI state (selKf etc. first) */
   for (let i = 0; i < 6; i++) {
     if (!(await page.evaluate(() => document.body.textContent.includes("Editing clip")))) break;
