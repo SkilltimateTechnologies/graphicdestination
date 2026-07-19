@@ -90,44 +90,25 @@ export default function Editor() {
     navigate("/login");
   };
 
-  /* R8w1 shell layout: the root is a fixed 100vh column with overflow hidden,
-     so NOTHING on this page scrolls — the header can never be scrolled away
-     (and it is sticky as a belt-and-braces fallback), and the editor below
-     docks its timeline at the bottom of the viewport. The top bar was purged
-     per the user request: no Share button (collaboration later), no Save
-     button + "saved" text here (the save control + save-state indicator moved
-     into the timeline transport bar via saveState/onSaveNow below). */
+  /* R10 shell layout: the old 44px shell header (project title + "←
+     Dashboard" link + user/Sign-out strip) is GONE. The editor now fills the
+     whole 100vh column under its own slim 40px top row (inside GDM): brand
+     left, BrandSwitcher + avatar menu right — the avatar menu carries
+     Dashboard / Profile / Settings / Logout, with Logout wired to the real
+     AuthContext logout below. The root stays overflow:hidden so nothing on
+     this page scrolls; the timeline docks at the bottom of the viewport. */
+  const shellMenu = {
+    user,
+    onDashboard: () => navigate("/dashboard"),
+    onProfile: () => navigate("/dashboard"),
+    onSettings: () => navigate("/settings"),
+    onLogout: doLogout,
+  };
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#0A0C10", overflow: "hidden" }}>
-      <style>{`
-        .gd-signout { transition: background 120ms ease-out, border-color 120ms ease-out; }
-        .gd-signout:hover { background: #1E2330; }
-        .gd-back { transition: color 120ms ease-out; }
-        .gd-back:hover { color: #E9ECF3; }
-      `}</style>
-      <div style={barStyle}>
-        {/* left — back (R9w1: the Zwoosh logo/wordmark moved to the slim
-            brand bar directly above the timeline, inside the editor) */}
-        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-          <Link to="/dashboard" className="gd-back" style={{ color: "#939BAD", textDecoration: "none", fontSize: 12.5, fontWeight: 600, whiteSpace: "nowrap" }}>← Dashboard</Link>
-        </div>
-        {/* center — project name (the single place the title is shown) */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, minWidth: 0, fontSize: 12.5 }}>
-          {id && proj && <span style={{ color: "#E9ECF3", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 320 }}>{proj.name}</span>}
-        </div>
-        {/* right — user + sign out (Share/Save removed: collaboration later,
-            saving lives in the timeline bar) */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#939BAD", fontSize: 12.5 }}>
-            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#3FB68B", boxShadow: "0 0 6px rgba(63,182,139,0.7)", flexShrink: 0 }} />
-            <span style={{ color: "#E9ECF3", fontWeight: 600 }}>{user?.username}</span>
-          </div>
-          <button onClick={doLogout} className="gd-signout" style={signoutBtn}>Sign out</button>
-        </div>
-      </div>
       <div style={{ flex: 1, minHeight: 0 }}>
         {!id ? (
-          <GraphicDestinationMotion user={user} onLogout={doLogout} onProfile={() => navigate("/dashboard")} />
+          <GraphicDestinationMotion {...shellMenu} />
         ) : loadErr ? (
           <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, fontFamily: "'Inter', system-ui, sans-serif" }}>
             <div style={{ color: "#E5636A", fontSize: 14, fontWeight: 600 }}>{loadErr}</div>
@@ -138,22 +119,9 @@ export default function Editor() {
             Loading project…
           </div>
         ) : (
-          <GraphicDestinationMotion key={proj.id} initialProject={proj.data} onChange={onEngineChange} saveState={saveState} onSaveNow={saveNow} user={user} onLogout={doLogout} onProfile={() => navigate("/dashboard")} />
+          <GraphicDestinationMotion key={proj.id} initialProject={proj.data} onChange={onEngineChange} saveState={saveState} onSaveNow={saveNow} {...shellMenu} />
         )}
       </div>
     </div>
   );
 }
-
-/* sticky + zIndex: even if a future layout change re-introduces page scroll,
-   the header stays pinned to the top of the viewport */
-const barStyle = {
-  height: 44, flexShrink: 0, display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center",
-  padding: "0 14px", background: "#10131A", borderBottom: "1px solid #232936",
-  fontFamily: "'Inter', system-ui, sans-serif",
-  position: "sticky", top: 0, zIndex: 50,
-};
-const signoutBtn = {
-  background: "transparent", border: "1px solid #2E3546", color: "#E9ECF3", borderRadius: 6,
-  padding: "5px 13px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
-};

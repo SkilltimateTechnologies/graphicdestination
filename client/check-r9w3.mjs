@@ -7,15 +7,14 @@
  *      text-style resolution over the active brand, default stage bg
  *      (none selected → BLACK) and fresh-project bg adoption.
  *
- *   B. TEXT PRESETS + EFFECTS (TextPanel) — 4 style presets honor the
- *      settings text-style config + brand text color; ≥8 drop-in effects map
- *      to LEGAL engine textFx ids (the exact TEXTFX_IDS list from
- *      check-templates.mjs), engine fonts, supported box FX; the playhead
- *      start stamping is on the 10 ms grid.
+ *   B. TEXT PRESETS (TextPanel) — 4 style presets honor the settings
+ *      text-style config + brand text color. R10: the ten drop-in effect
+ *      cards are GONE from the panel; every LEGAL engine textFx id (the
+ *      exact TEXTFX_IDS list from check-templates.mjs) is still offered
+ *      per-layer in the Inspector's Text card.
  *
  *   C. SSR of the REAL components (Vite bundle, react-dom/server) — the
- *      TextPanel renders the 4 preset cards + every effect card with live
- *      hover-play thumbs (representative hold frame via data-thumb-still),
+ *      TextPanel renders the 4 preset cards and NO effect cards (R10),
  *      and the TopBar BrandSwitcher lists saved kits with the active-kit
  *      marker + a "Manage brand kits…" item.
  *
@@ -31,7 +30,7 @@ import react from "@vitejs/plugin-react";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { FONTS } from "./src/components/editor/model.js";
+import { TEXTFX_LIST } from "./src/components/editor/model.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tmpDir = path.join(here, ".r9w3-check-tmp");
@@ -58,7 +57,7 @@ async function main() {
   const entry = path.join(tmpDir, "entry.js");
   fs.writeFileSync(entry, [
     `export * as S from ${JSON.stringify(path.join(here, "src", "lib", "settings.js"))};`,
-    `export { default as TextPanel, TEXT_EFFECTS, TEXT_TIER_PRESETS, presetInsertProps, effectInsertProps } from ${JSON.stringify(path.join(here, "src", "components", "editor", "panels", "TextPanel.jsx"))};`,
+    `export { default as TextPanel, TEXT_TIER_PRESETS, presetInsertProps } from ${JSON.stringify(path.join(here, "src", "components", "editor", "panels", "TextPanel.jsx"))};`,
     `export { BrandSwitcher } from ${JSON.stringify(path.join(here, "src", "components", "editor", "TopBar.jsx"))};`,
     `export { createElement } from "react";`,
     `export { renderToStaticMarkup } from "react-dom/server";`,
@@ -71,7 +70,7 @@ async function main() {
     build: { outDir: tmpDir, lib: { entry, formats: ["es"], fileName: () => "engine.mjs" } },
   });
   const M = await import(pathToFileURL(path.join(tmpDir, "engine.mjs")).href);
-  const { S, TextPanel, TEXT_EFFECTS, TEXT_TIER_PRESETS, presetInsertProps, effectInsertProps, BrandSwitcher, createElement: h, renderToStaticMarkup } = M;
+  const { S, TextPanel, TEXT_TIER_PRESETS, presetInsertProps, BrandSwitcher, createElement: h, renderToStaticMarkup } = M;
 
   /* ================= A · settings lib (pure) ================= */
   console.log("\nA · settings lib — normalize / mapping / defaults");
@@ -131,18 +130,19 @@ async function main() {
     check("missing bg keeps the current value (legacy projects)", S.resolveLoadedStageBg({ objects: [{ id: "ob1" }], stage: {} }, { defaultBg: "#123456" }, "#0B0E13") === "#0B0E13");
   }
 
-  /* ================= B · text presets + effects (pure) ================= */
-  console.log("\nB · text presets + effects");
+  /* ================= B · text presets (pure) ================= */
+  console.log("\nB · text presets (panel effects removed in R10)");
   {
     check("four style presets, one per tier", TEXT_TIER_PRESETS.length === 4 && TEXT_TIER_PRESETS.map((p) => p.id).join(",") === "heading,subheading,body,caption");
-    check("at least 8 drop-in text effects", TEXT_EFFECTS.length >= 8, `${TEXT_EFFECTS.length}`);
-    check("every effect maps to a LEGAL textFx id", TEXT_EFFECTS.every((e) => TEXTFX_IDS.includes(e.fx.type)), TEXT_EFFECTS.map((e) => e.fx.type).join(","));
-    check("every engine textFx id is represented", TEXTFX_IDS.every((id) => TEXT_EFFECTS.some((e) => e.fx.type === id)), TEXTFX_IDS.join(","));
-    check("every effect uses an engine font", TEXT_EFFECTS.every((e) => FONTS.includes(e.props.fontFamily)));
-    check("every effect uses a supported box FX", TEXT_EFFECTS.every((e) => ["none", "glow", "pulse"].includes(e.props.boxFx)));
-    check("every effect has name + hint + sample text", TEXT_EFFECTS.every((e) => e.name && e.hint && e.sample));
-    check("effect ids are unique", new Set(TEXT_EFFECTS.map((e) => e.id)).size === TEXT_EFFECTS.length);
-    check("no effect invents styling outside the text render path", TEXT_EFFECTS.every((e) => Object.keys(e.props).every((k) => ["fontFamily", "fontSize", "fontWeight", "fill", "ls", "upper", "bg", "borderC", "borderW", "radius", "pad", "boxFx"].includes(k))));
+    /* R10: the ten drop-in effect cards are gone from TextPanel — the panel
+       exports no TEXT_EFFECTS/effectInsertProps anymore… */
+    const tpSrc = read("src/components/editor/panels/TextPanel.jsx");
+    check("TextPanel no longer exports/renders the effect cards", !tpSrc.includes("TEXT_EFFECTS") && !tpSrc.includes("effectInsertProps") && !tpSrc.includes("data-fx"));
+    /* …and textFx is still fully reachable per-layer in the Inspector's
+       Text card, which offers every legal engine textFx id. */
+    check("model TEXTFX_LIST covers every legal textFx id", TEXTFX_IDS.every((id) => TEXTFX_LIST.some((fx) => fx.id === id)), TEXTFX_IDS.join(","));
+    const insp = read("src/components/editor/Inspector.jsx");
+    check("Inspector Text card offers the textFx chips (every legal id)", insp.includes("TEXTFX_LIST.map") && insp.includes("textFx"));
 
     const styles = { heading: { fontFamily: "Oswald", fontSize: 84, fontWeight: 700 }, body: { fontFamily: "Caveat", fontSize: 30, fontWeight: 400 } };
     const brand = { colors: ["#111111", "#222222", "#333333", "#444444", "#DDDDDD"] };
@@ -152,12 +152,6 @@ async function main() {
     const bp = presetInsertProps(TEXT_TIER_PRESETS[2], styles, brand);
     check("normal-text preset uses the body tier", bp.fontFamily === "Caveat" && bp.fontSize === 30 && bp.text === "Normal text");
     check("preset insert survives a missing brand", presetInsertProps(TEXT_TIER_PRESETS[0], styles, null).fill === "#F9F9F9");
-
-    const fxIns = effectInsertProps(TEXT_EFFECTS[0], 1234);
-    check("effect insert stamps the textFx start at the playhead (10 ms grid)", fxIns.textFx.start === 1230 && fxIns.textFx.type === TEXT_EFFECTS[0].fx.type);
-    check("effect insert carries the sample text + styling", fxIns.text === TEXT_EFFECTS[0].sample && fxIns.fontFamily === TEXT_EFFECTS[0].props.fontFamily && fxIns.fill === TEXT_EFFECTS[0].props.fill);
-    check("effect insert defaults to t=0 without a playhead", effectInsertProps(TEXT_EFFECTS[0]).textFx.start === 0);
-    check("effect insert never invents a new textFx id", TEXTFX_IDS.includes(fxIns.textFx.type));
   }
 
   /* ================= C · SSR of the real components ================= */
@@ -165,18 +159,14 @@ async function main() {
   {
     const settingsStyles = S.resolveTextStyles({ textStyles: { heading: { fontFamily: "Oswald", fontSize: 84, fontWeight: 700 }, caption: { fontFamily: "JetBrains Mono", fontSize: 13, fontWeight: 500 } } }, { headFont: "Space Grotesk", bodyFont: "Inter" });
     const brand = { id: "b1", name: "Zwoosh", colors: ["#FFB224", "#FF6B6B", "#5B8CFF", "#6EE7B7", "#F9F9F9"], headFont: "Space Grotesk", bodyFont: "Inter" };
-    const tp = renderToStaticMarkup(h(TextPanel, { addObject: () => {}, setTextOpen: () => {}, textStyles: settingsStyles, brand, getPlayheadMs: () => 800 }));
+    const tp = renderToStaticMarkup(h(TextPanel, { addObject: () => {}, setTextOpen: () => {}, textStyles: settingsStyles, brand }));
     check("TextPanel renders the drawer", tp.includes("data-text-panel"));
     check("TextPanel shows all four style preset cards", ["heading", "subheading", "body", "caption"].every((id) => tp.includes(`data-preset="${id}"`)));
     check("preset cards name the tiers (Heading / Subheading / Normal text / Caption)", tp.includes("Heading") && tp.includes("Subheading") && tp.includes("Normal text") && tp.includes("Caption"));
     check("preset cards show the configured settings font (Oswald heading)", tp.includes("Oswald") && tp.includes("84px"));
     check("preset cards show the settings caption config", tp.includes("JetBrains Mono") && tp.includes("13px"));
-    check("TextPanel renders every effect card", TEXT_EFFECTS.every((e) => tp.includes(`data-fx="${e.id}"`)));
-    check("effect cards show their names", TEXT_EFFECTS.every((e) => tp.includes(e.name)), TEXT_EFFECTS.map((e) => e.name).join(" · "));
-    check("effect cards carry live hover-play thumbs with a representative hold frame", TEXT_EFFECTS.every((e) => tp.includes(`data-fx-thumb="${e.id}"`)) && tp.includes("data-thumb-still"));
-    const charSpans = (tp.match(/display:inline-block/g) || []).length;
-    check("effect thumbs render per-char fx spans at the hold frame (visible, animated)", charSpans >= 30 && tp.includes(">H<") && tp.includes(">W<"), `${charSpans} char spans`);
-    check("the panel teaches hover-to-play", /hover a card to play/i.test(tp));
+    /* R10: the effects shelf is gone — no data-fx cards, no hover-play hint */
+    check("TextPanel renders NO effect cards (R10)", !tp.includes("data-fx") && !tp.includes("data-thumb-still") && !/hover a card to play/i.test(tp));
 
     const kits = [
       { id: "acme", name: "Acme Corp", primary: "#FF6B6B", accent: "#5B8CFF", textColor: "#F9F9F9", headingFont: "Space Grotesk", bodyFont: "Inter" },

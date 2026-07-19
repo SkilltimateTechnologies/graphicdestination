@@ -1,30 +1,37 @@
 /* ============================================================
-   TOP BAR — breadcrumbs, stage preset, brand switcher, account avatar.
-   Extracted VERBATIM from GraphicDestinationMotion.jsx (Refactor Pass 2).
-   R8w1 purge (user request): the logo + duplicate project title (both
-   already live in the editor shell header), the "saved" text, the
-   save/load buttons (saving moved to the timeline transport bar), the
-   share button (collaboration comes later) and the auto-keyframe toggle
-   are all gone from here.
-   R9w1: Export moved beside the Save control in the timeline transport
-   bar; in its place the top bar ends with a circular AVATAR button that
-   opens an account menu (Profile / Logout). The Editor shell wires real
-   handlers (logout actually logs out via AuthContext); standalone renders
-   the items as disabled stubs.
-   R9w3: the Brand button + modal are GONE (user request — brand settings
-   live on the /settings page now). In their place a compact BRAND
-   SWITCHER dropdown lists the user's saved brand kits; picking one
-   applies it to the current project through the same mechanism the old
-   dialog used (its palette becomes the app swatches, new text layers use
-   its fonts), and "Manage brand kits…" jumps to /settings.
+   TOP BAR (R10) — one SLIM 40px row replaces the old 44px top bar AND
+   the editor shell header: BrandMark logo + "Zwoosh" wordmark on the
+   left, the BrandSwitcher kept beside the right end, and the account
+   avatar menu at the right end with Dashboard / Profile / Settings /
+   Logout (logout really logs out via AuthContext — the Editor shell
+   wires the handlers; standalone renders stub-disabled items).
+   The old breadcrumb (Main › clip…) moved INTO the timeline transport
+   bar beside the Animate toggle; the stage-size preset lives in the
+   Inspector's Stage card. The shell header (project title + "←
+   Dashboard" link + Sign out) is gone — Dashboard is an avatar item.
    ============================================================ */
 import { useEffect, useRef, useState } from "react";
-import { C, STAGE_PRESETS } from "./model";
+import { C } from "./model";
+
+/* ---------- brand mark (R10: moved from the timeline brand bar into the
+   slim top row) — the Zwoosh logo + wordmark. ---------- */
+export function BrandMark() {
+  return (
+    <span className="gd-brandmark" style={{ display: "inline-flex", alignItems: "center", gap: 7, flexShrink: 0 }}>
+      <span style={{ width: 18, height: 18, borderRadius: 7, background: C.amber, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        <svg width="9" height="9" viewBox="0 0 12 12"><path d="M3 2.2v7.6c0 .7.8 1.1 1.4.7l6-3.8c.5-.3.5-1 0-1.4l-6-3.8c-.6-.3-1.4.1-1.4.7z" fill="#1A1405" /></svg>
+      </span>
+      <span style={{ color: C.txt, fontWeight: 800, fontSize: 12.5, letterSpacing: "-0.01em", whiteSpace: "nowrap" }}>Zwoosh</span>
+    </span>
+  );
+}
 
 /* circular avatar + dropdown account menu. Shows the user's initial;
-   Profile / Logout menu items. Handlers are optional — without them the
-   items render disabled (standalone demo / test harnesses). */
-export function AvatarMenu({ user, onProfile, onLogout }) {
+   Dashboard / Profile / Settings / Logout menu items (R10: Dashboard
+   moved here from the shell header's "← Dashboard" link). Handlers are
+   optional — without them the items render disabled (standalone demo /
+   test harnesses). */
+export function AvatarMenu({ user, onDashboard, onProfile, onSettings, onLogout }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   /* close on any outside pointerdown or Escape */
@@ -60,7 +67,9 @@ export function AvatarMenu({ user, onProfile, onLogout }) {
           <div style={{ padding: "6px 10px 8px", borderBottom: `1px solid ${C.line}`, marginBottom: 5, color: C.dim, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 210 }}>
             {name ? `Signed in as ${name}` : "Not signed in"}
           </div>
+          {item("Dashboard", onDashboard, "gd-avatar-dashboard")}
           {item("Profile", onProfile)}
+          {item("Settings", onSettings, "gd-avatar-settings")}
           {item("Logout", onLogout, "gd-avatar-logout")}
         </div>
       )}
@@ -141,30 +150,15 @@ export function BrandSwitcher({ brand, kits = [], onApplyKit, onManage, defaultO
   );
 }
 
-export default function TopBar({ exitToDepth, inClip, ctx, stage, applyStagePreset, stageIsPreset, brand, brandKits, onApplyKit, onManageBrand, user, onProfile, onLogout }) {
+/* R10 slim top row: BrandMark + wordmark left · BrandSwitcher kept ·
+   avatar account menu at the right end. 40px tall. */
+export default function TopBar({ brand, brandKits, onApplyKit, onManageBrand, user, onDashboard, onProfile, onSettings, onLogout }) {
   return (
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 14px", height: 44, background: C.bg1, borderBottom: `1px solid ${C.line}`, flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 4, overflow: "hidden" }}>
-          <button className="gd-btn" onClick={() => exitToDepth(0)} style={{ background: !inClip ? C.bg3 : "transparent", border: "none", color: !inClip ? C.txt : C.dim, borderRadius: 6, padding: "4px 9px", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>Main</button>
-          {ctx.names.map((nm, i) => (
-            <span key={i} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ color: C.faint }}>▸</span>
-              <button className="gd-btn" onClick={() => exitToDepth(i + 1)} style={{ background: i === ctx.names.length - 1 ? C.bg3 : "transparent", border: "none", color: i === ctx.names.length - 1 ? C.amber : C.dim, borderRadius: 6, padding: "4px 9px", cursor: "pointer", fontWeight: 600, fontSize: 12, whiteSpace: "nowrap" }}>{nm}</button>
-            </span>
-          ))}
-        </div>
+      <div className="gd-topbar" style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 12px", height: 40, background: C.bg1, borderBottom: `1px solid ${C.line}`, flexShrink: 0 }}>
+        <BrandMark />
         <div style={{ flex: 1 }} />
-        <select value={`${stage.w}x${stage.h}`} onChange={(e) => applyStagePreset(e.target.value)} title="Stage size preset" aria-label="Stage size preset" style={{ width: 142 }}>
-          {!stageIsPreset && <option value={`${stage.w}x${stage.h}`}>Custom</option>}
-          {STAGE_PRESETS.map((p) => <option key={p.id} value={`${p.w}x${p.h}`}>{p.name}</option>)}
-        </select>
-        <span style={{ fontFamily: "'JetBrains Mono'", fontSize: 11, color: C.faint, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{stage.w}×{stage.h}</span>
-        {/* R9w3: brand switcher replaces the old Brand button/modal — the
-            user's saved kits apply straight to the current project. */}
         <BrandSwitcher brand={brand} kits={brandKits} onApplyKit={onApplyKit} onManage={onManageBrand} />
-        {/* account avatar (R9w1) — sits where Export used to be; Export moved
-            to the timeline transport bar beside Save. */}
-        <AvatarMenu user={user} onProfile={onProfile} onLogout={onLogout} />
+        <AvatarMenu user={user} onDashboard={onDashboard} onProfile={onProfile} onSettings={onSettings} onLogout={onLogout} />
       </div>
   );
 }

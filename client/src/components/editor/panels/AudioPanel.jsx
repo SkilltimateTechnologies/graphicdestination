@@ -4,7 +4,7 @@ import { NoteIcon } from "../ui";
 
 export default function AudioPanel({ audioFileRef, audioUploading, audioErr, audioTrack, detachAudio, assets, assetsBusy, assetErr, refreshAssets, audioAssets, attachAudioAsset, onDeleteAudioAsset, fmtBytes, fmt }) {
   return (
-          <div className="gd-panel" style={{ position: "absolute", left: 84, top: 12, width: 240, background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 8, padding: 12, zIndex: 30, boxShadow: "0 12px 40px rgba(0,0,0,.5)" }}>
+          <div className="gd-panel" style={{ position: "absolute", left: 84, top: 12, width: 268, background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 8, padding: 12, zIndex: 30, boxShadow: "0 12px 40px rgba(0,0,0,.5)" }}>
             <button className="gd-btn-accent" onClick={() => audioFileRef.current?.click()} disabled={audioUploading}
               style={{ width: "100%", background: C.amber, color: "#1A1405", border: "none", borderRadius: 6, padding: "8px 0", cursor: audioUploading ? "default" : "pointer", fontWeight: 700, fontSize: 12.5, opacity: audioUploading ? 0.65 : 1 }}>
               {audioUploading ? "Uploading…" : "Upload audio"}

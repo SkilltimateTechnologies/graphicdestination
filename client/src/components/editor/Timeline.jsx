@@ -197,19 +197,10 @@ export function LaneTypeIcon({ type, size = 11, color = C.faint }) {
   }
 }
 
-/* ---------- brand mark (R9w1) ----------
-   The Zwoosh logo/wordmark, relocated from the shell header into the slim
-   bar directly above the timeline (the clip breadcrumb's old spot). */
-export function BrandMark() {
-  return (
-    <span className="gd-brandmark" style={{ display: "inline-flex", alignItems: "center", gap: 7, flexShrink: 0 }}>
-      <span style={{ width: 18, height: 18, borderRadius: 7, background: C.amber, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-        <svg width="9" height="9" viewBox="0 0 12 12"><path d="M3 2.2v7.6c0 .7.8 1.1 1.4.7l6-3.8c.5-.3.5-1 0-1.4l-6-3.8c-.6-.3-1.4.1-1.4.7z" fill="#1A1405" /></svg>
-      </span>
-      <span style={{ color: C.txt, fontWeight: 800, fontSize: 12.5, letterSpacing: "-0.01em", whiteSpace: "nowrap" }}>Zwoosh</span>
-    </span>
-  );
-}
+/* ---------- brand mark ----------
+   R10: the Zwoosh logo/wordmark moved UP into the new slim top row
+   (TopBar.jsx exports BrandMark); the 28px brand bar above the timeline
+   is gone and the in-clip hint moved into the transport breadcrumb. */
 
 /* camera lane keyframe colors: x amber · y teal · zoom blue (R9w1: the
    glyph shape is now a ★ star via KfGlyph — the COLOR coding is unchanged) */
@@ -290,16 +281,9 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
           style={{ position: "absolute", top: -3, left: 0, right: 0, height: 6, cursor: "ns-resize", zIndex: 60 }}>
           <div className="gd-tl-handle-line" style={{ position: "absolute", top: 2, left: 0, right: 0, height: 1, background: C.amber }} />
         </div>
-        {/* brand bar — slim bar directly above the timeline. R9w1: the
-            Zwoosh logo/wordmark moved here from the shell header (this is the
-            clip breadcrumb's old spot; the breadcrumb itself moved INTO the
-            transport bar below). */}
-        <div className="gd-brandbar" style={{ height: 28, flexShrink: 0, display: "flex", alignItems: "center", gap: 8, padding: "0 12px", background: C.bg1, borderBottom: `1px solid ${C.line}` }}>
-          <BrandMark />
-          {inClip && (
-            <span style={{ marginLeft: "auto", color: C.faint, fontSize: 10.5, fontWeight: 600, whiteSpace: "nowrap", paddingLeft: 12 }}>Editing clip — Esc to go back</span>
-          )}
-        </div>
+        {/* R10: the 28px brand bar above the timeline is GONE — the logo
+            lives in the slim top row (TopBar) and the in-clip hint moved
+            into the transport breadcrumb below. */}
         <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 12px", height: 44, borderBottom: `1px solid ${C.line}` }}>
           <button className="gd-btn" onClick={() => { setPlaying(false); setTime(0); }} style={transportBtn}>⏮</button>
           <button onClick={() => setPlaying(!playing)} style={{ ...transportBtn, width: 34, height: 28, background: C.amber, color: "#1a1405", border: "none", fontWeight: 800 }}>{playing ? "❚❚" : "▶"}</button>
@@ -331,25 +315,34 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
             style={{ display: "flex", alignItems: "center", gap: 6, background: animateArm ? C.amber : C.bg2, border: `1px solid ${animateArm ? C.amber : C.line}`, color: animateArm ? "#1A1405" : C.dim, borderRadius: 6, padding: "5px 10px", cursor: "pointer", fontWeight: 700, fontSize: 12, flexShrink: 0 }}>
             <KfGlyph glyph="diamond" size={10} color={animateArm ? "#1A1405" : C.faint} />Animate&nbsp;{animateArm ? "On" : "Off"}
           </button>
-          {/* clip-context breadcrumb (R9w1: moved INTO the transport bar from
-              the slim bar above the timeline, beside the Grid toggle) */}
-          {inClip && (
-            <span style={{ display: "flex", alignItems: "center", gap: 3, minWidth: 0, overflow: "hidden", flexShrink: 1 }}>
+          {/* clip-context breadcrumb (R10): "Main" is ALWAYS beside the
+              Animate toggle — it inherited the old top bar's breadcrumb.
+              Inside a clip it grows the depth crumbs and the "Editing
+              clip — Esc to go back" hint (moved from the removed brand
+              bar). At the root it renders as the current-context marker. */}
+          <span style={{ display: "flex", alignItems: "center", gap: 3, minWidth: 0, overflow: "hidden", flexShrink: 1 }}>
+            {inClip ? (
               <button className="gd-btn gd-tl-crumb" onClick={() => exitToDepth(0)} title="Back to the main timeline"
                 style={{ background: "transparent", border: "none", color: C.dim, borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontWeight: 600, fontSize: 12, flexShrink: 0 }}>Main</button>
-              {(crumbs || []).map((nm, i) => (
-                <span key={i} style={{ display: "flex", alignItems: "center", gap: 3, minWidth: 0 }}>
-                  <span style={{ color: C.amber, fontSize: 12, lineHeight: 1, pointerEvents: "none" }}>›</span>
-                  {i < crumbs.length - 1 ? (
-                    <button className="gd-btn gd-tl-crumb" onClick={() => exitToDepth(i + 1)} title={`Back to ${nm}`}
-                      style={{ background: "transparent", border: "none", color: C.dim, borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontWeight: 600, fontSize: 12, fontFamily: "'JetBrains Mono'", whiteSpace: "nowrap" }}>{nm}</button>
-                  ) : (
-                    <span className="gd-tl-crumb-current" style={{ fontFamily: "'JetBrains Mono'", fontSize: 12, fontWeight: 600, color: C.amber, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", padding: "2px 0" }}>{nm}</span>
-                  )}
-                </span>
-              ))}
-            </span>
-          )}
+            ) : (
+              <button className="gd-btn gd-tl-crumb" title="Main timeline"
+                style={{ background: C.bg3, border: "none", color: C.amber, borderRadius: 6, padding: "2px 8px", cursor: "default", fontWeight: 600, fontSize: 12, flexShrink: 0, fontFamily: "'JetBrains Mono'" }}>Main</button>
+            )}
+            {inClip && (crumbs || []).map((nm, i) => (
+              <span key={i} style={{ display: "flex", alignItems: "center", gap: 3, minWidth: 0 }}>
+                <span style={{ color: C.amber, fontSize: 12, lineHeight: 1, pointerEvents: "none" }}>›</span>
+                {i < crumbs.length - 1 ? (
+                  <button className="gd-btn gd-tl-crumb" onClick={() => exitToDepth(i + 1)} title={`Back to ${nm}`}
+                    style={{ background: "transparent", border: "none", color: C.dim, borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontWeight: 600, fontSize: 12, fontFamily: "'JetBrains Mono'", whiteSpace: "nowrap" }}>{nm}</button>
+                ) : (
+                  <span className="gd-tl-crumb-current" style={{ fontFamily: "'JetBrains Mono'", fontSize: 12, fontWeight: 600, color: C.amber, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", padding: "2px 0" }}>{nm}</span>
+                )}
+              </span>
+            ))}
+            {inClip && (
+              <span style={{ color: C.faint, fontSize: 10.5, fontWeight: 600, whiteSpace: "nowrap", paddingLeft: 8 }}>Editing clip — Esc to go back</span>
+            )}
+          </span>
           <div style={{ flex: 1 }} />
           {selGap && (
             <button className="gd-btn gd-gap-delete" onClick={onCloseGap}
@@ -359,7 +352,9 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
             </button>
           )}
           {selMany.length > 1 && <button className="gd-btn" onClick={groupSelection} style={{ ...chipStyle, cursor: "pointer", borderColor: C.amber, color: C.amber }}>⌘G Group {selMany.length} → Clip</button>}
-          <span style={{ color: C.faint, fontSize: 10.5 }}>drag bar = move · edges = trim · right-click = easing</span>
+          {/* R10: the old bar-gestures hint text is removed from the
+              transport bar (the same guidance lives on the bar hover
+              tooltips). */}
           {/* relocated save control (was the top-bar Save button + "saved" text):
               one click away in the docked timeline bar; the button itself IS
               the save-state indicator (dirty amber / saving muted / saved green
@@ -471,7 +466,7 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
             ))}
             {/* audio lane header (main timeline only — project audio lives at root) */}
             {!inClip && (
-              <div onPointerDown={onAudioLaneDown} title={audioTrack ? `${audioTrack.name} — click to select` : "No audio attached — click to open the Audio panel"}
+              <div onPointerDown={onAudioLaneDown} title={audioTrack ? `${audioTrack.name} — click to select` : "No audio attached — open the Audio panel from the rail to add a track"}
                 style={{ height: 36, display: "flex", alignItems: "center", gap: 6, padding: "0 8px", cursor: "pointer", borderTop: `1px solid ${C.line}`, background: audioLaneSel ? C.bg3 : "transparent", borderLeft: audioLaneSel ? `2px solid ${C.amber}` : "2px solid transparent", boxSizing: "border-box" }}>
                 <NoteIcon size={13} color={audioTrack ? C.amber : C.faint} />
                 <span style={{ fontSize: 12, fontWeight: 600, color: audioLaneSel ? C.txt : audioTrack ? C.dim : C.faint, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>
@@ -621,7 +616,7 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
               </div>
               {/* audio lane — flat labeled bar (waveform deliberately deferred); drag the bar to retime startT */}
               {!inClip && (
-                <div onPointerDown={onAudioLaneDown} title={audioTrack ? undefined : "No audio attached — click to open the Audio panel"}
+                <div onPointerDown={onAudioLaneDown} title={audioTrack ? undefined : "No audio attached — open the Audio panel from the rail to add a track"}
                   style={{ height: 36, position: "relative", borderTop: `1px solid ${C.line}`, background: audioLaneSel ? "rgba(245,165,36,.04)" : "transparent" }}>
                   {audioTrack ? (
                     <div onPointerDown={onAudioBarDown}

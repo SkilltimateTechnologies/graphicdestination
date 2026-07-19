@@ -4,11 +4,11 @@
    ============================================================ */
 import { useEffect, useState } from "react";
 import { C, PROP_LABEL, TEXTFX_LIST, NUM_STYLES, NUM_STYLE_PRESETS, NUM_STYLE_RESET, PRESETS, TRANSITIONS, STAGE_PRESETS, kfAt, layerOut, inputStyle, chipStyle, sectionLabel } from "./model";
-import { Card, ChipRow, ColorKfRow, PropRow, FontControls, WorldPicker, Row, SliderRow, EaseCurve, NoteIcon, CamIcon, LockIcon } from "./ui";
+import { Card, ChipRow, ColorKfRow, PropRow, FontControls, WorldPicker, Row, SliderRow, EaseCurve, NoteIcon, CamIcon } from "./ui";
 import { EASE, EASE_LABEL } from "../../engine/easing.js";
 import { SHAPE_IDS, SHAPE_DEFS, ptsToStr, shapePtsOf, lerpPts, morphPairAt, shapeIdAt, progKeyPlan, pathSamples, pointOnPath } from "../../engine/shapes.js";
 import { valueAt } from "../../engine/keyframes.js";
-import { MAPS, CONTINENT_NAMES, CONTINENTS, normHi } from "../../engine/maps.js";
+import { CONTINENT_NAMES, CONTINENTS, normHi } from "../../engine/maps.js";
 import { CONFETTI_STYLES, confettiStyleOf, confettiLife, confettiDurMs, CONFETTI_DUR_MIN, CONFETTI_DUR_MAX, NUM_FORMATS, CD_STYLES, cdStyleOf, COUNTER_STYLES, counterStyleOf } from "../../engine/fx.js";
 import { CAM_PROPS, CAM_ZOOM_MIN, CAM_ZOOM_MAX, CAM_DEPTH_MIN, CAM_DEPTH_MAX, cameraAt, camTrackHost, clampDepth } from "../../engine/camera.js";
 import { BLEND_MODES, BLUR_MAX, clampBlur, normBlend, depthHint } from "../../engine/filters.js";
@@ -140,7 +140,7 @@ function FiltersRow({ P, onBlur, onBlend }) {
   );
 }
 
-export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detachAudio, fmt, cameraLaneSel, camera, editCameraProp, setCameraKeyframe, removeCameraKeyframe, cameraKfNav, resetCamera, selCamKfData, setCameraSegmentEase, applyCameraPreset, applyCameraAction, selMany, groupSelection, align, duplicateSelected, removeSelected, inClip, ctx, sel, patchObject, toggleHide, toggleLock, stage, stageBg, setStageBg, applyStagePreset, stageIsPreset, enterClip, patchProps, ctxDur, stretchClipDur, stretchClips, setStretchClips, ungroupClip, morphQ, setMorphQ, time, timeRef, setShapeAt, editProp, removeKeyframe, setKeyframe, setSelKf, flowText, brand, SW, addPathTo, patchPath, kfNav, selectedKfData, setSegmentEase, applyPreset, fileRef }) {
+export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detachAudio, fmt, cameraLaneSel, camera, editCameraProp, setCameraKeyframe, removeCameraKeyframe, cameraKfNav, resetCamera, selCamKfData, setCameraSegmentEase, applyCameraPreset, applyCameraAction, selMany, groupSelection, align, duplicateSelected, removeSelected, inClip, ctx, sel, patchObject, stage, stageBg, setStageBg, applyStagePreset, stageIsPreset, enterClip, patchProps, ctxDur, stretchClipDur, stretchClips, setStretchClips, ungroupClip, morphQ, setMorphQ, time, timeRef, setShapeAt, editProp, removeKeyframe, setKeyframe, setSelKf, flowText, brand, SW, addPathTo, patchPath, kfNav, selectedKfData, setSegmentEase, applyPreset, fileRef }) {
   /* camera as a valueAt-compatible pseudo-object for the shared PropRow UI */
   const camObj = camTrackHost(camera);
   const camVals = cameraAt(camera, time);
@@ -189,7 +189,7 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
      the list is empty (confetti). */
   const tProps = !sel || sel.type === "confetti" ? [] : sel.type === "world" ? (sel.props.autoZoom !== false ? ["opacity"] : ["opacity", "focus"]) : sel.props.path ? ["prog", "opacity"] : ["opacity"];
   return (
-        <div style={{ width: 280, background: C.bg1, borderLeft: `1px solid ${C.line}`, overflowY: "auto", flexShrink: 0, padding: "12px 12px 30px" }}>
+        <div data-inspector style={{ width: 280, background: C.bg1, borderLeft: `1px solid ${C.line}`, overflowY: "auto", flexShrink: 0, padding: "12px 12px 30px" }}>
           {audioLaneSel ? (
             <Card title="Audio track" hint="main timeline">
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
@@ -297,16 +297,14 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
             </Card>
           ) : (
             <div>
+              {/* R10: the hide/lock BUTTONS are gone from the Inspector —
+                  visibility/locking live on the timeline lane toggles (and the
+                  context menu). The status text below stays as a passive
+                  readout so a locked/hidden selection is still explained. */}
               <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
                 <input value={sel.name} onChange={(e) => patchObject(sel.id, (o) => ({ ...o, name: e.target.value }))} style={{ ...inputStyle, fontWeight: 700 }} />
-                <button className="gd-btn" title={sel.hidden ? "Show" : "Hide"} onClick={() => toggleHide(sel.id)}
-                  style={{ ...chipStyle, cursor: "pointer", padding: "5px 9px", borderColor: sel.hidden ? C.amber : C.line, color: sel.hidden ? C.amber : C.dim }}>{sel.hidden ? "⊘" : "◉"}</button>
-                <button className="gd-btn" title={sel.locked ? "Unlock" : "Lock"} onClick={() => toggleLock(sel.id)}
-                  style={{ ...chipStyle, cursor: "pointer", padding: "5px 9px", borderColor: sel.locked ? C.amber : C.line, color: sel.locked ? C.amber : C.dim, display: "flex", alignItems: "center" }}>
-                  <LockIcon locked={sel.locked} size={13} color={sel.locked ? C.amber : C.dim} />
-                </button>
               </div>
-              <div style={{ color: C.faint, fontSize: 11, marginBottom: 10 }}>{sel.type}{sel.type === "clip" ? ` · ${sel.children.length} layers` : ""}{sel.locked ? " · locked" : ""}{sel.hidden ? " · hidden" : ""}</div>
+              <div style={{ color: C.faint, fontSize: 11, marginBottom: 10 }}>{sel.type}{sel.type === "clip" ? ` · ${sel.children.length} layers` : ""}{sel.locked ? " · locked (timeline lane)" : ""}{sel.hidden ? " · hidden (timeline lane)" : ""}</div>
 
               {/* R8w3 — OBJECT-LEVEL camera operation: friendly one-click moves
                   that WRITE the camera keyframes for the user (anchor at the
@@ -632,7 +630,9 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                 <Card title="Country map" hint="real outlines">
                   <DepthRow value={sel.props.depth} onChange={setDepth} />
                   <FiltersRow P={sel.props} onBlur={setBlur} onBlend={setBlend} />
-                  <ChipRow label="Country" options={Object.keys(MAPS).map((cc) => [cc, MAPS[cc].name])} value={sel.props.country} onChange={(v) => patchProps(sel.id, { country: v })} wrap />
+                  {/* R10: the country ChipRow is gone — picking a country
+                      happens in the Maps panel when the layer is inserted.
+                      Trace/highlight style + timing controls stay. */}
                   <ChipRow label="Effect" options={[["plain", "Plain"], ["draw", "Draw & stay"], ["comet", "Comet"], ["neon", "Neon"], ["reveal", "Draw → Glow"], ["pulse", "Glow pulse"]]} value={sel.props.mapStyle} onChange={(v) => patchProps(sel.id, { mapStyle: v })} wrap />
                   <Row label="Fill"><input type="color" value={sel.props.fillC} onChange={(e) => patchProps(sel.id, { fillC: e.target.value })} /></Row>
                   <SliderRow label="Fill op." min={0} max={1} step={0.01} value={sel.props.fillOp} onChange={(v) => patchProps(sel.id, { fillOp: v })} />

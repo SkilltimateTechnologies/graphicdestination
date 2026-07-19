@@ -42,6 +42,7 @@ const TL = read("src/components/editor/Timeline.jsx");
 const TB = read("src/components/editor/TopBar.jsx");
 const GDM = read("src/components/GraphicDestinationMotion.jsx");
 const ED = read("src/pages/Editor.jsx");
+const INS = read("src/components/editor/Inspector.jsx");
 const MODEL = read("src/components/editor/model.js");
 
 /* ---------- extraction helpers ---------- */
@@ -177,26 +178,31 @@ check("Export keeps the prominent amber accent treatment", TL.includes('classNam
 check("GDM opens the export dialog from the transport button", GDM.includes("exportCtl={{ onExport: () => setExportOpen(true) }}") && GDM.includes("<ExportDialog"));
 check("the clip breadcrumb moved INTO the transport bar (gd-tl-crumb)", TL.includes('className="gd-btn gd-tl-crumb"'));
 check("breadcrumb sits beside the Grid/Animate toggles (before the save control)", TL.indexOf("gd-animate-toggle") < TL.indexOf("gd-tl-crumb") && TL.indexOf("gd-tl-crumb") < TL.indexOf("gd-tl-save"));
-check("breadcrumb is clip-only and navigates with exitToDepth", TL.includes("exitToDepth(0)") && TL.includes("exitToDepth(i + 1)"));
-check("the slim bar above the timeline is now the brand bar (gd-brandbar + BrandMark)", TL.includes('className="gd-brandbar"') && TL.includes("<BrandMark />"));
-check("the brand bar no longer hosts the breadcrumb (logo took its spot)", (() => { const i = TL.indexOf("gd-brandbar"); return !TL.slice(i, i + 700).includes("exitToDepth"); })());
-check("the in-clip hint survives on the brand bar", TL.includes("Editing clip — Esc to go back"));
-check("BrandMark is the Zwoosh amber mark + wordmark", TL.includes('className="gd-brandmark"') && TL.includes("Zwoosh"));
-check("the shell header dropped the logo wordmark (keeps ← Dashboard)", !ED.includes('borderRadius: 8, background: "#F5A524"') && ED.includes("← Dashboard"));
-check("top bar keeps the stage preset + Brand", TB.includes("STAGE_PRESETS") && TB.includes("Brand"));
+check("breadcrumb navigates with exitToDepth", TL.includes("exitToDepth(0)") && TL.includes("exitToDepth(i + 1)"));
+/* R10: the 28px brand bar above the timeline is GONE — the logo moved UP
+   into the new slim 40px top row, "Main" stays beside the Animate toggle
+   (always visible now, not clip-only) and the in-clip hint moved into the
+   transport breadcrumb. */
+check("the brand bar above the timeline is gone (R10)", !TL.includes("gd-brandbar") && !TL.includes("<BrandMark />"));
+check("the Main crumb is always beside the Animate toggle (not clip-only)", TL.indexOf("gd-animate-toggle") < TL.indexOf("gd-tl-crumb"));
+check("the in-clip hint moved into the transport breadcrumb", TL.includes("Editing clip — Esc to go back"));
+check("the 'drag bar = move' hint text is removed (R10)", !TL.includes("drag bar = move"));
+check("BrandMark is the Zwoosh amber mark + wordmark in the slim top row", TB.includes('className="gd-brandmark"') && TB.includes("Zwoosh") && TB.includes("height: 40"));
+check("the editor shell header is gone (no ← Dashboard link, R10)", !ED.includes("← Dashboard") && !ED.includes("barStyle"));
+check("the slim top row keeps the Brand switcher (stage preset lives in the Inspector now)", !TB.includes("STAGE_PRESETS") && TB.includes("BrandSwitcher") && INS.includes("applyStagePreset"));
 
 /* ================= 5. avatar menu ================= */
-console.log("avatar menu — circular initial button, Profile / Logout");
+console.log("avatar menu — circular initial button, Dashboard / Profile / Settings / Logout");
 check("TopBar renders the circular gd-avatar button where Export was", TB.includes('className="gd-avatar"') && TB.includes('borderRadius: "50%"'));
 check("the avatar shows the user's initial (uppercased)", TB.includes('(name.trim().charAt(0) || "Z").toUpperCase()'));
 check("the button exposes menu semantics (aria-haspopup + expanded)", TB.includes('aria-haspopup="menu"') && TB.includes("aria-expanded={open}"));
-check("the menu lists Profile and Logout", TB.includes('item("Profile", onProfile)') && TB.includes('item("Logout", onLogout, "gd-avatar-logout")'));
+check("the menu lists Dashboard, Profile, Settings and Logout (R10)", TB.includes('item("Dashboard", onDashboard, "gd-avatar-dashboard")') && TB.includes('item("Profile", onProfile)') && TB.includes('item("Settings", onSettings, "gd-avatar-settings")') && TB.includes('item("Logout", onLogout, "gd-avatar-logout")'));
 check("menu items are real menuitem buttons with disabled stubs when handlerless", TB.includes('role="menuitem"') && TB.includes("disabled={!handler}"));
 check("the menu closes on outside pointerdown + Escape", TB.includes('window.addEventListener("pointerdown", away)') && TB.includes('e.key === "Escape"'));
-check("GDM threads user + handlers into the top bar", GDM.includes("user={user} onProfile={onProfile} onLogout={onLogout}"));
-check("the shell wires the REAL logout (AuthContext logout → /login)", ED.includes("await logout();") && ED.includes('navigate("/login")') && ED.includes("onLogout={doLogout}"));
-check("Profile navigates to an existing route (the dashboard)", ED.includes('onProfile={() => navigate("/dashboard")}'));
-check("both editor routes (demo + cloud project) get the avatar wiring", (ED.match(/onLogout=\{doLogout\}/g) || []).length === 2);
+check("GDM threads user + all four handlers into the top bar", GDM.includes("user={user} onDashboard={onDashboard} onProfile={onProfile} onSettings={onSettings} onLogout={onLogout}"));
+check("the shell wires the REAL logout (AuthContext logout → /login)", ED.includes("await logout();") && ED.includes('navigate("/login")') && ED.includes("onLogout: doLogout"));
+check("Profile navigates to an existing route (the dashboard)", ED.includes('onProfile: () => navigate("/dashboard")'));
+check("both editor routes (demo + cloud project) get the avatar wiring", (ED.match(/\{\.\.\.shellMenu\}/g) || []).length === 2);
 
 /* ================= 6. lane extras ================= */
 console.log("lane extras — color tag, type icons, hover quick actions");
