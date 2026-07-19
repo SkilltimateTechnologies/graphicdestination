@@ -218,6 +218,7 @@ const SAVE_BTN_STATE = {
 export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, setPlaying, setTime, playing, time, fmt, ctxDur, setCtxDurMs, stretchClips, setStretchClips, loop, setLoop, selMany, groupSelection, ctxLayers, selIds, setSelIds, setSelKf, enterClip, exitToDepth, crumbs, onLayerContext, onLaneContext, toggleHide, toggleLock, reorder, inClip, onAudioLaneDown, audioTrack, audioLaneSel, audioBarMs, onAudioBarDown, camera, cameraLaneSel, onCameraLaneDown, onCameraKfDown, selCamKf, rulerRef, onRulerDown, onBarDown, onKfDown, selKf, onWorldKfDown, rowsRef, barDrag, selGap, onGapDown, onCloseGap, saveCtl, showGrid, onToggleGrid, animateArm, onToggleAnimate, exportCtl, duplicateLayer, removeLayer, cycleTag }) {
   /* horizontal lane scroller (scrub-follow) + hovered lane label (quick actions) */
   const tlScrollRef = useRef(null);
+  const overlayStripRef = useRef(null); /* pinned always-visible ruler copy — synced to tlScrollRef.scrollLeft */
   const [hoverLane, setHoverLane] = useState(null);
   /* SCRUB-FOLLOW (R9w1): the lanes content carries a duration-based min
      width, so long comps overflow the lane viewport horizontally; whenever
@@ -478,11 +479,33 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
           </div>
 
           <div style={{ flex: 1, position: "relative", minWidth: 0 }}>
+            {/* PINNED RULER OVERLAY — an always-visible copy of the ruler that
+                stays at the top when many lanes scroll vertically. It lives in a
+                ZERO-height sticky box (takes no flow space) so it overlays the
+                real ruler below without doubling the height; its tick strip is
+                translated to the lane scroller's scrollLeft (see onScroll below).
+                onPointerDown routes to the same onRulerDown — cursor→time maps via
+                the real rulerRef, whose HORIZONTAL rect stays valid even when it
+                has scrolled out of view, so scrubbing math is unchanged. */}
+            <div style={{ position: "sticky", top: 0, height: 0, zIndex: 9 }}>
+              <div onPointerDown={onRulerDown} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 26, overflow: "hidden", background: C.bg2, borderBottom: `1px solid ${C.line}`, cursor: "col-resize" }}>
+                <div ref={overlayStripRef} style={{ position: "absolute", top: 0, left: 0, height: 26, width: "100%", minWidth: contentMinW, willChange: "transform" }}>
+                  {Array.from({ length: 11 }).map((_, i) => (
+                    <div key={i} style={{ position: "absolute", left: `${i * 10}%`, top: 0, bottom: 0 }}>
+                      <div style={{ width: 1, height: i % 2 === 0 ? 10 : 6, background: C.faint, opacity: 0.6 }} />
+                      {i % 2 === 0 && <span style={{ position: "absolute", top: 9, ...(i === 10 ? { right: 2 } : { left: 3 }), fontSize: 9.5, color: C.faint, fontFamily: "'JetBrains Mono'", fontVariantNumeric: "tabular-nums" }}>{((i * ctxDur) / 10000).toFixed(1)}s</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
             {/* horizontal scroller (scrub-follow): the content div carries a
                 duration-based min width, so long comps overflow and this
                 scroller pans; the label column stays fixed. Vertical scroll
                 stays on the outer container (both columns together). */}
-            <div ref={tlScrollRef} className="gd-tl-scroll" style={{ overflowX: "auto", overflowY: "hidden", width: "100%" }}>
+            <div ref={tlScrollRef} className="gd-tl-scroll"
+              onScroll={(e) => { if (overlayStripRef.current) overlayStripRef.current.style.transform = `translateX(${-e.currentTarget.scrollLeft}px)`; }}
+              style={{ overflowX: "auto", overflowY: "hidden", width: "100%" }}>
             {/* overflowX clip: abs-positioned bits (the playhead arrow at the
                 comp end) must not inflate scrollWidth beyond contentMinW —
                 otherwise the scroller reports phantom overflow when the comp

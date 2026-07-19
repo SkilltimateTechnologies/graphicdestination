@@ -1,7 +1,7 @@
-/* UI elements drawer — animated interface kits (engine/kits.js). Six are
-   offered: FAB radial menu, spinner, bouncing dots, glass card, pressable
-   button, avatar stack. Seven lower-quality ones (iOS notification, toggle,
-   progress bar, badge pill, search bar, brightness slider, toast) are retired
+/* UI elements drawer — animated interface kits (engine/kits.js). Four are
+   offered: FAB radial menu, spinner, bouncing dots, avatar stack. Nine
+   lower-quality ones (iOS notification, toggle, progress bar, badge pill,
+   search bar, brightness slider, toast, glass card, button press) are retired
    from the picker via HIDDEN_UI below — their build fns stay in kits.js so old
    projects still render. Mirrors TemplatesPanel UX (search + category chips +
    card grid); every card carries a LIVE thumbnail rendered by the SAME
@@ -22,7 +22,7 @@ const STAGE = { w: 1280, h: 720 };
 
 /* Retired from the picker for quality reasons (kept in engine/kits.js so old
    projects that reference them still render — never crash on unknown ids). */
-const HIDDEN_UI = new Set(["notification-ios", "toggle-switch", "progress-bar", "badge-pill", "search-bar", "slider-bright", "toast"]);
+const HIDDEN_UI = new Set(["notification-ios", "toggle-switch", "progress-bar", "badge-pill", "search-bar", "slider-bright", "toast", "glass-card", "button-press"]);
 const VISIBLE_UI = UI_ELEMENTS.filter((k) => !HIDDEN_UI.has(k.id));
 
 /* hover-play kit thumbnail: built once (memoized); static frame by default,
