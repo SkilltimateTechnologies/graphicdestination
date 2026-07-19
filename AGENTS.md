@@ -25,8 +25,11 @@ This file exists because features that were **100% working have been accidentall
 | Camera | `project.camera.tracks` {x,y,zoom} + per-object `props.depth` (f=1+depth); object-level Camera card writes eased keyframes | `check-editor-camera` (13), `check-r8w3` |
 | Timeline | row-jump deadzone (60%/20px), gap pills + ripple-close, lock/hide icon toggles, scrub-follow playhead chase, per-prop kf glyphs | `check-timeline` (45), `check-r8w1`, `check-r9w1` |
 | Templates | insert as movable content-sized groups; camera tracks only via buildProject (root-level) | `check-templates` |
-| Settings | `/settings` brand kits + 4-tier text styles + default bg (black fallback); `user_settings` table; editor brand switcher applies via `kitToBrand` | `check-r9w3` (75), `server/test-settings` (38) |
+| Settings | `/settings` brand kits + 4-tier text styles + default bg (black fallback); `user_settings` table; editor brand switcher applies via `kitToBrand` | `check-r9w3` (62), `server/test-settings` (38) |
 | Panels | mutually exclusive rail panels (openOnly); thumbs = representative hold frame (never t=0), hover plays | `check-r8w4` (69) |
+| Undo/hide/Animate | Ctrl+Z restores deleted objects (snapshot undo, inputs keep native undo); hidden layers FULLY invisible on canvas (no ghost opacity); Animate disarm shows re-arm nudge | `check-r10` (137) |
+| Rotation save chain | rotate→◆→save→reload→◆ browser-proven for text/shape/image/kit/clip; the historic trap is Animate-arm persistence (`gd:animateArm`) — disarm = base edits BY DESIGN | `check-r10` |
+| Editor shell | slim 40px top row (logo+name, BrandSwitcher, avatar menu: Dashboard/Profile/Settings/Logout); Export beside Save in timeline bar; Main crumb beside Animate; left drawers width 268 | `check-r10`, `check-r9w1` (86) |
 
 ## Regression history (learn from these)
 - **Rotation keyframes lost** (v2.7): an Inspector edit over-cut the keyframable prop list. → prop lists are asserted now.
