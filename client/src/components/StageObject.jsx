@@ -18,9 +18,11 @@ import { backdropModel } from "../engine/backdrops.js";
 
 /* ---------- on-canvas selection handles (direct manipulation) ----------
    Rendered inside the SAME transformed wrapper as the selection outline, so they
-   track position/rotation/scale for free. `u = 1/stageScale` counter-scales them
-   so grips stay ~8px on screen at any zoom. Base-prop edits only (w/h, the map
-   types' `w`, fontSize for text/number, rotation) — keyframe tracks untouched. */
+   track position/rotation/scale for free. `u = 1/(stageScale × object scale)`
+   counter-scales them so grips stay ~8px on screen at any zoom AND any object
+   scale (resized objects don't blow the grips up). Base-prop edits only (w/h,
+   the map types' `w`, fontSize for text/number, rotation) — keyframe tracks
+   untouched. */
 const RESIZE_CURSORS = ["ew", "nwse", "ns", "nesw"]; /* indexed by drag-axis angle: 0°, 45°, 90°, 135° (mod 180°) */
 const resizeCursor = (axis, rot) => RESIZE_CURSORS[Math.round(((((axis + rot) % 180) + 180) % 180) / 45) % 4] + "-resize";
 const HANDLE_DEFS = [ /* [id, left, top, drag-axis°] — corners + edge midpoints */
@@ -383,7 +385,7 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
      floating 22px above top-center on a 1px stem. Base-prop editing only — hidden
      while playing, multi-selected (move-only), locked, or non-interactive (export). */
   const canManip = selected && interactive && !obj.locked && !playing && selCount <= 1;
-  const u = 1 / Math.max(0.05, stageScale || 1); /* inverse zoom → constant screen size */
+  const u = 1 / Math.max(0.05, (stageScale || 1) * Math.max(0.05, scale)); /* inverse zoom × object scale → constant screen size (same compensation as uClip above) */
   const handles = canManip && (onResize || onRotate)
     ? <>
         {onResize && HANDLE_DEFS.map(([hid, left, top, axis]) => (
