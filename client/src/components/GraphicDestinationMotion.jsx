@@ -21,7 +21,6 @@ import ImagePanel from "./editor/panels/ImagePanel";
 import AudioPanel from "./editor/panels/AudioPanel";
 import TemplatesPanel from "./editor/panels/TemplatesPanel";
 import EmojiPanel from "./editor/panels/EmojiPanel";
-import EmojiLibrary from "./editor/panels/EmojiLibrary";
 import UIElementsPanel from "./editor/panels/UIElementsPanel";
 import ConfettiPanel from "./editor/panels/ConfettiPanel";
 import ChartsPanel from "./editor/panels/ChartsPanel";
@@ -425,7 +424,6 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   const [stretchClips, setStretchClips] = useState(true);
   const [name] = useState("Untitled project"); /* R10: the shell header is gone — this still feeds the export dialog */
   const [exportOpen, setExportOpen] = useState(false);
-  const [emojiLibOpen, setEmojiLibOpen] = useState(false); /* full emoji library modal (opened from the compact EmojiPanel) */
   const [showGrid, setShowGrid] = useState(readGrid); /* canvas alignment grid overlay (StageView) */
   const [selGap, setSelGap] = useState(null); /* selected empty-gap pill: { leftId, rightId, start, end } */
   const [barDrag, setBarDrag] = useState(null); /* live bar body-drag row pin: { id, row } — deadzone keeps horizontal drags in-row */
@@ -890,15 +888,19 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   /* insert a Fluent emoji as ONE movable clip (template-style): emoji.build()
      returns a standard looping clip (image child + engine motion tracks), so
      it reuses the tested template-insert path — reframe to content, drop at the
-     playhead. Closes the library modal + rail panel on insert. */
+     playhead. Built small (100px art) and the whole GROUP is normalized so the
+     content bbox (motion excursions included) is exactly 100px on its longest
+     side — the selection frame hugs a tight 100×100 box and the emoji moves /
+     scales / rotates as one grouped object. Closes the rail panel on insert. */
   const insertEmojiClip = (emoji, opts = {}) => {
-    const built = cloneLayer(emoji.build(opts));
-    const { clip } = reframeClipToContent(built, stage);
+    const built = cloneLayer(emoji.build({ ...opts, size: 100 }));
+    const { clip, box } = reframeClipToContent(built, stage);
     clip.locked = false;
+    const k = 100 / Math.max(1, box.w, box.h);
+    if (Math.abs(k - 1) > 1e-3) clip.props = { ...clip.props, scale: +k.toFixed(4) };
     clip.props.start = Math.max(0, Math.min(Math.max(0, ctxDur - 400), Math.round(timeRef.current / 10) * 10));
     setLayers((ls) => [...ls, clip]);
     setSelIds([clip.id]);
-    setEmojiLibOpen(false);
     setIconsOpen(false);
   };
   const copySelection = () => { if (!selMany.length) return; clipboardRef.current = selMany.map((o) => JSON.parse(JSON.stringify(o))); setClipCount(clipboardRef.current.length); };
@@ -2032,9 +2034,8 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
         {/* templates drawer: search + categories, inserts as one editable clip at the playhead */}
         {templatesOpen && <TemplatesPanel tplQ={tplQ} setTplQ={setTplQ} tplCat={tplCat} setTplCat={setTplCat} insertTemplateClip={insertTemplateClip} />}
 
-        {/* icons drawer: 42 animated stroke icons, insert as looping clips */}
-        {iconsOpen && <EmojiPanel openLibrary={() => setEmojiLibOpen(true)} />}
-        <EmojiLibrary open={emojiLibOpen} onClose={() => setEmojiLibOpen(false)} insertEmojiClip={insertEmojiClip} />
+        {/* emoji drawer: featured teaser + → arrow, full library inline (no modal); inserts as one movable 100×100 clip */}
+        {iconsOpen && <EmojiPanel insertEmojiClip={insertEmojiClip} />}
 
         {/* UI elements drawer: 13 animated interface pieces, insert as looping clips */}
         {uiOpen && <UIElementsPanel uiQ={uiQ} setUiQ={setUiQ} uiCat={uiCat} setUiCat={setUiCat} insertKitClip={insertKitClip} />}

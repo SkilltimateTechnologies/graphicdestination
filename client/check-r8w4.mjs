@@ -316,7 +316,7 @@ async function main() {
       const names = await laneNames();
       check(`insert ${label} → new lane (${before} → ${after})`, after === before + 1 && (!expectName || names.some((n) => n.toLowerCase().includes(expectName.toLowerCase()))), names.join(" · "));
     };
-    /* emoji: rail → compact teaser → "Browse all" → library modal → click a card */
+    /* emoji: rail → compact teaser → right arrow (browse inline) → click a card */
     {
       const before = await laneCount();
       await page.locator('button:has(span:text-is("Emoji"))').first().click();

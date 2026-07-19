@@ -181,7 +181,6 @@ async function main() {
     `export { default as Inspector } from ${JSON.stringify(path.join(here, "src", "components", "editor", "Inspector.jsx"))};`,
     `export { default as ShapesPanel } from ${JSON.stringify(path.join(here, "src", "components", "editor", "panels", "ShapesPanel.jsx"))};`,
     `export { default as EmojiPanel } from ${JSON.stringify(path.join(here, "src", "components", "editor", "panels", "EmojiPanel.jsx"))};`,
-    `export { default as EmojiLibrary } from ${JSON.stringify(path.join(here, "src", "components", "editor", "panels", "EmojiLibrary.jsx"))};`,
     `export { createElement } from "react";`,
     `export { renderToStaticMarkup } from "react-dom/server";`,
     "",
@@ -193,7 +192,7 @@ async function main() {
     build: { outDir: tmpDir, lib: { entry, formats: ["es"], fileName: () => "engine.mjs" } },
   });
   const M = await import(pathToFileURL(path.join(tmpDir, "engine.mjs")).href);
-  const { StageObject, Inspector, ShapesPanel, EmojiPanel, EmojiLibrary, createElement: h, renderToStaticMarkup } = M;
+  const { StageObject, Inspector, ShapesPanel, EmojiPanel, createElement: h, renderToStaticMarkup } = M;
   const stage = { w: 1280, h: 720 };
   const ssr = (obj, time, extra = {}) => renderToStaticMarkup(h(StageObject, { obj, time, stage, selected: false, interactive: false, ...extra }));
   const inkOf = (markup) => (markup.match(/fill[:="]/g) || []).length + (markup.match(/<(rect|circle|ellipse|path|polygon|text)[ >]/g) || []).length;
@@ -313,17 +312,18 @@ async function main() {
       check(`ui:${k.id} hold frame (40%) is non-empty`, ms.length > 500 && inkOf(ms) >= 2, `len=${ms.length} ink=${inkOf(ms)}`);
       check(`ui:${k.id} hold frame is NaN-free`, !ms.includes("NaN"));
     }
-    /* the Emoji library (Fluent 3D) lists every emoji as a grid card, thumbs
-       non-empty; the compact EmojiPanel is a featured teaser that opens it */
-    const lib = renderToStaticMarkup(h(EmojiLibrary, { open: true, onClose: () => {}, insertEmojiClip: () => {} }));
+    /* the Emoji panel is a featured teaser + right arrow; the FULL library
+       loads INLINE in the same panel (startBrowsing) — no modal, thumbs
+       non-empty on every card */
+    const lib = renderToStaticMarkup(h(EmojiPanel, { insertEmojiClip: () => {}, startBrowsing: true }));
     const cards = lib.split('data-emoji-card="').slice(1);
-    check("EmojiLibrary lists ALL Fluent emoji as cards", cards.length === EMOJIS.length, `got ${cards.length} of ${EMOJIS.length}`);
-    check("EmojiLibrary is a floating searchable modal", lib.includes('role="dialog"') && lib.includes("position:fixed") && /Search emoji/i.test(lib));
-    check("EmojiLibrary uses an auto-fill card grid", lib.includes("grid-template-columns"));
+    check("inline emoji library lists ALL Fluent emoji as cards", cards.length === EMOJIS.length, `got ${cards.length} of ${EMOJIS.length}`);
+    check("the library is INLINE in the panel (no modal overlay)", !lib.includes("position:fixed") && !lib.includes('role="dialog"') && /Search emoji/i.test(lib));
+    check("the inline library uses an auto-fill card grid", lib.includes("grid-template-columns"));
     check("every emoji card carries a non-empty still thumbnail", cards.length > 0 && cards.every((c) => c.includes("data-thumb-still")));
-    const ep = renderToStaticMarkup(h(EmojiPanel, { openLibrary: () => {} }));
+    const ep = renderToStaticMarkup(h(EmojiPanel, { insertEmojiClip: () => {} }));
     check("EmojiPanel shows 4 featured emoji as a teaser", (ep.split('data-emoji-featured="').length - 1) === 4);
-    check("EmojiPanel has a Browse-all button into the library", ep.includes("data-emoji-browse") && /Browse all/i.test(ep));
+    check("EmojiPanel has a right-arrow browse affordance (no big button)", ep.includes("data-emoji-browse") && ep.includes("→") && !/Browse all \d+ emoji →/.test(ep));
     check("EmojiPanel keeps the floating panel shell", ep.includes("gd-panel") && ep.includes("position:absolute"));
   }
 
