@@ -386,8 +386,7 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
 
         <div style={{ flex: 1, display: "flex", minHeight: 0, overflowY: "auto" }}>
           <div style={{ width: 212, flexShrink: 0, borderRight: `1px solid ${C.line}` }}>
-            {/* top-left corner — sticky so it stays put under the pinned ruler */}
-            <div style={{ height: 26, position: "sticky", top: 0, zIndex: 7, background: C.bg1 }} />
+            <div style={{ height: 26 }} />
             {/* camera lane header — pinned at the TOP (main timeline only: the
                 scene camera lives at root). Click selects "Camera" in the Inspector. */}
             {!inClip && (
@@ -488,32 +487,21 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
                 duration-based min width, so long comps overflow and this
                 scroller pans; the label column stays fixed. Vertical scroll
                 stays on the outer container (both columns together). */}
-            {/* PINNED RULER (always-visible scrub bar): the ruler used to live
-                inside the vertical scroll and slid out of view once there were
-                enough layers to scroll. It now sits in a sticky band pinned to
-                the top of the timeline (outside the horizontal scroller); its
-                tick strip is translated to match the lane scroller's scrollLeft
-                (see the scroller's onScroll below), so scrubbing stays visible
-                AND aligned with the bars. rulerRef → the translated strip, so
-                the cursor→time math (getBoundingClientRect) is unchanged. */}
-            <div style={{ position: "sticky", top: 0, zIndex: 8, height: 26, overflow: "hidden", background: C.bg2, borderBottom: `1px solid ${C.line}` }}>
-              <div ref={rulerRef} onPointerDown={onRulerDown} style={{ position: "absolute", top: 0, left: 0, height: 26, width: "100%", minWidth: contentMinW, cursor: "col-resize", willChange: "transform" }}>
-                {Array.from({ length: 11 }).map((_, i) => (
-                  <div key={i} style={{ position: "absolute", left: `${i * 10}%`, top: 0, bottom: 0 }}>
-                    <div style={{ width: 1, height: i % 2 === 0 ? 10 : 6, background: C.faint, opacity: 0.6 }} />
-                    {i % 2 === 0 && <span style={{ position: "absolute", top: 9, ...(i === 10 ? { right: 2 } : { left: 3 }), fontSize: 9.5, color: C.faint, fontFamily: "'JetBrains Mono'", fontVariantNumeric: "tabular-nums" }}>{((i * ctxDur) / 10000).toFixed(1)}s</span>}
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div ref={tlScrollRef} className="gd-tl-scroll"
-              onScroll={(e) => { if (rulerRef.current) rulerRef.current.style.transform = `translateX(${-e.currentTarget.scrollLeft}px)`; }}
-              style={{ overflowX: "auto", overflowY: "hidden", width: "100%" }}>
+            <div ref={tlScrollRef} className="gd-tl-scroll" style={{ overflowX: "auto", overflowY: "hidden", width: "100%" }}>
             {/* overflowX clip: abs-positioned bits (the playhead arrow at the
                 comp end) must not inflate scrollWidth beyond contentMinW —
                 otherwise the scroller reports phantom overflow when the comp
                 fits the viewport and the follow math fights a stuck scrollLeft. */}
             <div style={{ width: "100%", minWidth: contentMinW, position: "relative", overflowX: "clip" }}>
+            <div ref={rulerRef} onPointerDown={onRulerDown} style={{ height: 26, position: "relative", cursor: "col-resize", borderBottom: `1px solid ${C.line}`, background: C.bg2 }}>
+              {Array.from({ length: 11 }).map((_, i) => (
+                <div key={i} style={{ position: "absolute", left: `${i * 10}%`, top: 0, bottom: 0 }}>
+                  <div style={{ width: 1, height: i % 2 === 0 ? 10 : 6, background: C.faint, opacity: 0.6 }} />
+                  {i % 2 === 0 && <span style={{ position: "absolute", top: 9, ...(i === 10 ? { right: 2 } : { left: 3 }), fontSize: 9.5, color: C.faint, fontFamily: "'JetBrains Mono'", fontVariantNumeric: "tabular-nums" }}>{((i * ctxDur) / 10000).toFixed(1)}s</span>}
+                </div>
+              ))}
+            </div>
+
             <div onPointerDown={onRulerDown} style={{ position: "relative" }}>
               {/* camera lane — pinned at the TOP, above the packed rows (mirrors the
                   audio lane pattern). ★ star glyphs for x/y/zoom (R9w1 — the
