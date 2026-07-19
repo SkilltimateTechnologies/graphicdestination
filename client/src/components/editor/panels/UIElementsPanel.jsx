@@ -1,7 +1,9 @@
-/* UI elements drawer — 13 animated interface kits (engine/kits.js):
-   iOS notification, squash-stretch toggle, FAB radial menu, loaders,
-   glass card, pressable button, badge, avatar stack, search bar,
-   slider, toast. Mirrors TemplatesPanel UX (search + category chips +
+/* UI elements drawer — animated interface kits (engine/kits.js). Six are
+   offered: FAB radial menu, spinner, bouncing dots, glass card, pressable
+   button, avatar stack. Seven lower-quality ones (iOS notification, toggle,
+   progress bar, badge pill, search bar, brightness slider, toast) are retired
+   from the picker via HIDDEN_UI below — their build fns stay in kits.js so old
+   projects still render. Mirrors TemplatesPanel UX (search + category chips +
    card grid); every card carries a LIVE thumbnail rendered by the SAME
    <StageObject> the stage/export use, crop-zoomed via frameOf() and
    HOVER-PLAYED (R7a): static representative frame by default, the shared
@@ -17,6 +19,11 @@ import { useHoverPlay } from "../TemplateThumb";
 
 const THUMB_W = 100, THUMB_H = 74;
 const STAGE = { w: 1280, h: 720 };
+
+/* Retired from the picker for quality reasons (kept in engine/kits.js so old
+   projects that reference them still render — never crash on unknown ids). */
+const HIDDEN_UI = new Set(["notification-ios", "toggle-switch", "progress-bar", "badge-pill", "search-bar", "slider-bright", "toast"]);
+const VISIBLE_UI = UI_ELEMENTS.filter((k) => !HIDDEN_UI.has(k.id));
 
 /* hover-play kit thumbnail: built once (memoized); static frame by default,
    the 120 ms ticker runs only while hovered, resets on leave */
@@ -46,14 +53,14 @@ const KitThumb = memo(function KitThumb({ kit }) {
 });
 
 export default function UIElementsPanel({ uiQ, setUiQ, uiCat, setUiCat, insertKitClip }) {
-  const cats = ["All", ...UI_CATS];
+  const cats = ["All", ...UI_CATS.filter((c) => VISIBLE_UI.some((k) => k.category === c))];
   const q = uiQ.trim().toLowerCase();
-  const list = UI_ELEMENTS.filter((k) =>
+  const list = VISIBLE_UI.filter((k) =>
     (uiCat === "All" || k.category === uiCat) &&
     (!q || k.name.toLowerCase().includes(q) || k.tags.some((t) => t.includes(q))));
   return (
     <div className="gd-panel" style={{ position: "absolute", left: 84, top: 12, width: 264, background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 8, padding: 12, zIndex: 30, boxShadow: "0 12px 40px rgba(0,0,0,.5)" }}>
-      <div style={{ ...sectionLabel, marginBottom: 9 }}>UI elements · {UI_ELEMENTS.length} animated · insert as locked object</div>
+      <div style={{ ...sectionLabel, marginBottom: 9 }}>UI elements · {VISIBLE_UI.length} animated · insert as locked object</div>
       <input autoFocus value={uiQ} onChange={(e) => setUiQ(e.target.value)} placeholder="Search UI elements…" style={{ ...inputStyle, marginBottom: 8 }} />
       <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 10 }}>
         {cats.map((c) => (
