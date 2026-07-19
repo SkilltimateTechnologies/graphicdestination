@@ -133,7 +133,7 @@ async function main() {
   /* ================= B · text presets (pure) ================= */
   console.log("\nB · text presets (panel effects removed in R10)");
   {
-    check("four style presets, one per tier", TEXT_TIER_PRESETS.length === 4 && TEXT_TIER_PRESETS.map((p) => p.id).join(",") === "heading,subheading,body,caption");
+    check("two style presets (heading + body)", TEXT_TIER_PRESETS.length === 2 && TEXT_TIER_PRESETS.map((p) => p.id).join(",") === "heading,body");
     /* R10: the ten drop-in effect cards are gone from TextPanel — the panel
        exports no TEXT_EFFECTS/effectInsertProps anymore… */
     const tpSrc = read("src/components/editor/panels/TextPanel.jsx");
@@ -149,7 +149,7 @@ async function main() {
     const hp = presetInsertProps(TEXT_TIER_PRESETS[0], styles, brand);
     check("preset insert honors the settings config (font/size/weight)", hp.fontFamily === "Oswald" && hp.fontSize === 84 && hp.fontWeight === 700);
     check("preset insert uses the brand text color as fill", hp.fill === "#DDDDDD");
-    const bp = presetInsertProps(TEXT_TIER_PRESETS[2], styles, brand);
+    const bp = presetInsertProps(TEXT_TIER_PRESETS[1], styles, brand);
     check("normal-text preset uses the body tier", bp.fontFamily === "Caveat" && bp.fontSize === 30 && bp.text === "Normal text");
     check("preset insert survives a missing brand", presetInsertProps(TEXT_TIER_PRESETS[0], styles, null).fill === "#F9F9F9");
   }
@@ -161,10 +161,10 @@ async function main() {
     const brand = { id: "b1", name: "Zwoosh", colors: ["#FFB224", "#FF6B6B", "#5B8CFF", "#6EE7B7", "#F9F9F9"], headFont: "Space Grotesk", bodyFont: "Inter" };
     const tp = renderToStaticMarkup(h(TextPanel, { addObject: () => {}, setTextOpen: () => {}, textStyles: settingsStyles, brand }));
     check("TextPanel renders the drawer", tp.includes("data-text-panel"));
-    check("TextPanel shows all four style preset cards", ["heading", "subheading", "body", "caption"].every((id) => tp.includes(`data-preset="${id}"`)));
-    check("preset cards name the tiers (Heading / Subheading / Normal text / Caption)", tp.includes("Heading") && tp.includes("Subheading") && tp.includes("Normal text") && tp.includes("Caption"));
+    check("TextPanel shows both style preset cards", ["heading", "body"].every((id) => tp.includes(`data-preset="${id}"`)));
+    check("preset cards name the tiers (Heading / Normal text)", tp.includes("Heading") && tp.includes("Normal text"));
     check("preset cards show the configured settings font (Oswald heading)", tp.includes("Oswald") && tp.includes("84px"));
-    check("preset cards show the settings caption config", tp.includes("JetBrains Mono") && tp.includes("13px"));
+    check("subheading/caption preset cards are gone", !tp.includes('data-preset="subheading"') && !tp.includes('data-preset="caption"'));
     /* R10: the effects shelf is gone — no data-fx cards, no hover-play hint */
     check("TextPanel renders NO effect cards (R10)", !tp.includes("data-fx") && !tp.includes("data-thumb-still") && !/hover a card to play/i.test(tp));
 

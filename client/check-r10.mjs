@@ -275,8 +275,8 @@ console.log("\n#A10 MapsPanel is a left .gd-panel drawer (width 268) + width nor
   check("GDM's main region carries the gd-main class", GDM.includes('className="gd-main"'));
 }
 
-/* ---------- 11. Text effects gone from TextPanel (4 presets stay) ---------- */
-console.log("\n#A11 TextPanel: effects removed, the 4 style presets stay (fx live in the Inspector)");
+/* ---------- 11. Text effects gone from TextPanel (2 presets stay) ---------- */
+console.log("\n#A11 TextPanel: effects removed, the 2 style presets stay (fx live in the Inspector)");
 {
   check("no TEXT_EFFECTS registry remains", !TP.includes("TEXT_EFFECTS"));
   check("no effectInsertProps helper remains", !TP.includes("effectInsertProps"));
@@ -284,8 +284,8 @@ console.log("\n#A11 TextPanel: effects removed, the 4 style presets stay (fx liv
   const m = TP.match(/export const TEXT_TIER_PRESETS = (\[[\s\S]*?\]);/);
   let presets = null;
   try { presets = m && eval(m[1]); } catch { /* eval failed */ }
-  check("TEXT_TIER_PRESETS holds EXACTLY the 4 tiers (heading/subheading/body/caption)",
-    Array.isArray(presets) && presets.length === 4 && JSON.stringify(presets.map((p) => p.id)) === '["heading","subheading","body","caption"]',
+  check("TEXT_TIER_PRESETS holds EXACTLY the 2 kept tiers (heading/body)",
+    Array.isArray(presets) && presets.length === 2 && JSON.stringify(presets.map((p) => p.id)) === '["heading","body"]',
     presets ? presets.map((p) => p.id).join(",") : "unreadable");
   /* exercise the REAL presetInsertProps (pure — extracted verbatim) */
   let pip = null;

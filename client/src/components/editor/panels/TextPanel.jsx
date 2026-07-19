@@ -1,5 +1,5 @@
-/* text drawer (R10) — the panel offers the four STYLE PRESETS:
-   Heading / Subheading / Normal text / Caption, styled from the user's
+/* text drawer (R10) — the panel offers two STYLE PRESETS:
+   Heading / Normal text, styled from the user's
    settings text-style config (Settings page) with the active brand's
    fonts filling any gap and its text color as the fill.
    R10: the ten drop-in TEXT EFFECT cards (typewriter terminal, cinematic
@@ -12,9 +12,7 @@ import { TEXT_TIER_LABELS } from "../../../lib/settings.js";
 /* ---------- style presets (tiers) ---------- */
 export const TEXT_TIER_PRESETS = [
   { id: "heading", ls: 0.5, sample: "Heading" },
-  { id: "subheading", ls: 0.5, sample: "Subheading" },
   { id: "body", ls: 0, sample: "Normal text" },
-  { id: "caption", ls: 1, sample: "Caption" },
 ];
 
 /* ---------- pure insert-prop builder (node-checked) ----------
@@ -40,7 +38,7 @@ export default function TextPanel({ addObject, setTextOpen, textStyles, brand })
       <div style={{ ...sectionLabel, marginBottom: 4 }}>Text</div>
       <div style={{ color: C.faint, fontSize: 9.5, lineHeight: 1.5, marginBottom: 10 }}>Click a preset to insert — fonts & sizes come from your <b>Settings</b> text styles.</div>
 
-      {/* style presets — 2×2 cards */}
+      {/* style presets — two cards */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
         {TEXT_TIER_PRESETS.map((p) => {
           const st = (textStyles && textStyles[p.id]) || {};
@@ -48,7 +46,7 @@ export default function TextPanel({ addObject, setTextOpen, textStyles, brand })
             <button key={p.id} className="gd-btn" data-preset={p.id} title={`Insert ${TEXT_TIER_LABELS[p.id]} — ${st.fontFamily || ""} ${st.fontSize || ""}px`}
               onClick={() => insertPreset(p)}
               style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, background: C.bg1, border: `1px solid ${C.line}`, borderRadius: 8, padding: "8px 10px", cursor: "pointer", textAlign: "left" }}>
-              <span style={{ color: C.txt, fontFamily: `'${st.fontFamily || "Space Grotesk"}'`, fontWeight: st.fontWeight || 700, fontSize: p.id === "heading" ? 17 : p.id === "subheading" ? 14.5 : 12.5, lineHeight: 1.25, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span style={{ color: C.txt, fontFamily: `'${st.fontFamily || "Space Grotesk"}'`, fontWeight: st.fontWeight || 700, fontSize: p.id === "heading" ? 17 : 12.5, lineHeight: 1.25, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {p.sample}
               </span>
               <span style={{ fontSize: 9, color: C.faint, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" }}>{TEXT_TIER_LABELS[p.id]}</span>
