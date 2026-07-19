@@ -131,7 +131,10 @@ console.log("sticky header + docked timeline");
   const ed = read("src/pages/Editor.jsx");
   const gdm = read("src/components/GraphicDestinationMotion.jsx");
   check("editor shell root clips any page scroll (overflow hidden)", ed.includes('overflow: "hidden"'));
-  check("editor header is sticky at top as a fallback", ed.includes('position: "sticky"') && ed.includes("top: 0"));
+  /* R10: the shell header is GONE — the editor fills 100vh under its own
+     slim 40px top row (gd-topbar inside GDM), so there is no header to
+     pin; overflow:hidden keeps nothing scrollable. */
+  check("R10: shell header removed — GDM's slim top row is the only bar", !ed.includes("barStyle") && read("src/components/editor/TopBar.jsx").includes('className="gd-topbar"') && read("src/components/editor/TopBar.jsx").includes("height: 40"));
   check("GDM fills its parent (height 100% — no more 100vh overflow under the shell header)", gdm.includes('height: "100%"') && !gdm.includes('height: "100vh"'));
   check("timeline is docked: fixed height, flexShrink 0", TL.includes("height: tlH") && TL.includes("flexShrink: 0"));
   check("only the timeline track area scrolls internally", TL.includes('overflowY: "auto"'));
@@ -143,7 +146,11 @@ console.log("top-bar purge + save relocation");
   const tb = read("src/components/editor/TopBar.jsx");
   const gdm = read("src/components/GraphicDestinationMotion.jsx");
   const ed = read("src/pages/Editor.jsx");
-  check("logo block removed from the editor top bar", !tb.includes("Zwoosh") && !tb.includes("v0.5"));
+  /* R10: the brand block is CONSOLIDATED, not duplicated — the old shell
+     header wordmark is gone and the single Zwoosh mark lives in the slim
+     top row (40px) at the top of the editor chrome. */
+  check("logo lives ONLY in the slim 40px top row (shell header gone)", tb.includes("Zwoosh") && tb.includes("height: 40") && !ed.includes("← Dashboard"));
+  check("old version badge still gone from the editor chrome", !tb.includes("v0.5") && !ed.includes("v0.5"));
   check("duplicate project-title input removed from the top bar", !tb.includes("gd-name-input") && !tb.includes("setName"));
   check("Save/Load button removed from the top bar", !tb.includes("Save / Load") && !tb.includes("setIoOpen"));
   check("Share button removed from the editor chrome", !tb.includes("Share") && !ed.includes("ShareDialog") && !ed.includes("shareOpen") && !ed.includes("sharedPill"));
@@ -158,8 +165,11 @@ console.log("top-bar purge + save relocation");
   /* R9w1: Export moved from the top bar into the timeline transport bar,
      beside the save control, keeping the amber accent treatment */
   check("R9w1: Export left the top bar for the timeline transport bar (still prominent)", !tb.includes(">Export<") && TL.includes("gd-tl-export") && TL.includes("gd-btn-accent"));
-  check("stage preset + Brand survive the purge", tb.includes("STAGE_PRESETS") && tb.includes("Brand"));
-  check("shell still shows the project title once (center of the sticky header)", ed.includes("{proj.name}"));
+  /* R10: the Brand switcher stays in the slim top row; the stage-size
+     preset moved fully into the Inspector's Stage card. */
+  check("Brand switcher survives in the slim top row", tb.includes("BrandSwitcher"));
+  check("stage preset lives in the Inspector now (not the top row)", !tb.includes("STAGE_PRESETS") && read("src/components/editor/Inspector.jsx").includes("STAGE_PRESETS"));
+  check("R10: the shell header (with its project title) is removed", !ed.includes("{proj.name}") && !ed.includes("gd-signout"));
   check("shell passes saveState + onSaveNow into the editor", ed.includes("saveState={saveState}") && ed.includes("onSaveNow={saveNow}"));
   check("GDM builds the save control only when the shell wires it", gdm.includes("const saveCtl = saveState && onSaveNow ? { state: saveState, onSave: onSaveNow } : null;"));
   check("save control renders in the timeline transport bar", TL.includes("gd-tl-save") && TL.includes("saveCtl.onSave"));

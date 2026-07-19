@@ -297,7 +297,7 @@ function audioErrorText(err) {
 /* ============================================================
    APP
    ============================================================ */
-export default function GraphicDestinationMotion({ initialProject, onChange, saveState, onSaveNow, user, onLogout, onProfile } = {}) {
+export default function GraphicDestinationMotion({ initialProject, onChange, saveState, onSaveNow, user, onLogout, onProfile, onDashboard, onSettings } = {}) {
   const [objects, setObjects] = useState(demoProject);
   const [stage, setStage] = useState({ w: 1280, h: 720 });
   const [compDur, setCompDur] = useState(6000);
@@ -333,8 +333,14 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
      edit (R8 behavior), disarmed = patch the base layer without keyframes. */
   const [animateArm, setAnimateArm] = useState(readArm);
   const autokey = animateArm;
+  /* R10 disarm-nudge: the arm PERSISTS across sessions (localStorage), so one
+     forgotten disarm click used to make every later canvas transform silently
+     skip keyframes. Now the first move/rotate/clip-scale that lands while
+     disarmed raises a banner with a one-click re-arm. */
+  const [armNudge, setArmNudge] = useState(false);
   const setAnimateArmPersist = useCallback((v) => {
     setAnimateArm(v);
+    if (v) setArmNudge(false); /* re-arming (any path) settles the nudge */
     try { localStorage.setItem(ARM_KEY, v ? "1" : "0"); } catch { /* storage unavailable — the arm just won't persist */ }
   }, []);
   /* R9w3 default stage background: a brand-new project starts on the user's
@@ -407,10 +413,17 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   snapOnRef.current = snapOn;
   const [snapGuides, setSnapGuides] = useState(null); /* alignment guides — set only while a canvas drag is active */
   const clipboardRef = useRef([]);
+  /* R10: single-slot undo snapshot for deletions. Delete/Backspace, the
+     timeline lane ✕ and the context-menu delete all funnel through
+     removeSelected/removeLayer, which snapshot the FULL root layer tree +
+     selection + clip path here first; Ctrl/Cmd+Z then restores objects
+     deleted on the canvas OR the timeline. Text inputs keep their native
+     undo (the keydown handler bails on form fields). */
+  const undoRef = useRef(null);
   const [clipCount, setClipCount] = useState(0);
   const [menu, setMenu] = useState(null); // context menu {x,y,kind,...}
   const [stretchClips, setStretchClips] = useState(true);
-  const [name] = useState("Untitled project"); /* title lives in the editor shell header (R8w1) — still feeds the export dialog */
+  const [name] = useState("Untitled project"); /* R10: the shell header is gone — this still feeds the export dialog */
   const [exportOpen, setExportOpen] = useState(false);
   const [emojiLibOpen, setEmojiLibOpen] = useState(false); /* full emoji library modal (opened from the compact EmojiPanel) */
   const [showGrid, setShowGrid] = useState(readGrid); /* canvas alignment grid overlay (StageView) */
@@ -734,6 +747,15 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
 
   useEffect(() => {
     const onKey = (e) => {
+      /* R10: Ctrl/Cmd+Z restores the last deletion — but NEVER inside text
+         inputs, where the browser's own undo must keep working. */
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        const t = e.target.tagName;
+        if (t === "INPUT" || t === "TEXTAREA" || t === "SELECT" || e.target.isContentEditable) return;
+        e.preventDefault();
+        undoDelete();
+        return;
+      }
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") return;
       if (e.code === "Space") { e.preventDefault(); setPlaying((p) => !p); }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "g") { e.preventDefault(); groupSelection(); }
@@ -886,7 +908,27 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     setLayers((ls) => [...ls, ...clones]);
     setSelIds(clones.map((c) => c.id));
   };
-  const removeSelected = () => { setLayers((ls) => ls.filter((o) => !selIds.includes(o.id) || o.locked)); setSelIds([]); };
+  /* R10 undo-delete: snapshot the tree right before a destructive removal… */
+  const pushUndo = () => {
+    undoRef.current = { objects: JSON.parse(JSON.stringify(objects)), selIds: [...selIds], path: [...path] };
+  };
+  /* …and restore it on Ctrl/Cmd+Z. Returns false when there is nothing to undo. */
+  const undoDelete = () => {
+    const snap = undoRef.current;
+    if (!snap) return false;
+    undoRef.current = null;
+    setObjects(snap.objects);
+    setPath(snap.path);
+    setSelIds(snap.selIds);
+    setSelKf(null);
+    setSelGap(null);
+    return true;
+  };
+  const removeSelected = () => {
+    if (selIds.some((id) => { const l = ctxLayers.find((x) => x.id === id); return l && !l.locked; })) pushUndo();
+    setLayers((ls) => ls.filter((o) => !selIds.includes(o.id) || o.locked));
+    setSelIds([]);
+  };
   const duplicateSelected = () => {
     const clones = selMany.map((o) => { const c = cloneLayer(o); c.name = o.name + " copy"; c.locked = false; c.props = { ...c.props, x: c.props.x + 24, y: c.props.y + 24 }; if (c.props.path) c.props.path = { ...c.props.path, pts: c.props.path.pts.map(([px, py]) => [px + 24, py + 24]) }; return c; });
     setLayers((ls) => [...ls, ...clones]);
@@ -909,6 +951,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   const removeLayer = (id) => {
     const o = ctxLayers.find((x) => x.id === id);
     if (!o || o.locked) return;
+    pushUndo();
     setLayers((ls) => ls.filter((x) => x.id !== id));
     setSelIds((s) => s.filter((i) => i !== id));
   };
@@ -1324,6 +1367,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
          base x/y only (R9w1). Path-dragged members shift their path points
          instead, position comes from the path. */
       d.members.forEach((m) => { const lv = d.live[m.id]; if (lv && !m.hasPath) { canvasEditProp(m.id, "x", lv.x); canvasEditProp(m.id, "y", lv.y); } });
+      if (!autokey) setArmNudge(true); /* R10: a move landed with no ◆ written — nudge the re-arm */
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -1542,6 +1586,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     const prevCursor = document.body.style.cursor;
     document.body.style.cursor = "grabbing";
     const move = (ev) => {
+      if (!autokey) setArmNudge(true); /* R10: rotate landed disarmed — no ◆ is being written, nudge the re-arm */
       const a = Math.atan2(ev.clientY - cy, ev.clientX - cx);
       let nr = Math.round(r0 + ((a - a0) * 180) / Math.PI);
       if (ev.shiftKey) nr = Math.round(nr / 15) * 15;
@@ -1594,6 +1639,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     const prevCursor = document.body.style.cursor;
     if (cursor) document.body.style.cursor = cursor;
     const move = (ev) => {
+      if (!autokey) setArmNudge(true); /* R10: clip-scale landed disarmed — no ◆ is being written, nudge the re-arm */
       const dx = (ev.clientX - sx) / (stageScale * cs), dy = (ev.clientY - sy) / (stageScale * cs);
       const ns = Math.max(0.05, Math.min(10, Math.round(s0 * (Math.hypot(ax + dx, ay + dy) / r0) * 100) / 100));
       if (autokey) setKeyframe(obj.id, "scale", timeRef.current, ns); /* R8w3: always ◆ at the playhead (fresh props start their track) */
@@ -1785,12 +1831,14 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
-  /* ---------- audio lane: click selects (opens the panel when empty), bar drag retimes startT ---------- */
+  /* ---------- audio lane: click selects (R10: the EMPTY lane no longer pops
+     the Audio panel — an unexpected upload window opening mid-work was the
+     reported bug; the rail's Audio button remains the way to open it), bar
+     drag retimes startT ---------- */
   const onAudioLaneDown = (e) => {
     if (e.button === 2) return;
     e.stopPropagation();
     if (audioTrack) selectAudio();
-    else setAudioOpen(true);
   };
   /* bar body drag = move start offset, snapped to 100ms, clamped inside the composition */
   const onAudioBarDown = (e) => {
@@ -1950,22 +1998,28 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
         .gd-tl-handle:hover .gd-tl-handle-line{opacity:1}
         .gd-tl-handle.gd-dragging .gd-tl-handle-line{opacity:1}
         .gd-rzh::after{content:"";position:absolute;inset:-55%} /* fat-finger hit zone around the 8px selection grips */
+        /* R10: ALL left-rail drawers share one width (inline panel styles vary,
+           this wins) so the rail reads as one consistent column */
+        .gd-main > .gd-panel{width:268px !important}
+        @keyframes gdNudgeIn{from{opacity:0;transform:translate(-50%,6px)}to{opacity:1;transform:translate(-50%,0)}}
+        .gd-disarm-nudge{animation:gdNudgeIn 180ms ease-out}
       `}</style>
       <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onPickImage} />
       <input ref={assetFileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" style={{ display: "none" }} onChange={onPickAsset} />
       <input ref={audioFileRef} type="file" accept={AUDIO_ACCEPT_ATTR} style={{ display: "none" }} onChange={onPickAudioAsset} />
 
-      {/* ============ TOP BAR ============ */}
-      {/* R9w1: Export moved to the timeline transport bar; the top bar now
-          ends with the avatar account menu (Profile / Logout — wired by the
-          Editor shell; standalone renders stub-disabled items). */}
-      <TopBar exitToDepth={exitToDepth} inClip={inClip} ctx={ctx}
-        stage={stage} applyStagePreset={applyStagePreset} stageIsPreset={stageIsPreset} brand={brand}
+      {/* ============ TOP BAR (R10 slim 40px row) ============ */}
+      {/* BrandMark + "Zwoosh" left · BrandSwitcher kept · avatar menu at the
+          right end (Dashboard / Profile / Settings / Logout — real handlers
+          wired by the Editor shell; standalone renders disabled stubs). The
+          old Main breadcrumb moved into the timeline transport bar; the
+          stage preset lives in the Inspector. */}
+      <TopBar brand={brand}
         brandKits={userSettings.brandKits} onApplyKit={applyBrandKit} onManageBrand={() => window.location.assign("/settings")}
-        user={user} onProfile={onProfile} onLogout={onLogout} />
+        user={user} onDashboard={onDashboard} onProfile={onProfile} onSettings={onSettings} onLogout={onLogout} />
 
       {/* ============ MAIN ============ */}
-      <div style={{ display: "flex", flex: 1, minHeight: 0, position: "relative" }}>
+      <div className="gd-main" style={{ display: "flex", flex: 1, minHeight: 0, position: "relative" }}>
         <IconRail shapesOpen={shapesOpen} setShapesOpen={setShapesOpen} textOpen={textOpen} setTextOpen={setTextOpen} imagesOpen={imagesOpen} setImagesOpen={setImagesOpen}
           audioOpen={audioOpen} setAudioOpen={setAudioOpen} mapsOpen={mapsOpen} setMapsOpen={setMapsOpen}
           templatesOpen={templatesOpen} setTemplatesOpen={setTemplatesOpen} chartsOpen={chartsOpen} setChartsOpen={setChartsOpen}
@@ -1988,8 +2042,9 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
         {/* shapes folder with search */}
         {shapesOpen && <ShapesPanel shapeQ={shapeQ} setShapeQ={setShapeQ} addObject={addObject} />}
 
-        {/* text drawer: style presets (settings text styles) + drop-in effects */}
-        {textOpen && <TextPanel addObject={addObject} setTextOpen={setTextOpen} textStyles={resolvedTextStyles} brand={brand} getPlayheadMs={() => timeRef.current} />}
+        {/* text drawer: style presets (settings text styles). R10: the ten
+            drop-in effect cards are gone — textFx lives in the Inspector. */}
+        {textOpen && <TextPanel addObject={addObject} setTextOpen={setTextOpen} textStyles={resolvedTextStyles} brand={brand} />}
 
         {/* charts drawer: 7 chart types as separate insertables */}
         {chartsOpen && <ChartsPanel addObject={addObject} setChartsOpen={setChartsOpen} />}
@@ -2009,12 +2064,19 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
         {/* images drawer: upload + your asset library */}
         {imagesOpen && <ImagePanel assetFileRef={assetFileRef} assetUploading={assetUploading} assetErr={assetErr} assets={assets} assetsBusy={assetsBusy} refreshAssets={refreshAssets} addAssetLayer={addAssetLayer} onDeleteAsset={onDeleteAsset} />}
 
-        {/* audio drawer: upload + attached track + reusable audio assets */}
-        {audioOpen && <AudioPanel audioFileRef={assetFileRef} audioUploading={audioUploading} audioErr={audioErr} audioTrack={audioTrack} detachAudio={detachAudio} assets={assets} assetsBusy={assetsBusy} assetErr={assetErr} refreshAssets={refreshAssets} audioAssets={audioAssets} attachAudioAsset={attachAudioAsset} onDeleteAudioAsset={onDeleteAudioAsset} fmtBytes={fmtBytes} fmt={fmt} />}
+        {/* audio drawer: upload + attached track + reusable audio assets.
+            R10: the panel's Upload button must click the REAL audio input
+            (audioFileRef — AUDIO_ACCEPT_ATTR + onPickAudioAsset), not the
+            image-asset input (assetFileRef) it was mistakenly wired to. */}
+        {audioOpen && <AudioPanel audioFileRef={audioFileRef} audioUploading={audioUploading} audioErr={audioErr} audioTrack={audioTrack} detachAudio={detachAudio} assets={assets} assetsBusy={assetsBusy} assetErr={assetErr} refreshAssets={refreshAssets} audioAssets={audioAssets} attachAudioAsset={attachAudioAsset} onDeleteAudioAsset={onDeleteAudioAsset} fmtBytes={fmtBytes} fmt={fmt} />}
 
-        {/* ---- stage ---- */}
+        {/* ---- stage ----
+            R10: hidden layers are FULLY invisible on the canvas (they used to
+            linger at 32% opacity while selected). The timeline still lists
+            them (eye toggle un-hides); export already drops them via
+            StageObject's non-interactive early return — unchanged. */}
         <StageView stageWrapRef={stageWrapRef} stageScrollRef={stageScrollRef} tlDragging={tlDragging} zoomed={zoomed}
-          stage={stage} stageScale={stageScale} stageBg={stageBg} inClip={inClip} ctx={ctx} ctxLayers={ctxLayers} time={time}
+          stage={stage} stageScale={stageScale} stageBg={stageBg} inClip={inClip} ctx={ctx} ctxLayers={ctxLayers.filter((o) => !o.hidden)} time={time}
           selIds={selIds} sel={sel} overflowShow={overflowShow} zoomMode={zoomMode} playing={playing} rotLive={rotLive}
           onObjectDown={onObjectDown} enterClip={enterClip} displayValue={displayValue} onResizeDown={onResizeDown} onRotateDown={onRotateDown}
           onClipScaleDown={onClipScaleDown}
@@ -2030,13 +2092,31 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
           cameraLaneSel={cameraLaneSel} camera={camera} editCameraProp={editCameraProp} setCameraKeyframe={setCameraKeyframe} removeCameraKeyframe={removeCameraKeyframe}
           cameraKfNav={cameraKfNav} resetCamera={resetCamera} selCamKfData={selCamKfData} setCameraSegmentEase={setCameraSegmentEase} applyCameraPreset={applyCameraPreset}
           selMany={selMany} groupSelection={groupSelection} align={align} duplicateSelected={duplicateSelected} removeSelected={removeSelected}
-          inClip={inClip} ctx={ctx} sel={sel} patchObject={patchObject} toggleHide={toggleHide} toggleLock={toggleLock}
+          inClip={inClip} ctx={ctx} sel={sel} patchObject={patchObject}
           stage={stage} stageBg={stageBg} setStageBg={setStageBg} applyStagePreset={applyStagePreset} stageIsPreset={stageIsPreset}
           enterClip={enterClip} patchProps={patchProps} ctxDur={ctxDur} stretchClipDur={stretchClipDur} stretchClips={stretchClips} setStretchClips={setStretchClips} ungroupClip={ungroupClip}
           morphQ={morphQ} setMorphQ={setMorphQ} time={time} timeRef={timeRef} setShapeAt={setShapeAt} editProp={editProp}
           removeKeyframe={removeKeyframe} setKeyframe={setKeyframe} setSelKf={setSelKf} flowText={flowText} brand={brand} SW={SW}
           addPathTo={addPathTo} patchPath={patchPath} animateAlongPath={animateAlongPath} kfNav={kfNav} selectedKfData={selectedKfData}
           setSegmentEase={setSegmentEase} applyPreset={applyPreset} fileRef={fileRef} applyCameraAction={applyCameraAction} />
+
+        {/* R10 disarm-nudge: the Animate arm persists across sessions — one
+            forgotten disarm click used to make every later canvas transform
+            silently skip keyframes. The first move/rotate/clip-scale that
+            lands disarmed raises this banner; one click re-arms. */}
+        {armNudge && !animateArm && (
+          <div className="gd-disarm-nudge" role="status"
+            style={{ position: "absolute", left: "50%", bottom: 14, transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 10, background: C.bg2, border: `1px solid ${C.amber}`, borderRadius: 8, padding: "8px 12px", boxShadow: "0 12px 32px rgba(0,0,0,.55)", maxWidth: "min(620px, 86%)" }}>
+            <span style={{ color: C.dim, fontSize: 12, lineHeight: 1.5 }}>
+              <b style={{ color: C.amber }}>Animate is Off</b> — that canvas edit changed the base layer only; no ◆ keyframes were written.
+            </span>
+            <button className="gd-btn-accent gd-nudge-rearm" onClick={() => setAnimateArmPersist(true)}
+              title="Re-arm Animate — canvas edits record ◆ keyframes again (the arm persists across sessions)"
+              style={{ background: C.amber, color: "#1A1405", border: "none", borderRadius: 6, padding: "5px 10px", cursor: "pointer", fontWeight: 800, fontSize: 12, fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0 }}>◆ Re-arm Animate</button>
+            <button className="gd-btn gd-nudge-dismiss" aria-label="Dismiss" onClick={() => setArmNudge(false)}
+              style={{ background: "transparent", border: "none", color: C.faint, cursor: "pointer", fontSize: 13, padding: "2px 4px", lineHeight: 1, flexShrink: 0 }}>✕</button>
+          </div>
+        )}
       </div>
 
       {/* ============ TIMELINE ============ */}

@@ -147,11 +147,19 @@ async function main() {
     /* R9w3: the Brand button/modal is gone — a compact brand switcher
        (gd-brandswitch) lists saved brand kits; the standalone harness has no
        kits, so the menu shows the empty state + the Manage… jump */
-    check("top bar keeps the Main breadcrumb + stage preset + brand switcher (R9w3) + avatar, NO Export",
-      await page.locator('button:has-text("Main")').count() >= 1
-      && await page.locator('select[aria-label="Stage size preset"]').count() >= 1
-      && await page.locator("button.gd-brandswitch").count() === 1
-      && await page.locator("button.gd-avatar").count() === 1
+    /* R10: the top chrome is ONE slim 40px row — brand mark + wordmark on
+       the left, BrandSwitcher + avatar at the right end. The Main crumb
+       moved to the timeline transport bar (beside Animate); the stage
+       preset lives in the Inspector's Stage card. */
+    check("slim top row (R10): brand mark + brand switcher + avatar — NO Export / preset / Main crumb",
+      await page.locator(".gd-topbar .gd-brandmark").count() === 1
+      && await page.locator(".gd-topbar button.gd-brandswitch").count() === 1
+      && await page.locator(".gd-topbar button.gd-avatar").count() === 1
+      && await page.locator('.gd-topbar button:has-text("Export")').count() === 0
+      && await page.locator(".gd-topbar select").count() === 0
+      && await page.locator('.gd-topbar button:has-text("Main")').count() === 0
+      && await page.locator('button:has-text("Main")').count() >= 1 /* Main crumb lives in the transport bar */
+      && await page.locator('select[aria-label="Stage size preset"]').count() >= 1 /* stage preset lives in the Inspector */
       && await page.locator('button:has-text("Export")').count() === 1 /* the ONE Export now lives in the timeline bar */);
     await page.locator("button.gd-brandswitch").click();
     await page.waitForTimeout(150);
@@ -163,16 +171,23 @@ async function main() {
     check("Escape closes the brand switcher", await page.locator(".gd-brandswitch-menu").count() === 0);
     /* R9w1: Export moved into the timeline transport bar beside the save control */
     check("Export sits in the timeline transport bar beside the save control", await page.locator("button.gd-tl-export").count() === 1 && await page.locator("button.gd-tl-save").count() === 1);
-    /* R9w1: the Zwoosh wordmark moved to the slim brand bar above the timeline */
-    check("the Zwoosh wordmark sits in the brand bar above the timeline", await page.locator(".gd-brandbar .gd-brandmark").count() === 1);
+    /* R10: the Zwoosh wordmark sits in the slim top row; the 28px brand bar
+       above the timeline is gone */
+    check("the Zwoosh wordmark sits in the slim top row (brand bar gone)", await page.locator(".gd-topbar .gd-brandmark").count() === 1 && await page.locator(".gd-brandbar").count() === 0);
     /* R9w1: avatar menu — circular initial button, Profile / Logout items
        (standalone harness wires no handlers → disabled stubs) */
     const avatar = page.locator("button.gd-avatar");
     check("the avatar is a circular button showing one initial", (await avatar.evaluate((el) => getComputedStyle(el).borderRadius)) === "50%" && (await avatar.textContent()).trim().length === 1);
     await avatar.click();
     await page.waitForTimeout(150);
-    check("avatar menu opens with Profile + Logout", await page.locator('.gd-avatar-menu button:has-text("Profile")').count() === 1 && await page.locator('.gd-avatar-menu button:has-text("Logout")').count() === 1);
-    check("standalone harness: menu items render as disabled stubs", await page.locator(".gd-avatar-menu button[disabled]").count() === 2);
+    /* R10: the menu gained Dashboard + Settings (the shell header's "←
+       Dashboard" link moved in here) */
+    check("avatar menu opens with Dashboard + Profile + Settings + Logout",
+      await page.locator('.gd-avatar-menu button:has-text("Dashboard")').count() === 1
+      && await page.locator('.gd-avatar-menu button:has-text("Profile")').count() === 1
+      && await page.locator('.gd-avatar-menu button:has-text("Settings")').count() === 1
+      && await page.locator('.gd-avatar-menu button:has-text("Logout")').count() === 1);
+    check("standalone harness: all four menu items render as disabled stubs", await page.locator(".gd-avatar-menu button[disabled]").count() === 4);
     await page.keyboard.press("Escape");
     await page.waitForTimeout(120);
     check("Escape closes the avatar menu", await page.locator(".gd-avatar-menu").count() === 0);
@@ -484,29 +499,31 @@ async function runPart2(page, { check, proj, stageRect, toScreen, drag }) {
   check("40px clamp works for clips (not flung off-canvas)", xClamped > -600 && xClamped < 0, `x=${xClamped} scale=${sc}`);
 
   /* ==================== #5 lock icons ==================== */
-  console.log("\n#5 lock — distinct padlock glyphs");
-  const tlLock = page.locator('button[title="Lock"]').first();
+  console.log("\n#5 lock — distinct padlock glyphs (timeline lane toggle)");
+  const tlLock = page.locator("button.gd-tl-lock").first();
   check("timeline lock toggle renders an SVG padlock (no emoji)", await tlLock.evaluate((el) => !!el.querySelector("svg") && !/🔒|🔓/.test(el.innerHTML)));
   const openSvg = await tlLock.evaluate((el) => el.innerHTML);
   await tlLock.click();
   await page.waitForTimeout(150);
-  const closedBtn = page.locator('button[title="Unlock"]').first();
+  const closedBtn = page.locator('button.gd-tl-lock[aria-pressed="true"]').first();
   check("locked state renders a different, amber closed padlock", await closedBtn.evaluate((el) => {
     const svg = el.querySelector("svg");
     return !!svg && (svg.getAttribute("stroke") || "").toLowerCase() === "#f5a524" && !!svg.querySelector("circle");
   }));
   const closedSvg = await closedBtn.evaluate((el) => el.innerHTML);
   check("open vs closed padlock glyphs are clearly different", openSvg !== closedSvg);
-  /* Inspector lock button is an SVG too — select an object first */
-  await page.locator('button[title="Unlock"]').first().click(); /* unlock again */
+  /* R10: the Inspector hide/lock buttons are REMOVED — visibility/locking
+     live on the timeline lane toggles only; the Inspector keeps a passive
+     status text. Select an object and verify. */
+  await page.locator('button.gd-tl-lock[aria-pressed="true"]').first().click(); /* unlock again */
   await page.waitForTimeout(150);
   await page.mouse.click(toScreen(r, 100, 100).x, toScreen(r, 100, 100).y);
   await page.waitForTimeout(200);
-  const inspLock = await page.evaluate(() => {
-    const b = [...document.querySelectorAll("button")].find((x) => x.title === "Lock" || x.title === "Unlock");
-    return !!b && !!b.querySelector("svg") && !/🔒|🔓/.test(b.innerHTML);
-  });
-  check("Inspector lock toggle renders an SVG padlock (no emoji)", inspLock);
+  check("R10: the Inspector has NO hide/lock buttons (lane toggles only)", await page.evaluate(() => {
+    const insp = document.querySelector("[data-inspector]");
+    if (!insp) return false;
+    return [...insp.querySelectorAll("button")].filter((x) => ["Lock", "Unlock", "Hide", "Show"].includes(x.title)).length === 0;
+  }));
 
   /* ==================== #6 empty states ==================== */
   console.log("\n#6 empty states — no keyframe UI");
