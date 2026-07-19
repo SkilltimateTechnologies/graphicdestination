@@ -7,7 +7,7 @@ import { Card, ChipRow, ColorKfRow, PropRow, FontControls, WorldPicker, Row, Sli
 import { EASE, EASE_LABEL } from "../../engine/easing.js";
 import { SHAPE_IDS, SHAPE_DEFS, ptsToStr } from "../../engine/shapes.js";
 import { MAPS, CONTINENT_NAMES, CONTINENTS, normHi } from "../../engine/maps.js";
-import { CONFETTI_STYLES, confettiStyleOf, NUM_FORMATS, CD_STYLES, cdStyleOf, COUNTER_STYLES, counterStyleOf } from "../../engine/fx.js";
+import { CONFETTI_STYLES, confettiStyleOf, confettiLife, confettiDurMs, CONFETTI_DUR_MIN, CONFETTI_DUR_MAX, NUM_FORMATS, CD_STYLES, cdStyleOf, COUNTER_STYLES, counterStyleOf } from "../../engine/fx.js";
 import { CAM_PROPS, CAM_ZOOM_MIN, CAM_ZOOM_MAX, CAM_DEPTH_MIN, CAM_DEPTH_MAX, cameraAt, camTrackHost, clampDepth } from "../../engine/camera.js";
 import { BLEND_MODES, BLUR_MAX, clampBlur, normBlend, depthHint } from "../../engine/filters.js";
 import { BACKDROP_VARIANTS, BACKDROP_THEMES, BACKDROP_SPEED_MIN, BACKDROP_SPEED_MAX, BACKDROP_INTENSITY_MIN, BACKDROP_INTENSITY_MAX, BACKDROP_LOOP_MIN, BACKDROP_LOOP_MAX, clampSpeed, clampIntensity, clampLoopMs } from "../../engine/backdrops.js";
@@ -114,6 +114,14 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
     const m = normBlend(v);
     if (m === "normal") patchObject(sel.id, (o) => { const p = { ...o.props }; delete p.blend; return { ...o, props: p }; });
     else patchProps(sel.id, { blend: m });
+  };
+  /* confetti duration — same inert-default discipline as depth/blur/blend:
+     setting the style's own default life REMOVES the dur key so untouched
+     layers keep their old-project JSON shape (absent dur = style default) */
+  const setConfettiDur = (v) => {
+    const d = Math.min(CONFETTI_DUR_MAX, Math.max(CONFETTI_DUR_MIN, Math.round(v)));
+    if (d === confettiLife(confettiStyleOf(sel.props))) patchObject(sel.id, (o) => { const p = { ...o.props }; delete p.dur; return { ...o, props: p }; });
+    else patchProps(sel.id, { dur: d });
   };
   /* number style preset click: reset every preset-controlled prop to inert,
      apply the preset patch, remember the swatch (amber ring). Outline inks
@@ -615,9 +623,9 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                   <textarea value={sel.props.dataStr} onChange={(e) => patchProps(sel.id, { dataStr: e.target.value })}
                     style={{ ...inputStyle, height: 92, resize: "none", fontFamily: "'JetBrains Mono'", fontSize: 11, marginBottom: 8 }} placeholder={"Q1, 42\nQ2, 65"} />
                   {sel.props.chartType !== "gauge" && <ChipRow label="Values" options={[[true, "Show"], [false, "Hide"]]} value={sel.props.showVals} onChange={(v) => patchProps(sel.id, { showVals: v })} />}
-                  <SliderRow label="Start" min={0} max={Math.max(100, ctxDur - 300)} step={10} value={sel.props.start} onChange={(v) => patchProps(sel.id, { start: v })} />
-                  <SliderRow label="Duration" min={400} max={5000} step={10} value={sel.props.dur} onChange={(v) => patchProps(sel.id, { dur: v })} />
-                  <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.5 }}>Series colors follow the brand palette. Bars stagger in, lines draw on, donuts sweep, the gauge always reads a % — all easing-finished.</div>
+                  {/* no start/duration controls on purpose: the lifecycle follows the
+                      layer's timeline span — in once → static hold → animated out */}
+                  <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.5 }}>The lifecycle follows the layer's timeline span: it animates in once, holds, then animates out — trim or move the bar on the timeline to retime. Series colors follow the brand palette. Bars stagger in, lines draw on, donuts sweep, the gauge always reads a % — all easing-finished.</div>
                 </Card>
               )}
               {sel.type === "chart" && (
@@ -641,6 +649,8 @@ export default function Inspector({ audioLaneSel, audioTrack, patchAudio, detach
                   <FiltersRow P={sel.props} onBlur={setBlur} onBlend={setBlend} />
                   <ChipRow label="Style" options={CONFETTI_STYLES.map((s) => [s.id, s.name])} value={confettiStyleOf(sel.props)} onChange={(v) => patchProps(sel.id, { style: v })} wrap />
                   <SliderRow label="Burst" min={0} max={Math.max(100, ctxDur - 500)} step={10} value={sel.props.burst} onChange={(v) => patchProps(sel.id, { burst: v })} />
+                  <SliderRow label="Duration" min={CONFETTI_DUR_MIN} max={CONFETTI_DUR_MAX} step={100} value={confettiDurMs(sel.props)} onChange={setConfettiDur} />
+                  <div style={{ color: C.faint, fontSize: 10.5, lineHeight: 1.5, margin: "-4px 0 8px" }}>Exact play time after the burst (ms) — pieces stay inside the canvas, fading out at the edges.</div>
                   <SliderRow label="Particles" min={20} max={160} value={sel.props.count} onChange={(v) => patchProps(sel.id, { count: v })} />
                   <SliderRow label="Power" min={0.4} max={2} step={0.05} value={sel.props.power} onChange={(v) => patchProps(sel.id, { power: v })} />
                   <Row label="Seed"><button className="gd-btn" onClick={() => patchProps(sel.id, { seed: Math.floor(Math.random() * 9999) })} style={{ ...chipStyle, cursor: "pointer" }}>#{sel.props.seed} · shuffle</button></Row>

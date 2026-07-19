@@ -13,7 +13,7 @@ import { valueAt, colorAt, lerpColor, clipLocalTime, clipTransition } from "../e
 import { cameraTransform, camTransformCss } from "../engine/camera.js";
 import { blurCss, blendCss } from "../engine/filters.js";
 import { MAPS, WORLD, WORLD_H, CONTINENTS, ringsToPath, arcPath, mapBox, WORLD_D, normHi, continentBox, countryCenter, hiColors, hiState, traceState } from "../engine/maps.js";
-import { CONFETTI_STYLES, confettiStyleOf, confettiLife, confettiParticles, charFx, numberValue, numberColumns, formatNumber, contrastOn, chartModel, cdStyleOf, countdownFraction, counterStyleOf, counterModel } from "../engine/fx.js";
+import { CONFETTI_STYLES, confettiStyleOf, confettiDurMs, confettiParticles, charFx, numberValue, numberColumns, formatNumber, contrastOn, chartModel, cdStyleOf, countdownFraction, counterStyleOf, counterModel } from "../engine/fx.js";
 import { backdropModel } from "../engine/backdrops.js";
 
 /* ---------- on-canvas selection handles (direct manipulation) ----------
@@ -138,57 +138,92 @@ function MapUnionPaths({ codes, P, time, box, pad }) {
 }
 
 /* per-style confetti kinematics — pure playback of the particle fields
-   precomputed in engine/fx.js (confettiParticles). Returns wrapper-local
-   offsets {px, py} + rotation/opacity for one particle at dt seconds after
-   the burst. `anchor` shifts the emission point: (0,0) = the object's own
+   precomputed in engine/fx.js (confettiParticles). confettiFlight returns
+   the RAW wrapper-local offsets {px, py} + rotation/opacity for one particle
+   at dt seconds after the burst; confettiMotion then clamps it to the stage
+   bounds. `anchor` shifts the emission point: (0,0) = the object's own
    x/y (burst and most styles); cannons re-anchor to the stage's bottom
    corners, expressed relative to the object's position. "burst" below is
    the original fountain math, verbatim. */
-function confettiMotion(style, p, dt, life, anchor) {
+
+/* per-style fade windows as FRACTIONS of the particle life [fadeIn, fadeOut],
+   so the duration prop (props.dur) scales the whole motion instead of
+   truncating it. Rebalanced so pieces live out their full styled motion:
+   fade-out never starts before 55% of the life (pop) and every other style
+   holds full opacity until ≥ 68% — the lifetime floor check-r8w2 asserts.
+   (family-normalized ids only — streamers→rain etc. arrive pre-mapped) */
+const CONFETTI_FADE = {
+  rain: [0.07, 0.24], cannonL: [0, 0.27], cannonR: [0, 0.27],
+  firework: [0, 0.32], spiral: [0.07, 0.32], snow: [0.09, 0.18], pop: [0, 0.45],
+};
+const confettiFade = (style, dt, life) => {
+  const w = CONFETTI_FADE[style] || [0, 0.3]; /* default = the burst family */
+  const fin = w[0] > 0 ? clamp01(dt / (life * w[0])) : 1;
+  const fout = 1 - clamp01((dt - life * (1 - w[1])) / (life * w[1]));
+  return fin * fout;
+};
+
+function confettiFlight(style, p, dt, life, anchor) {
   if (style === "rain") {
     const px = p.ox + p.swayA * Math.sin(p.wob + dt * p.swayF);
     const py = -320 + p.vy * 620 * dt;
-    const op = clamp01(dt / 0.25) * (1 - clamp01((dt - (life - 0.8)) / 0.8));
-    return { px, py, rot: p.spin * dt, op };
+    return { px, py, rot: p.spin * dt, op: confettiFade(style, dt, life) };
   }
   if (style === "cannonL" || style === "cannonR") {
     const g = 2.1;
     const px = anchor.x + p.vx * 620 * dt + p.drift * dt * Math.sin(p.wob + dt * 5);
     const py = anchor.y + p.vy * 620 * dt + 0.5 * g * 620 * dt * dt;
-    const op = 1 - clamp01((dt - (life - 0.7)) / 0.7);
-    return { px, py, rot: p.spin * dt, op };
+    return { px, py, rot: p.spin * dt, op: confettiFade(style, dt, life) };
   }
   if (style === "firework") {
     const g = 1.35;
     const k = 1 / (1 + 0.9 * dt); /* air drag — the shell decelerates as it flies */
     const px = p.vx * 620 * dt * k + p.drift * dt * Math.sin(p.wob + dt * 4);
     const py = p.vy * 620 * dt * k + 0.5 * g * 620 * dt * dt;
-    const fade = 1 - clamp01((dt - (life - 1.1)) / 1.1);
-    const twinkle = 0.6 + 0.4 * Math.sin(p.wob + dt * p.twk * Math.PI);
-    return { px, py, rot: p.spin * dt, op: fade * twinkle };
+    /* softer twinkle (never dips below 0.5 mid-flight — pieces read as
+       sparkling, never as vanishing) */
+    const twinkle = 0.75 + 0.25 * Math.sin(p.wob + dt * p.twk * Math.PI);
+    return { px, py, rot: p.spin * dt, op: confettiFade(style, dt, life) * twinkle };
   }
   if (style === "spiral") {
     const r = p.r0 + p.vr * dt;
     const th = p.th0 + p.om * dt;
-    const op = clamp01(dt / 0.18) * (1 - clamp01((dt - (life - 0.9)) / 0.9));
-    return { px: r * Math.cos(th), py: r * Math.sin(th), rot: p.spin * dt, op };
+    return { px: r * Math.cos(th), py: r * Math.sin(th), rot: p.spin * dt, op: confettiFade(style, dt, life) };
   }
   if (style === "snow") {
     const px = p.ox + p.swayA * Math.sin(p.wob + dt * p.swayF);
     const py = -330 + p.vy * 620 * dt;
-    const op = clamp01(dt / 0.6) * (1 - clamp01((dt - (life - 1.2)) / 1.2));
-    return { px, py, rot: 0, op };
+    return { px, py, rot: 0, op: confettiFade(style, dt, life) };
   }
   if (style === "pop") {
     const u = clamp01(dt / life);
-    const e = 1 - Math.pow(1 - u, 3); /* easeOutCubic ring expansion, quick fade */
-    return { px: p.vx * 260 * e, py: p.vy * 260 * e, rot: p.spin * dt, op: 1 - u * 1.15 };
+    const e = 1 - Math.pow(1 - u, 3); /* easeOutCubic ring expansion */
+    /* rebalanced: full opacity through the first 55% of the life, then a
+       graceful fade — no more vanishing-from-birth */
+    return { px: p.vx * 260 * e, py: p.vy * 260 * e, rot: p.spin * dt, op: confettiFade(style, dt, life) };
   }
   const g = 1.9;
   const px = p.vx * 620 * dt + p.drift * dt * Math.sin(p.wob + dt * 5);
   const py = p.vy * 620 * dt + 0.5 * g * 620 * dt * dt;
-  const fade = dt > 1.7 ? 1 - (dt - 1.7) / 0.7 : 1;
-  return { px, py, rot: p.spin * dt, op: fade };
+  return { px, py, rot: p.spin * dt, op: confettiFade(style, dt, life) };
+}
+
+/* canvas clamp (stage bounds): the particle's position clamps at the canvas
+   edge — its velocity dies there — and it fades out over the last
+   CONFETTI_EDGE_PX of would-be travel past the edge, so nothing ever renders
+   outside the stage box (exported frames show zero particles beyond bounds).
+   bounds = { ox, oy } the object's stage position + { w, h } the stage size. */
+const CONFETTI_EDGE_PX = 90;
+function confettiMotion(style, p, dt, life, anchor, bounds) {
+  const m = confettiFlight(style, p, dt, life, anchor);
+  if (!bounds) return m;
+  const pw = p.size || 0, ph = pw * (p.round ? 1 : 0.55);
+  const sx0 = bounds.ox + m.px, sy0 = bounds.oy + m.py;
+  const sx = Math.min(Math.max(sx0, 0), Math.max(0, bounds.w - pw));
+  const sy = Math.min(Math.max(sy0, 0), Math.max(0, bounds.h - ph));
+  const pen = Math.max(Math.abs(sx - sx0), Math.abs(sy - sy0)); /* deepest axis overshoot past the edge */
+  const edge = 1 - clamp01(pen / CONFETTI_EDGE_PX);
+  return { px: sx - bounds.ox, py: sy - bounds.oy, rot: m.rot, op: m.op * edge };
 }
 
 /* ============================================================
@@ -246,7 +281,10 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
   if (obj.hidden && !(interactive && selected)) return null;
   if (obj.type !== "clip") {
     const inT = P.inT || 0;
-    if (time < inT || (P.outT != null && time > P.outT)) return null;
+    /* confetti plays EXACTLY its duration (burst + settle) independent of how
+       much timeline remains — the outT cutoff does not apply to it. Every
+       other type keeps the legacy gate, byte-identical. */
+    if (time < inT || (obj.type !== "confetti" && P.outT != null && time > P.outT)) return null;
   }
   const dv = interactive && displayValue ? displayValue : (o, p) => valueAt(o, p, time);
   const [x, y] = P.path && P.path.pts?.length >= 2 ? pointOnPath(P.path, valueAt(obj, "prog", time)) : [dv(obj, "x"), dv(obj, "y")];
@@ -317,18 +355,24 @@ function StageObjectInner({ obj, time, stage, selected, onDown, onEnterClip, dis
   if (obj.type === "confetti") {
     const style = confettiStyleOf(P); /* missing/unknown style → "burst" (pre-styles projects unchanged) */
     const parts = confettiParticles(obj);
-    const life = confettiLife(style) / 1000;
+    /* duration prop (props.dur, ms — engine/fx.js confettiDurMs): the burst
+       plays for EXACTLY this long, independent of how much timeline remains
+       (the outT cutoff does not apply — see the visibility gate above).
+       Absent ⇒ the style's default life, so pre-duration projects unchanged. */
+    const life = confettiDurMs(P) / 1000;
     const dt = (time - P.burst) / 1000;
     const active = dt >= 0 && dt <= life;
     /* cannons emit from the stage's bottom corners — re-anchored relative to the object's own position */
     const anchor = style === "cannonL" ? { x: -x, y: stage.h - y } : style === "cannonR" ? { x: stage.w - x, y: stage.h - y } : { x: 0, y: 0 };
+    /* canvas clamp: particles pin + fade at the stage edges, never outside */
+    const bounds = { ox: x, oy: y, w: stage.w, h: stage.h };
     const glyph = (CONFETTI_STYLES.find((s) => s.id === style) || CONFETTI_STYLES[0]).glyph;
     return (
       <div onPointerDown={interactive && !obj.locked ? (e) => onDown(e, obj) : undefined}
         style={{ position: "absolute", left: x, top: y, transform: "translate(-50%,-50%)", width: 44, height: 44, cursor: interactive && !obj.locked ? "grab" : "default", zIndex: 50, pointerEvents: interactive ? "auto" : "none", ...fxStyle }}>
         {(selected || (!active && interactive)) && <div style={{ position: "absolute", inset: 0, border: selected ? `1.5px dashed ${C.amber}` : "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, opacity: active ? 1 : 0.35 }}>{glyph}</div>}
         {active && parts.map((p, i) => {
-          const m = confettiMotion(style, p, dt, life, anchor);
+          const m = confettiMotion(style, p, dt, life, anchor, bounds);
           return <div key={i} style={{ position: "absolute", left: 22 + m.px, top: 22 + m.py, width: p.size, height: p.size * (p.round ? 1 : 0.55), background: p.color, borderRadius: p.round ? "50%" : 1.5, transform: `rotate(${m.rot}deg)`, opacity: Math.max(0, Math.min(1, m.op)), pointerEvents: "none" }} />;
         })}
       </div>

@@ -15,6 +15,18 @@
  *        and settle equal during the hold
  *      · no NaN/undefined at 9 sample times
  *
+ *   2.5 PLACEMENT-DRIVEN LIFECYCLE (R8) — the animation window derives from
+ *      the layer's TIMELINE PLACEMENT, not from properties-panel timing
+ *      controls (the Inspector Start/Duration rows are gone — asserted
+ *      grep-level below): outT set ⇒ entrance plays ONCE from inT over the
+ *      first 45% of the visible span (capped at CHART_IN_CAP ms), static
+ *      hold, ANIMATED EXIT over the last 32% (capped at CHART_OUT_CAP ms)
+ *      ending exactly at outT; legacy start/dur props are IGNORED while
+ *      outT is set; resizing the layer re-maps the grammar. outT absent ⇒
+ *      the legacy authored start+dur window, byte-identical. Loop purity
+ *      f(inT) ≡ f(outT) + static hold hold for every type. Full contract:
+ *      check-r8w2.mjs.
+ *
  *   3. DESIGN — dashed hairline gridlines, rounded bar tops, small-caps axis
  *      labels, tabular numerals, value count-ups, overshoot springs
  *      (scale > 1 mid-entrance), accelerate exits (shrink(v=.5) = .875).
@@ -33,7 +45,7 @@ import react from "@vitejs/plugin-react";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { CHART_TYPES, chartTypeOf, chartModel, chartWindows, chartProgress, parseChart, parseChartRows } from "./src/engine/fx.js";
+import { CHART_TYPES, chartTypeOf, chartModel, chartWindows, chartProgress, parseChart, parseChartRows, CHART_IN_CAP, CHART_OUT_CAP, CHART_MIN_SPAN } from "./src/engine/fx.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tmpDir = path.join(here, ".charts-check-tmp");
@@ -107,6 +119,37 @@ async function main() {
   check("exit accelerates (ease-in cubic): shrink(v=.5) = .875", approx(prExit.v, 0.5, 1e-6) && approx(prExit.shrink, 0.875, 1e-6), `shrink=${prExit.shrink}`);
   const prA = chartProgress({ start: 200, dur: 1400 }, 350, 0, 4), prB = chartProgress({ start: 200, dur: 1400 }, 350, 3, 4);
   check("stagger: element 0 ahead of element 3 mid-entrance", prA.u > 0 && prB.u === 0, `u0=${prA.u.toFixed(2)} u3=${prB.u.toFixed(2)}`);
+
+  /* ---------- 2.5 R8: placement-driven lifecycle window ---------- */
+  console.log("\nR8 — placement-driven lifecycle (window = f(inT, outT), start/dur ignored)");
+  {
+    const W = chartWindows({ inT: 1000, outT: 4000 });
+    check("outT set ⇒ window = [inT, outT]", W.start === 1000 && W.end === 4000 && W.dur === 3000);
+    check("entrance = first 45% (1350 ms), exit = last 32% (960 ms)", approx(W.inDur, 1350) && approx(W.outDur, 960) && W.holdStart === 2350 && W.outStart === 3040);
+    const WC = chartWindows({ inT: 0, outT: 20000 });
+    check("huge spans capped (in ≤ CHART_IN_CAP, out ≤ CHART_OUT_CAP)", WC.inDur === CHART_IN_CAP && WC.outDur === CHART_OUT_CAP);
+    check("degenerate span floors at CHART_MIN_SPAN", chartWindows({ inT: 500, outT: 600 }).end === 500 + CHART_MIN_SPAN);
+    const WI = chartWindows({ inT: 100, outT: 2000, start: 900, dur: 50 });
+    check("legacy start/dur IGNORED while outT is set", WI.start === 100 && WI.end === 2000);
+    const WL = chartWindows({ start: 200, dur: 1400 });
+    check("outT absent ⇒ legacy authored window, byte-identical", WL.start === 200 && WL.end === 1600 && approx(WL.inDur, 630) && approx(WL.outDur, 448));
+    const P1 = chartObj("bar", DATA.multi, { inT: 1000, outT: 4000 }).props;
+    const P2 = chartObj("bar", DATA.multi, { inT: 1000, outT: 4000, start: 4444, dur: 77 }).props;
+    check("chartModel ignores start/dur with outT set (identical models)", J(P1, 2500) === J(P2, 2500) && J(P1, 1300) === J(P2, 1300));
+    check("resize re-maps: different outT ⇒ different window", chartWindows({ inT: 1000, outT: 3000 }).end === 3000 && chartWindows({ inT: 1000, outT: 5000 }).end === 5000);
+  }
+  for (const { id: type } of CHART_TYPES) {
+    const P = chartObj(type, dataFor(type), { inT: 1000, outT: 4000 }).props;
+    check(`${type}: placement window — f(inT) ≡ f(outT) loop purity`, J(P, 1000) === J(P, 4000));
+    check(`${type}: placement window — hold static, entrance once + animated exit present`, J(P, 2500) === J(P, 2900) && J(P, 1300) !== J(P, 2500) && J(P, 3800) !== J(P, 2500));
+  }
+  { /* Inspector: chart Start/Duration rows removed (grep-level) */
+    const src = fs.readFileSync(path.join(here, "src", "components", "editor", "Inspector.jsx"), "utf8");
+    const i1 = src.indexOf('{sel.type === "chart" && (');
+    const i2 = src.indexOf('{sel.type === "chart" && (', i1 + 1);
+    const chartCard = src.slice(i1, i2);
+    check("Inspector: chart card has NO Start/Duration sliders (data + values kept)", i1 > 0 && !/label="Start"/.test(chartCard) && !/label="Duration"/.test(chartCard) && chartCard.includes("sel.props.dataStr") && /label="Values"/.test(chartCard));
+  }
 
   /* ---------- 3. per-type model checks ---------- */
   console.log("\nchartModel — 11 types × grammar/structure");
@@ -244,6 +287,14 @@ async function main() {
     check(`${type}: SSR seamless loop — markup(start) ≡ markup(end)`, start === end && start.length > 100);
     check(`${type}: SSR hold is static`, ssr(obj, 900) === ssr(obj, 1100));
   }
+  console.log("\nSSR — R8 placement lifecycle (inT 1000 · outT 4000)");
+  for (const type of ["bar", "donut", "line"]) {
+    const obj = chartObj(type, dataFor(type), { inT: 1000, outT: 4000 });
+    check(`${type}: markup(inT) ≡ markup(outT), hold static, exit animated`, ssr(obj, 1000) === ssr(obj, 4000) && ssr(obj, 2400) === ssr(obj, 2900) && ssr(obj, 3800) !== ssr(obj, 2500));
+    check(`${type}: layer gone after outT (t=4001 ⇒ empty)`, ssr(obj, 4001) === "");
+  }
+  check("SSR: resize re-maps (outT 3000 vs 5000 differ at t=2500)", ssr(chartObj("bar", DATA.multi, { inT: 1000, outT: 3000 }), 2500) !== ssr(chartObj("bar", DATA.multi, { inT: 1000, outT: 5000 }), 2500));
+
   check("SSR: tabular-nums + small caps in markup", ssr(chartObj("bar", DATA.multi), 1000).includes("tabular-nums") && ssr(chartObj("bar", DATA.multi), 1000).includes("letter-spacing"));
   check("SSR: card backdrop (soft shadow + radius) when bg set", ssr(chartObj("bar", DATA.multi), 1000).includes("box-shadow") && ssr(chartObj("bar", DATA.multi), 1000).includes("border-radius:32px"));
   console.log("\nSSR — panel-thumbnail size (small chrome adapts)");

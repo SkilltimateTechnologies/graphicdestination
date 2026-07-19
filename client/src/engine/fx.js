@@ -478,6 +478,43 @@ const confettiRawStyleOf = (P) => (P && CONFETTI_LIVES[P.style] ? P.style : "bur
 export const confettiStyleOf = (P) => { const s = confettiRawStyleOf(P); return CONFETTI_FAMILY[s] || s; };
 export function confettiLife(style) { return CONFETTI_LIVES[style] || CONFETTI_LIFE; }
 
+/* ============================================================
+   CONFETTI DURATION (props.dur, ms — optional) — the burst plays
+   for EXACTLY this long (burst + settle), independent of how much
+   timeline remains. ABSENT/invalid ⇒ the per-style default life
+   (confettiLife), so projects saved before the prop existed render
+   byte-identical. The renderer scales the whole fade grammar with
+   it (StageObject confettiMotion) — pieces always live out their
+   full styled motion inside the window.
+   ============================================================ */
+export const CONFETTI_DUR_MIN = 300, CONFETTI_DUR_MAX = 15000;
+export function confettiDurMs(P) {
+  const d = P ? Number(P.dur) : NaN;
+  if (Number.isFinite(d) && d > 0) return Math.min(CONFETTI_DUR_MAX, Math.max(CONFETTI_DUR_MIN, d));
+  return confettiLife(confettiStyleOf(P));
+}
+
+/* fitDurForConfetti(project, confettiObj) → newDur — PURE timeline
+   auto-extend contract for the shell (GraphicDestinationMotion):
+   when a confetti's full span (burst + duration) runs past the end
+   of the project, the project timeline extends AT THE END to fit.
+     · pure — never mutates `project`/`confettiObj`, returns a number
+     · monotonic — the result is NEVER smaller than the current
+       project.stage.dur (extending only ever grows the timeline;
+       nothing else on the timeline moves)
+     · contract for the shell wave: after inserting a confetti or
+       editing its burst/duration, set
+         compDur = fitDurForConfetti(projectWithStageDur, confettiObj)
+       and leave every layer's inT/outT untouched. stage.dur is the
+       serialized project length (see the v5 project JSON). */
+export function fitDurForConfetti(project, confettiObj) {
+  const cur = Math.max(0, Number(project && project.stage && project.stage.dur) || 0);
+  if (!confettiObj || typeof confettiObj !== "object") return cur; /* no confetti ⇒ no extension */
+  const P = confettiObj.props || {};
+  const start = Math.max(0, Number(P.burst) || 0);
+  return Math.max(cur, Math.ceil(start + confettiDurMs(P)));
+}
+
 /* #rrggbb → [h 0..360, s 0..100, l 0..100] (pure — mono's brand-hue shades) */
 function hexToHsl(hex) {
   const r = parseInt(hex.slice(1, 3), 16) / 255, g = parseInt(hex.slice(3, 5), 16) / 255, b = parseInt(hex.slice(5, 7), 16) / 255;
@@ -752,9 +789,33 @@ export const CHART_TYPES = [
 ];
 export const chartTypeOf = (P) => (P && CHART_TYPES.some((c) => c.id === P.chartType) ? P.chartType : "bar");
 
-/* the in → hold → out window: entrance over the first 45%, exit (accelerate
-   off) over the last 32%, static hold in between */
+/* the in → hold → out window.
+   PLACEMENT-DRIVEN LIFECYCLE (props.outT set — every layer inserted after
+   the timeline-window model): the chart plays WHATEVER span the layer
+   occupies on the timeline. The entrance plays ONCE from the layer's inT
+   over the first 45% of the visible span (capped at CHART_IN_CAP ms so very
+   long holds stay snappy), the chart holds fully static, then an ANIMATED
+   EXIT — mirror of the entrance: staggered, accelerating off with ease-in —
+   plays over the last 32% (capped at CHART_OUT_CAP ms), ending exactly at
+   the layer's outT. Resizing/retiming the layer's timeline bar re-maps the
+   whole grammar automatically (window = f(inT, outT) only — the legacy
+   start/dur props are ignored while outT is set).
+   LEGACY WINDOW (outT absent — projects saved before outT existed): the
+   authored start/dur window, byte-identical to the pre-lifecycle engine.
+   SEAMLESS LOOP: the zero state at t ≤ start is byte-identical to the zero
+   state at t ≥ end (opacities 0, scales 0, counts "0", dial rotation
+   normalized), so a comp whose length matches the chart window loops cleanly. */
+export const CHART_IN_FRAC = 0.45, CHART_OUT_FRAC = 0.32;
+export const CHART_IN_CAP = 1400, CHART_OUT_CAP = 1100, CHART_MIN_SPAN = 600;
 export function chartWindows(P) {
+  const outN = P && P.outT != null ? Number(P.outT) : NaN;
+  if (Number.isFinite(outN)) {
+    const start = Math.max(0, Number(P.inT) || 0);
+    const end = Math.max(start + CHART_MIN_SPAN, outN);
+    const dur = end - start;
+    const inDur = Math.min(dur * CHART_IN_FRAC, CHART_IN_CAP), outDur = Math.min(dur * CHART_OUT_FRAC, CHART_OUT_CAP);
+    return { start, dur, inDur, outDur, holdStart: start + inDur, outStart: end - outDur, end };
+  }
   const start = Math.max(0, Number(P && P.start) || 0);
   const dur = Math.max(1, Number(P && P.dur) || 1400);
   const inDur = dur * 0.45, outDur = dur * 0.32;

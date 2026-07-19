@@ -25,6 +25,15 @@
  *      of styles produces DISTINCT markup at peak (new styles are visibly
  *      new, including vs. their kinematics-family source).
  *
+ *   5. R8 LIFECYCLE — duration prop (props.dur ms, engine confettiDurMs:
+ *      absent ⇒ per-style default, explicit clamped to [MIN,MAX]); the pure
+ *      fitDurForConfetti end-only timeline-extension contract; CANVAS CLAMP
+ *      (zero particles beyond the stage box across a full sweep per style);
+ *      LIFETIME FLOOR (no particle below 0.45 opacity before 60% of its
+ *      styled life on a clamp-free stage); duration honored through SSR
+ *      (active window exactly [burst, burst+dur], outT does not cut confetti).
+ *      The full R8 contract lives in check-r8w2.mjs.
+ *
  * Run:  node check-confetti.mjs        (from client/)
  * (requires client dependencies installed; exits non-zero on failure)
  */
@@ -34,7 +43,7 @@ import react from "@vitejs/plugin-react";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { CONFETTI_STYLES, confettiParticles, confettiLife, confettiStyleOf } from "./src/engine/fx.js";
+import { CONFETTI_STYLES, confettiParticles, confettiLife, confettiStyleOf, confettiDurMs, CONFETTI_DUR_MIN, CONFETTI_DUR_MAX, fitDurForConfetti } from "./src/engine/fx.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tmpDir = path.join(here, ".confetti-check-tmp");
@@ -118,6 +127,20 @@ async function main() {
     check(`${s.id}: power changes the fields`, JSON.stringify(confettiParticles(confettiObj(s.id, 7, 40, 1))) !== JSON.stringify(confettiParticles(confettiObj(s.id, 7, 40, 1.8))));
   }
 
+  /* ---------- 3.5 R8: duration prop + fitDurForConfetti contract ---------- */
+  console.log("\nR8 — confetti duration prop (confettiDurMs) + timeline auto-extend helper");
+  for (const s of CONFETTI_STYLES) {
+    check(`${s.id}: absent dur ⇒ per-style default (${confettiLife(s.id)} ms)`, confettiDurMs({ style: s.id }) === confettiLife(s.id));
+  }
+  check("explicit dur honored; clamped to [MIN, MAX]", confettiDurMs({ dur: 1200 }) === 1200 && confettiDurMs({ dur: 10 }) === CONFETTI_DUR_MIN && confettiDurMs({ dur: 99999 }) === CONFETTI_DUR_MAX);
+  check("junk dur ⇒ style default (old projects unchanged)", confettiDurMs({}) === 2400 && confettiDurMs({ dur: NaN }) === 2400 && confettiDurMs({ dur: -5 }) === 2400);
+  check("fitDurForConfetti: no-op when the span fits", fitDurForConfetti({ stage: { dur: 5000 } }, { props: { burst: 500, dur: 1200 } }) === 5000);
+  check("fitDurForConfetti: extends AT THE END to burst+dur", fitDurForConfetti({ stage: { dur: 2000 } }, { props: { burst: 1500, dur: 1200 } }) === 2700);
+  check("fitDurForConfetti: default style life when dur absent (burst 4000 + snow 6500)", fitDurForConfetti({ stage: { dur: 5000 } }, { props: { style: "snow", burst: 4000 } }) === 10500);
+  const fp = { stage: { dur: 3000 } }, fo = { props: { burst: 2500, dur: 2000 } };
+  const fBefore = JSON.stringify([fp, fo]);
+  check("fitDurForConfetti: pure + monotonic (inputs untouched, never shrinks)", fitDurForConfetti(fp, fo) === 4500 && JSON.stringify([fp, fo]) === fBefore && fitDurForConfetti({ stage: { dur: 9000 } }, fo) === 9000);
+
   /* ---------- 4. SSR through the real StageObject ---------- */
   console.log("\nBundling the real StageObject (+ react-dom/server) with Vite…");
   fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -177,6 +200,54 @@ async function main() {
   }
   for (const [id, fam] of Object.entries(FAMILY)) {
     check(`${id}: distinct from its ${fam} kinematics family`, peakMarkup[id] !== peakMarkup[fam]);
+  }
+
+  /* ---------- 5. R8 SSR: canvas clamp + lifetime floor + duration ---------- */
+  console.log("\nR8 SSR — canvas clamp: zero particles beyond the stage box");
+  const NUM_RE = "-?\\d+(?:\\.\\d+)?(?:e[-+]?\\d+)?";
+  const particlesOf = (html) => html.split("<div").slice(1).filter((s) => s.includes("border-radius:")).map((s) => {
+    const num = (re) => { const m = re.exec(s); return m ? Number(m[1]) : NaN; };
+    return {
+      left: num(new RegExp(`left:(${NUM_RE})px`)), top: num(new RegExp(`top:(${NUM_RE})px`)),
+      w: num(new RegExp(`width:(${NUM_RE})px`)), h: num(new RegExp(`height:(${NUM_RE})px`)),
+      op: num(new RegExp(`opacity:(${NUM_RE})`)),
+    };
+  });
+  for (const s of CONFETTI_STYLES) {
+    const obj = confettiObj(s.id, 7, COUNT, 1.8); /* high power — worst case for escaping */
+    const life = confettiDurMs(obj.props);
+    let worst = null;
+    for (let t = obj.props.burst; t <= obj.props.burst + life + 1; t += 90) {
+      for (const p of particlesOf(ssr(obj, t))) {
+        const sx = obj.props.x - 22 + p.left, sy = obj.props.y - 22 + p.top;
+        if (sx < -1e-9 || sy < -1e-9 || sx + p.w > stage.w + 1e-9 || sy + p.h > stage.h + 1e-9) worst = `t=${t} box=(${sx.toFixed(1)},${sy.toFixed(1)},${p.w},${p.h})`;
+      }
+    }
+    check(`${s.id}: no particle beyond ${stage.w}×${stage.h} across the full sweep`, !worst, worst || "");
+  }
+  console.log("\nR8 SSR — lifetime floor (6000×5000 clamp-free stage): no early vanish");
+  const ssrBig = (obj, time) => renderToStaticMarkup(h(StageObject, { obj, time, stage: { w: 6000, h: 5000 }, selected: false, interactive: false }));
+  for (const s of CONFETTI_STYLES) {
+    const obj = { ...confettiObj(s.id, 7, COUNT, 1), props: { ...confettiObj(s.id, 7, COUNT, 1).props, x: 3000, y: 2500 } };
+    const life = confettiDurMs(obj.props);
+    const mid = particlesOf(ssrBig(obj, obj.props.burst + life * 0.55)).filter((p) => {
+      const sx = obj.props.x - 22 + p.left, sy = obj.props.y - 22 + p.top;
+      return sx > 0 && sy > 0 && sx + p.w < 6000 && sy + p.h < 5000; /* free-flight only — edge-faded excluded */
+    });
+    const end = particlesOf(ssrBig(obj, obj.props.burst + life * 0.97));
+    check(`${s.id}: floor — free-flight particles ≥ 0.45 opacity at 55% of life`, mid.length >= 4 && mid.every((p) => p.op >= 0.45), `n=${mid.length} min=${Math.min(...mid.map((p) => p.op))}`);
+    check(`${s.id}: settled to ≤ 0.25 opacity by 97% of life (no pop-out)`, end.length === COUNT && end.every((p) => p.op <= 0.25), `max=${Math.max(...end.map((p) => p.op))}`);
+  }
+  console.log("\nR8 SSR — duration honored: active window exactly [burst, burst+dur]");
+  {
+    const obj = confettiObj("burst", 7, COUNT);
+    obj.props.dur = 1200;
+    check("dur=1200: all particles mid-life, gone right after", particlesOf(ssr(obj, 800)).length === COUNT && particlesOf(ssr(obj, 1500)).length === 0);
+  }
+  {
+    const obj = confettiObj("burst", 7, COUNT);
+    obj.props.outT = 500; /* timeline bar ends early — confetti must NOT be cut */
+    check("outT does not cut confetti (plays exactly its duration)", particlesOf(ssr(obj, 1200)).length === COUNT && particlesOf(ssr(obj, 2500)).length === COUNT);
   }
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
