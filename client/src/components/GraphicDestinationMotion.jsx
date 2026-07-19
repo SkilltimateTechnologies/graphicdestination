@@ -25,11 +25,13 @@ import UIElementsPanel from "./editor/panels/UIElementsPanel";
 import ConfettiPanel from "./editor/panels/ConfettiPanel";
 import ChartsPanel from "./editor/panels/ChartsPanel";
 import BackgroundsPanel from "./editor/panels/BackgroundsPanel";
+import TextPanel from "./editor/panels/TextPanel";
+import { useUserSettings, readCachedSettings, resolveLoadedStageBg, resolveTextStyles, kitToBrand, upsertBrand, defaultStageBg, ENGINE_STAGE_BG } from "../lib/settings.js";
 import { BACKDROP_VARIANTS, backdropDefaults, themeOf, variantOf } from "../engine/backdrops.js";
 import StageView from "./editor/StageView";
 import Inspector from "./editor/Inspector";
 import Timeline, { rowJumpTarget, TL_ROW_H, rippleShift, TAG_PALETTE } from "./editor/Timeline";
-import { ContextMenu, BrandModal } from "./editor/modals";
+import { ContextMenu } from "./editor/modals";
 
 /* Re-export the pure engine API so the export pipeline
    (export/frameRenderer.js, export/exportWebm.js, export/validateFrameMath.mjs)
@@ -300,7 +302,25 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   const [compDur, setCompDur] = useState(6000);
   const [brands, setBrands] = useState([DEFAULT_BRAND]);
   const [brandId, setBrandId] = useState("b1");
-  const [brandOpen, setBrandOpen] = useState(false);
+  /* R9w3: the Brand modal is gone — brand kits live in user settings and
+     apply through the TopBar switcher (same setBrands/setBrandId mechanism). */
+  const { settings: userSettings, remote: settingsRemote } = useUserSettings();
+  /* a factory-fresh blank project adopts the user's default bg — also when
+     the server settings only arrive AFTER the project was loaded (cold
+     localStorage cache): one-shot re-resolve while it is still untouched */
+  const freshBlankRef = useRef(false);
+  const settingsSettledRef = useRef(false);
+  useEffect(() => {
+    if (settingsRemote === null || settingsSettledRef.current) return;
+    settingsSettledRef.current = true;
+    if (freshBlankRef.current) { freshBlankRef.current = false; setStageBg(defaultStageBg(userSettings)); }
+  }, [settingsRemote]); // eslint-disable-line react-hooks/exhaustive-deps
+  const applyBrandKit = useCallback((kit) => {
+    if (!kit) return;
+    const asBrand = kitToBrand(kit);
+    setBrands((bs) => upsertBrand(bs, asBrand).brands);
+    setBrandId(asBrand.id);
+  }, []);
   const [path, setPath] = useState([]);
   const [selIds, setSelIds] = useState([]);
   const [selKf, setSelKf] = useState(null);
@@ -316,12 +336,16 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     setAnimateArm(v);
     try { localStorage.setItem(ARM_KEY, v ? "1" : "0"); } catch { /* storage unavailable — the arm just won't persist */ }
   }, []);
-  const [stageBg, setStageBg] = useState("#101218");
+  /* R9w3 default stage background: a brand-new project starts on the user's
+     configured default bg (Settings page); none selected → black. Loaded
+     projects keep their own saved stage.bg (importProject below). */
+  const [stageBg, setStageBg] = useState(() => resolveLoadedStageBg(null, readCachedSettings(), "#101218"));
   const [stageScale, setStageScale] = useState(0.6);
   const [zoomMode, setZoomMode] = useState("fit"); /* "fit" (auto) or a manual factor from ZOOM_STEPS */
   const [tlH, setTlH] = useState(() => { try { const v = parseFloat(localStorage.getItem(TL_H_KEY)); return Number.isFinite(v) ? clampTlH(v) : TL_H_DEFAULT; } catch { return TL_H_DEFAULT; } });
   const [tlDragging, setTlDragging] = useState(false);
   const [shapesOpen, setShapesOpenRaw] = useState(false);
+  const [textOpen, setTextOpenRaw] = useState(false);
   const [numbersOpen, setNumbersOpenRaw] = useState(false);
   const [mapsOpen, setMapsOpenRaw] = useState(false);
   const [imagesOpen, setImagesOpenRaw] = useState(false);
@@ -340,12 +364,13 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
      unclickable). Opening one rail panel closes the rest; closing any panel
      keeps working (it just closes the others too — a no-op when they are
      already shut). */
-  const RAIL_PANEL_SETTERS = [setShapesOpenRaw, setNumbersOpenRaw, setMapsOpenRaw, setImagesOpenRaw, setTemplatesOpenRaw, setChartsOpenRaw, setConfettiOpenRaw, setBgOpenRaw, setIconsOpenRaw, setUiOpenRaw];
+  const RAIL_PANEL_SETTERS = [setShapesOpenRaw, setTextOpenRaw, setNumbersOpenRaw, setMapsOpenRaw, setImagesOpenRaw, setTemplatesOpenRaw, setChartsOpenRaw, setConfettiOpenRaw, setBgOpenRaw, setIconsOpenRaw, setUiOpenRaw];
   const openOnly = (setter) => (v) => {
     RAIL_PANEL_SETTERS.forEach((s) => { if (s !== setter) s(false); });
     setter(v);
   };
   const setShapesOpen = openOnly(setShapesOpenRaw);
+  const setTextOpen = openOnly(setTextOpenRaw);
   const setNumbersOpen = openOnly(setNumbersOpenRaw);
   const setMapsOpen = openOnly(setMapsOpenRaw);
   const setImagesOpen = openOnly(setImagesOpenRaw);
@@ -1149,7 +1174,13 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
       const walk = (l) => { const m = /^ob(\d+)$/.exec(l.id || ""); if (m) _uid = Math.max(_uid, parseInt(m[1]) + 1); (l.children || []).forEach(walk); };
       data.objects.forEach(walk);
       setObjects(data.objects);
-      if (data.stage) { setStage({ w: data.stage.w || 1280, h: data.stage.h || 720 }); if (data.stage.dur) setCompDur(data.stage.dur); if (data.stage.bg) setStageBg(data.stage.bg); }
+      if (data.stage) {
+        setStage({ w: data.stage.w || 1280, h: data.stage.h || 720 });
+        if (data.stage.dur) setCompDur(data.stage.dur);
+        const loadedBg = typeof data.stage.bg === "string" ? data.stage.bg : null;
+        freshBlankRef.current = (!Array.isArray(data.objects) || data.objects.length === 0) && (!loadedBg || loadedBg.toUpperCase() === ENGINE_STAGE_BG.toUpperCase());
+        setStageBg((cur) => resolveLoadedStageBg(data, readCachedSettings(), cur));
+      }
       if (Array.isArray(data.brands) && data.brands.length) { setBrands(data.brands); setBrandId(data.brandId || data.brands[0].id); }
       setAudioTrack(audioFromJson(data.audio)); /* restore attached audio (null when the field is absent) */
       setAudioSel(false);
@@ -1811,6 +1842,9 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
 
   const fmt = (ms) => `${Math.floor(ms / 1000)}:${String(Math.floor((ms % 1000) / 10)).padStart(2, "0")}`;
   const SW = brand.colors;
+  /* R9w3: text style presets resolve the user's settings config over the
+     active brand's fonts (heading tiers ← headFont, body tiers ← bodyFont) */
+  const resolvedTextStyles = useMemo(() => resolveTextStyles(userSettings, brand), [userSettings, brand]);
   /* audio lane is selected only while no layer selection supersedes it */
   const audioLaneSel = audioSel && !!audioTrack && selIds.length === 0;
   /* camera lane selected: mirrors audioLaneSel — a layer or audio selection supersedes it */
@@ -1878,11 +1912,12 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
           Editor shell; standalone renders stub-disabled items). */}
       <TopBar exitToDepth={exitToDepth} inClip={inClip} ctx={ctx}
         stage={stage} applyStagePreset={applyStagePreset} stageIsPreset={stageIsPreset} brand={brand}
-        setBrandOpen={setBrandOpen} user={user} onProfile={onProfile} onLogout={onLogout} />
+        brandKits={userSettings.brandKits} onApplyKit={applyBrandKit} onManageBrand={() => window.location.assign("/settings")}
+        user={user} onProfile={onProfile} onLogout={onLogout} />
 
       {/* ============ MAIN ============ */}
       <div style={{ display: "flex", flex: 1, minHeight: 0, position: "relative" }}>
-        <IconRail shapesOpen={shapesOpen} setShapesOpen={setShapesOpen} imagesOpen={imagesOpen} setImagesOpen={setImagesOpen}
+        <IconRail shapesOpen={shapesOpen} setShapesOpen={setShapesOpen} textOpen={textOpen} setTextOpen={setTextOpen} imagesOpen={imagesOpen} setImagesOpen={setImagesOpen}
           audioOpen={audioOpen} setAudioOpen={setAudioOpen} mapsOpen={mapsOpen} setMapsOpen={setMapsOpen}
           templatesOpen={templatesOpen} setTemplatesOpen={setTemplatesOpen} chartsOpen={chartsOpen} setChartsOpen={setChartsOpen}
           confettiOpen={confettiOpen} setConfettiOpen={setConfettiOpen}
@@ -1902,6 +1937,9 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
 
         {/* shapes folder with search */}
         {shapesOpen && <ShapesPanel shapeQ={shapeQ} setShapeQ={setShapeQ} addObject={addObject} />}
+
+        {/* text drawer: style presets (settings text styles) + drop-in effects */}
+        {textOpen && <TextPanel addObject={addObject} setTextOpen={setTextOpen} textStyles={resolvedTextStyles} brand={brand} getPlayheadMs={() => timeRef.current} />}
 
         {/* charts drawer: 7 chart types as separate insertables */}
         {chartsOpen && <ChartsPanel addObject={addObject} setChartsOpen={setChartsOpen} />}
@@ -1969,9 +2007,6 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
 
       {/* ============ CONTEXT MENU ============ */}
       {menu && <ContextMenu menu={menu} setMenu={setMenu} setSegmentEase={setSegmentEase} groupSelection={groupSelection} enterClip={enterClip} ungroupClip={ungroupClip} copySelection={copySelection} pasteClipboard={pasteClipboard} clipCount={clipCount} duplicateSelected={duplicateSelected} toggleHide={toggleHide} toggleLock={toggleLock} removeSelected={removeSelected} fmt={fmt} />}
-
-      {/* ============ BRAND MODAL ============ */}
-      {brandOpen && <BrandModal setBrandOpen={setBrandOpen} brands={brands} brandId={brandId} setBrandId={setBrandId} setBrands={setBrands} brand={brand} />}
 
       {/* ============ EXPORT DIALOG ============ */}
       {exportOpen && (

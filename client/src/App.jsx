@@ -4,6 +4,7 @@ import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Editor from "./pages/Editor";
 import Dashboard from "./pages/Dashboard";
+import Settings from "./pages/Settings";
 import Templates from "./pages/Templates";
 import PublicPlayer from "./pages/PublicPlayer";
 
@@ -44,6 +45,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <Templates />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <ProtectedRoute>
+                <Settings />
               </ProtectedRoute>
             }
           />

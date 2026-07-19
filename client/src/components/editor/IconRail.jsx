@@ -7,14 +7,17 @@ import { RailBtn, NoteIcon } from "./ui";
 import { ptsToStr, SHAPE_DEFS } from "../../engine/shapes.js";
 import { ringsToPath, MAPS } from "../../engine/maps.js";
 
-export default function IconRail({ shapesOpen, setShapesOpen, imagesOpen, setImagesOpen, audioOpen, setAudioOpen, mapsOpen, setMapsOpen, templatesOpen, setTemplatesOpen, chartsOpen, setChartsOpen, confettiOpen, setConfettiOpen, numbersOpen, setNumbersOpen, bgOpen, setBgOpen, iconsOpen, setIconsOpen, uiOpen, setUiOpen, audioTrack, addObject }) {
+export default function IconRail({ shapesOpen, setShapesOpen, textOpen, setTextOpen, imagesOpen, setImagesOpen, audioOpen, setAudioOpen, mapsOpen, setMapsOpen, templatesOpen, setTemplatesOpen, chartsOpen, setChartsOpen, confettiOpen, setConfettiOpen, numbersOpen, setNumbersOpen, bgOpen, setBgOpen, iconsOpen, setIconsOpen, uiOpen, setUiOpen, audioTrack, addObject }) {
   return (
         <div style={{ width: 76, background: C.bg1, borderRight: `1px solid ${C.line}`, display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 12, gap: 9, flexShrink: 0, zIndex: 20, overflowY: "auto" }}>
           <RailBtn label="Templates" active={templatesOpen} onClick={() => setTemplatesOpen(!templatesOpen)} glyph={<svg width="17" height="17" viewBox="0 0 18 18"><rect x="1" y="1" width="7" height="7" rx="1.5" fill={C.dim} /><rect x="10" y="1" width="7" height="7" rx="1.5" fill={C.dim} /><rect x="1" y="10" width="7" height="7" rx="1.5" fill={C.dim} /><rect x="10" y="10" width="7" height="7" rx="1.5" fill={C.dim} /></svg>} />
           <RailBtn label="Icons" active={iconsOpen} onClick={() => setIconsOpen(!iconsOpen)} glyph={<svg width="17" height="17" viewBox="0 0 18 18" fill="none" stroke={C.dim} strokeWidth="1.5" strokeLinejoin="round"><path d="M9 1.9l2.1 4.5 4.9.5-3.7 3.3 1 4.8L9 12.5l-4.3 2.5 1-4.8-3.7-3.3 4.9-.5z" /></svg>} />
           <RailBtn label="UI" active={uiOpen} onClick={() => setUiOpen(!uiOpen)} glyph={<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke={C.dim} strokeWidth="1.5"><rect x="1.5" y="4.5" width="15" height="9" rx="4.5" /><circle cx="10.6" cy="9" r="2.7" fill={C.dim} stroke="none" /></svg>} />
           <RailBtn label="Shapes" active={shapesOpen} onClick={() => setShapesOpen(!shapesOpen)} glyph={<svg width="19" height="19" viewBox="0 0 100 100"><polygon points={ptsToStr(SHAPE_DEFS.star.pts)} fill={C.dim} /></svg>} />
-          <RailBtn label="Text" onClick={() => addObject("text")} glyph={<div style={{ color: C.dim, fontWeight: 800, fontSize: 15 }}>T</div>} />
+          {/* R9w3: when the host wires textOpen/setTextOpen the Text button
+              toggles the TextPanel (presets + effects); without them it keeps
+              the legacy one-click plain-text insert. */}
+          <RailBtn label="Text" active={!!textOpen} onClick={() => (setTextOpen ? setTextOpen(!textOpen) : addObject("text"))} glyph={<div style={{ color: C.dim, fontWeight: 800, fontSize: 15 }}>T</div>} />
           <RailBtn label="Image" active={imagesOpen} onClick={() => setImagesOpen(!imagesOpen)} glyph={<div style={{ width: 18, height: 14, border: `2px solid ${C.dim}`, borderRadius: 3, position: "relative", overflow: "hidden" }}><div style={{ position: "absolute", width: 7, height: 7, background: C.dim, transform: "rotate(45deg)", bottom: -4, left: 3 }} /></div>} />
           <RailBtn label="Audio" active={audioOpen} onClick={() => setAudioOpen(!audioOpen)} glyph={<NoteIcon size={18} color={audioTrack ? C.amber : C.dim} />} />
           <RailBtn label="Number" active={numbersOpen} onClick={() => setNumbersOpen(!numbersOpen)} glyph={<div style={{ color: C.dim, fontWeight: 800, fontSize: 12.5, fontFamily: "'JetBrains Mono'" }}>123</div>} />

@@ -111,8 +111,12 @@ async function main() {
     await page.waitForTimeout(150);
     check("reset camera clears the lane", !(await lane.textContent()).includes("◆") && await laneTrack.locator(".gd-kf").count() === 0);
 
-    /* ---- depth slider on an inserted object ---- */
+    /* ---- depth slider on an inserted object ----
+       R9w3: the Text rail button opens the presets/effects drawer — the
+       "Normal text" preset performs the plain insert. */
     await page.locator('button:has(span:text-is("Text"))').first().click();
+    await page.waitForTimeout(200);
+    await page.locator('[data-text-panel] button[data-preset="body"]').first().click();
     await page.waitForTimeout(200);
     const depth = page.locator('input[aria-label="Parallax depth"]');
     check("Depth slider in the object's first card", await depth.count() === 1);

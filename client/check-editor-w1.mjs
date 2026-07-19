@@ -144,12 +144,23 @@ async function main() {
 
     /* ==================== #2 new shell — purge + timeline-bar controls ==== */
     console.log("\n#2 new shell — top-bar purge, timeline save control + grid toggle");
-    check("top bar keeps the Main breadcrumb + stage preset + Brand (R9w1: + avatar, NO Export)",
+    /* R9w3: the Brand button/modal is gone — a compact brand switcher
+       (gd-brandswitch) lists saved brand kits; the standalone harness has no
+       kits, so the menu shows the empty state + the Manage… jump */
+    check("top bar keeps the Main breadcrumb + stage preset + brand switcher (R9w3) + avatar, NO Export",
       await page.locator('button:has-text("Main")').count() >= 1
       && await page.locator('select[aria-label="Stage size preset"]').count() >= 1
-      && await page.locator('button:has-text("Brand")').count() >= 1
+      && await page.locator("button.gd-brandswitch").count() === 1
       && await page.locator("button.gd-avatar").count() === 1
       && await page.locator('button:has-text("Export")').count() === 1 /* the ONE Export now lives in the timeline bar */);
+    await page.locator("button.gd-brandswitch").click();
+    await page.waitForTimeout(150);
+    check("brand switcher opens: saved-kit list + Manage brand kits… item",
+      await page.locator(".gd-brandswitch-menu").count() === 1 && await page.locator(".gd-brandswitch-menu button.gd-kit-manage").count() === 1);
+    check("standalone harness: switcher shows the no-kits empty state", await page.locator('.gd-brandswitch-menu [data-empty="kits"]').count() === 1);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(120);
+    check("Escape closes the brand switcher", await page.locator(".gd-brandswitch-menu").count() === 0);
     /* R9w1: Export moved into the timeline transport bar beside the save control */
     check("Export sits in the timeline transport bar beside the save control", await page.locator("button.gd-tl-export").count() === 1 && await page.locator("button.gd-tl-save").count() === 1);
     /* R9w1: the Zwoosh wordmark moved to the slim brand bar above the timeline */

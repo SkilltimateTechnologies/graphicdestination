@@ -279,9 +279,13 @@ async function main() {
     kf2 = await kfCount();
     check("shape canvas RESIZE wrote a ◆ diamond (scale track)", kf2 > kf, `${kf} → ${kf2}`);
 
-    /* --- text: insert (auto-selected, topmost at center) → same gestures --- */
+    /* --- text: insert (auto-selected, topmost at center) → same gestures ---
+       R9w3: the Text rail button opens the presets/effects drawer; the
+       "Normal text" preset performs the plain center-stage insert. */
     console.log("\n#5b text — insert, then canvas move/rotate/resize");
     await page.locator('button:has(span:text-is("Text"))').first().click();
+    await page.waitForTimeout(320);
+    await page.locator('[data-text-panel] button[data-preset="body"]').first().click();
     await page.waitForTimeout(320);
     check("insert text → 2 lanes, auto-selected", (await laneCount()) === 2, (await laneNames()).join(" · "));
     kf = await kfCount();

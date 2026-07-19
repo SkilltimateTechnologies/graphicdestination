@@ -8,7 +8,7 @@ import crypto from "crypto";
 import { fileURLToPath } from "url";
 import { db, initSchema, usingTurso } from "./db.js";
 import { hashPassword, verifyPassword, signSession, requireAuth, COOKIE_NAME, COOKIE_OPTS } from "./auth.js";
-import { authLimiter, shareLimiter } from "./ratelimit.js";
+import { authLimiter, shareLimiter, createRateLimiter } from "./ratelimit.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CRED_FILE = path.join(__dirname, "data", "admin-credentials.json");
@@ -37,6 +37,14 @@ app.use(cookieParser());
 app.use(cors({ origin: process.env.CLIENT_ORIGIN || true, credentials: true }));
 
 await initSchema();
+/* R9w3 — per-user settings store (brand kits, text styles, default stage bg).
+   ADDITIVE: one row per user, whole-document JSON (validated + size-capped in
+   the PUT route below). Kept out of db.js so the core schema stays untouched. */
+await db.execute(`CREATE TABLE IF NOT EXISTS user_settings (
+  user_id INTEGER PRIMARY KEY,
+  json TEXT NOT NULL,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+)`);
 console.log(`Database: ${usingTurso ? "Turso cloud (remote HTTPS)" : "local SQLite file (no Turso env vars set)"}`);
 
 /* ---------------- health (no auth) ---------------- */
@@ -357,6 +365,119 @@ app.delete("/api/assets/:id", requireAuth, async (req, res) => {
   const result = await db.execute({ sql: "DELETE FROM assets WHERE id = ? AND owner_id = ?", args: [req.params.id, req.user.sub] });
   if (result.rowsAffected === 0) return res.status(404).json({ error: "Not found" });
   res.json({ ok: true });
+});
+
+/* ---------------- user settings (R9w3) ----------------
+ * Per-user JSON document: saved brand kits, text-style config and the
+ * default stage background. One row per user in user_settings; the whole
+ * document is validated + size-capped on every PUT (unknown keys are
+ * stripped, unknown text-style tiers dropped). Own lenient rate bucket
+ * (60 req / 10 min / IP) so it can't be used to amplify like the auth
+ * endpoints, but normal editor use never trips it.
+ */
+
+const settingsLimiter = createRateLimiter({ max: 60, message: "Too many requests. Try again later." });
+
+const SETTINGS_MAX_BYTES = 256 * 1024; /* serialized cap — kits + optional small logo data URLs */
+const SETTINGS_MAX_KITS = 24;
+const SETTINGS_LOGO_MAX = 120 * 1024; /* a logo is a small data/asset URL string */
+const SETTINGS_HEX_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+const SETTINGS_ID_RE = /^[a-zA-Z0-9_-]{1,40}$/;
+const SETTINGS_TIERS = ["heading", "subheading", "body", "caption"];
+const SETTINGS_WEIGHTS = new Set([100, 200, 300, 400, 500, 600, 700, 800, 900]);
+
+const defaultSettingsDoc = () => ({ v: 1, brandKits: [], textStyles: null, defaultBg: null });
+
+const cleanHex = (v) => (typeof v === "string" && SETTINGS_HEX_RE.test(v) ? v : null);
+const cleanFontName = (v) => (typeof v === "string" && v.trim().length >= 1 && v.trim().length <= 60 ? v.trim() : null);
+
+/* strict-but-repairing validator: returns { settings } or { error }.
+   Unknown top-level keys are stripped; malformed REQUIRED fields 400. */
+function sanitizeSettings(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return { error: "settings must be a JSON object" };
+  const out = { v: 1, brandKits: [], textStyles: null, defaultBg: null };
+
+  if (input.brandKits != null) {
+    if (!Array.isArray(input.brandKits)) return { error: "brandKits must be an array" };
+    if (input.brandKits.length > SETTINGS_MAX_KITS) return { error: `too many brand kits (max ${SETTINGS_MAX_KITS})` };
+    const seen = new Set();
+    for (let i = 0; i < input.brandKits.length; i++) {
+      const k = input.brandKits[i];
+      if (!k || typeof k !== "object" || Array.isArray(k)) return { error: `brand kit #${i + 1} must be an object` };
+      const name = typeof k.name === "string" ? k.name.trim() : "";
+      if (!name || name.length > 60) return { error: `brand kit #${i + 1}: name must be 1-60 characters` };
+      const primary = cleanHex(k.primary), accent = cleanHex(k.accent), textColor = cleanHex(k.textColor);
+      if (!primary || !accent || !textColor) return { error: `brand kit "${name}": primary/accent/textColor must be hex colors (#rgb or #rrggbb)` };
+      const headingFont = cleanFontName(k.headingFont), bodyFont = cleanFontName(k.bodyFont);
+      if (!headingFont || !bodyFont) return { error: `brand kit "${name}": headingFont/bodyFont must be 1-60 character strings` };
+      let id = typeof k.id === "string" && SETTINGS_ID_RE.test(k.id) ? k.id : `kit${i + 1}`;
+      while (seen.has(id)) id = `${id}x`;
+      seen.add(id);
+      const kit = { id, name, primary, accent, textColor, headingFont, bodyFont };
+      if (k.logo != null && k.logo !== "") {
+        if (typeof k.logo !== "string" || k.logo.length > SETTINGS_LOGO_MAX) return { error: `brand kit "${name}": logo must be a string up to 120 KB` };
+        kit.logo = k.logo;
+      }
+      out.brandKits.push(kit);
+    }
+  }
+
+  if (input.textStyles != null) {
+    if (typeof input.textStyles !== "object" || Array.isArray(input.textStyles)) return { error: "textStyles must be an object" };
+    const ts = {};
+    for (const tier of SETTINGS_TIERS) {
+      const t = input.textStyles[tier];
+      if (t == null) continue;
+      if (typeof t !== "object" || Array.isArray(t)) return { error: `textStyles.${tier} must be an object` };
+      const fontFamily = cleanFontName(t.fontFamily);
+      if (!fontFamily) return { error: `textStyles.${tier}.fontFamily must be a 1-60 character string` };
+      const fontSize = Number(t.fontSize);
+      if (!Number.isFinite(fontSize) || fontSize < 6 || fontSize > 400) return { error: `textStyles.${tier}.fontSize must be a number between 6 and 400` };
+      const fontWeight = Number(t.fontWeight);
+      if (!SETTINGS_WEIGHTS.has(fontWeight)) return { error: `textStyles.${tier}.fontWeight must be one of 100-900 (x100)` };
+      ts[tier] = { fontFamily, fontSize: Math.round(fontSize), fontWeight };
+    }
+    out.textStyles = Object.keys(ts).length ? ts : null;
+  }
+
+  if (input.defaultBg != null && input.defaultBg !== "") {
+    const bg = cleanHex(input.defaultBg);
+    if (!bg) return { error: "defaultBg must be a hex color (#rgb or #rrggbb), \"\" or null" };
+    out.defaultBg = bg;
+  }
+
+  const size = Buffer.byteLength(JSON.stringify(out), "utf8");
+  if (size > SETTINGS_MAX_BYTES) return { error: `settings too large (max ${SETTINGS_MAX_BYTES / 1024} KB)`, status: 413 };
+  return { settings: out };
+}
+
+app.get("/api/settings", settingsLimiter, requireAuth, async (req, res) => {
+  const result = await db.execute({ sql: "SELECT json FROM user_settings WHERE user_id = ?", args: [req.user.sub] });
+  const row = result.rows[0];
+  if (!row) return res.json(defaultSettingsDoc());
+  try {
+    res.json(JSON.parse(row.json));
+  } catch {
+    res.json(defaultSettingsDoc());
+  }
+});
+
+app.put("/api/settings", settingsLimiter, requireAuth, async (req, res) => {
+  /* cap the INCOMING payload first — unknown keys are stripped by the
+     sanitizer, so measuring after would let an oversized envelope through */
+  let incomingBytes = 0;
+  try { incomingBytes = Buffer.byteLength(JSON.stringify(req.body), "utf8"); } catch { incomingBytes = SETTINGS_MAX_BYTES + 1; }
+  if (incomingBytes > SETTINGS_MAX_BYTES) {
+    return res.status(413).json({ error: `settings too large (max ${SETTINGS_MAX_BYTES / 1024} KB)` });
+  }
+  const verdict = sanitizeSettings(req.body);
+  if (verdict.error) return res.status(verdict.status || 400).json({ error: verdict.error });
+  await db.execute({
+    sql: `INSERT INTO user_settings (user_id, json, updated_at) VALUES (?, ?, datetime('now'))
+          ON CONFLICT(user_id) DO UPDATE SET json = excluded.json, updated_at = datetime('now')`,
+    args: [req.user.sub, JSON.stringify(verdict.settings)],
+  });
+  res.json({ ok: true, settings: verdict.settings });
 });
 
 /* ---------------- HyperFrames export ---------------- */

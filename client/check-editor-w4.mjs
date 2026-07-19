@@ -124,7 +124,11 @@ async function main() {
     /* ---------- B · filters row ---------- */
     console.log("\nB · filters row (blur + blend) in the first card");
     let p;
+    /* R9w3: the Text rail button opens the presets/effects drawer — the
+       "Normal text" preset performs the plain insert this pack drives */
     await page.locator('button:has(span:text-is("Text"))').first().click();
+    await page.waitForTimeout(300);
+    await page.locator('[data-text-panel] button[data-preset="body"]').first().click();
     await page.waitForTimeout(300);
     check("blur slider present (0–20)", await page.evaluate(() => { const el = document.querySelector('input[aria-label="Blur radius"]'); return !!el && el.min === "0" && el.max === "20"; }));
     check("4 blend chips present", await page.evaluate(() => ["normal", "screen", "multiply", "overlay"].every((m) => [...document.querySelectorAll("button")].some((b) => b.textContent === m))));
