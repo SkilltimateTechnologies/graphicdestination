@@ -12,6 +12,7 @@ import { hashPassword, verifyPassword, signSession, requireAuth, COOKIE_NAME, CO
 import { authLimiter, shareLimiter, createRateLimiter } from "./ratelimit.js";
 import { logger } from "./logger.js";
 import { initErrorTracking, captureError } from "./errorTracking.js";
+import { recordHttp, renderMetrics } from "./metrics.js";
 
 // Validate env & fail-fast in production before the app starts serving traffic.
 enforceConfig();
@@ -50,8 +51,13 @@ app.use((req, res, next) => {
   res.setHeader("X-Request-Id", id);
   const start = Date.now();
   res.on("finish", () => {
+    const ms = Date.now() - start;
     const level = res.statusCode >= 500 ? "error" : res.statusCode >= 400 ? "warn" : "info";
-    req.log[level]("request", { method: req.method, path: req.path, status: res.statusCode, ms: Date.now() - start });
+    req.log[level]("request", { method: req.method, path: req.path, status: res.statusCode, ms });
+    // Skip infra endpoints so scrapes/probes don't drown the request signal.
+    if (!(req.path === "/metrics" || req.path === "/api/health" || req.path === "/api/ready")) {
+      recordHttp(req.method, res.statusCode, ms);
+    }
   });
   next();
 });
@@ -82,6 +88,18 @@ logger.info("database_ready", { backend: usingTurso ? "turso" : "local" });
 
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, db: usingTurso ? "turso" : "local" });
+});
+
+/* Prometheus metrics (RED + process). Optionally gate with METRICS_TOKEN:
+   when set, scrapers must send `Authorization: Bearer <token>`. Left open
+   (internal-network scraping) when unset — the payload carries no secrets. */
+app.get("/metrics", (req, res) => {
+  const token = process.env.METRICS_TOKEN;
+  if (token && req.headers.authorization !== `Bearer ${token}`) {
+    return res.status(401).type("text/plain").send("Unauthorized\n");
+  }
+  res.setHeader("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+  res.send(renderMetrics());
 });
 
 app.get("/api/ready", async (req, res) => {

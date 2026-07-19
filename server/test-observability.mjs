@@ -8,6 +8,7 @@
 import { validateConfig } from "./config.js";
 import { redact, formatLine, REDACT_KEYS } from "./logger.js";
 import { initErrorTracking, errorTrackingStatus, captureError } from "./errorTracking.js";
+import { recordHttp, renderMetrics, resetMetrics } from "./metrics.js";
 
 let passed = 0;
 let failed = 0;
@@ -118,6 +119,32 @@ console.log("errorTracking — safe no-op when disabled");
     threw = true;
   }
   check("captureError never throws when disabled", threw === false);
+}
+
+/* ---------- metrics (Prometheus exposition) ---------- */
+console.log("metrics — RED counters + duration histogram");
+
+{
+  resetMetrics();
+  recordHttp("GET", 200, 12);
+  recordHttp("GET", 200, 300);
+  recordHttp("POST", 500, 8);
+  const text = renderMetrics();
+
+  check("counts requests by method+status", /http_requests_total\{method="GET",status="200"\} 2/.test(text));
+  check("separate series per status", /http_requests_total\{method="POST",status="500"\} 1/.test(text));
+  check("histogram emits a +Inf bucket equal to total count", /http_request_duration_ms_bucket\{le="\+Inf"\} 3/.test(text));
+  check("histogram sum reflects observations", /http_request_duration_ms_sum 320/.test(text));
+  check("histogram count is total observations", /http_request_duration_ms_count 3/.test(text));
+  check("le=10 bucket only counts the 8ms request", /http_request_duration_ms_bucket\{le="10"\} 1/.test(text));
+  check("le=25 bucket counts the 8ms and 12ms requests", /http_request_duration_ms_bucket\{le="25"\} 2/.test(text));
+  check("exposition has TYPE metadata", /# TYPE http_requests_total counter/.test(text) && /# TYPE http_request_duration_ms histogram/.test(text));
+  check("process gauges present", /process_uptime_seconds /.test(text) && /process_resident_memory_bytes /.test(text));
+  check("no secrets leak into metrics", !/password|token|secret|JWT/i.test(text));
+}
+{
+  resetMetrics();
+  check("reset clears counters", !/http_requests_total\{/.test(renderMetrics()));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

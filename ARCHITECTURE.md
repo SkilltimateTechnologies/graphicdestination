@@ -150,7 +150,9 @@ right `Content-Type` from `GET /api/assets/:id`.
 
 | Route | Auth | Purpose |
 |---|---|---|
-| `GET /api/health` | — | `{ ok, db }` |
+| `GET /api/health` | — | liveness `{ ok, db }` |
+| `GET /api/ready` | — | readiness — DB reachable (503 if not) |
+| `GET /metrics` | optional bearer | Prometheus RED + process metrics |
 | `POST /api/auth/signup` / `login` | rate-limited | create / authenticate (sets cookie) |
 | `POST /api/auth/logout`, `GET /api/auth/me`, `POST /api/auth/change-password` | session | session lifecycle |
 | `GET/POST/PUT/DELETE /api/projects[/:id]` | session | owner-scoped project CRUD |

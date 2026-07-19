@@ -32,7 +32,10 @@ release tags (Rn-Wn "round/week") rather than strict SemVer for feature work.
     handler + process guards — activates only when `SENTRY_DSN` is set **and**
     `@sentry/node` is installed (undeclared, like the `hyperframes` pattern); a
     safe no-op otherwise, so it adds no required dependency.
-  - New guard suite `server/test-observability.mjs` (22 assertions).
+  - Prometheus metrics (`server/metrics.js`) at `GET /metrics` — zero-dependency
+    RED metrics (request rate/errors, duration histogram) + process
+    uptime/memory; optional `METRICS_TOKEN` bearer gate.
+  - New guard suite `server/test-observability.mjs` (33 assertions).
   - Backup & restore runbook ([docs/backup-restore.md](docs/backup-restore.md))
     — RPO/RTO targets, Turso + local-SQLite procedures, quarterly restore drill.
 

@@ -83,12 +83,14 @@ command on every push/PR. See [CONTRIBUTING.md](CONTRIBUTING.md#testing).
 | `PORT` | no | Default 8787 |
 | `LOG_LEVEL` | no | Structured-log verbosity: `debug`/`info`/`warn`/`error` (default `info`) |
 | `SENTRY_DSN` | no | Enables error tracking (no-op unless set **and** `@sentry/node` installed) |
+| `METRICS_TOKEN` | no | If set, `GET /metrics` requires `Authorization: Bearer <token>` |
 | `ENABLE_ADMIN_HINT` | no | `1` exposes the seeded-admin bootstrap endpoint (dev only; **rejected in production**) |
 | `CLIENT_ORIGIN` | no | CORS origin for the client |
 
-Health endpoints: `GET /api/health` (liveness — process is up) and
-`GET /api/ready` (readiness — DB reachable; returns 503 if not). Point load
-balancers / orchestrators at `/api/ready`.
+Operational endpoints:
+- `GET /api/health` — liveness (process is up).
+- `GET /api/ready` — readiness (DB reachable; 503 if not). Point load balancers here.
+- `GET /metrics` — Prometheus metrics (request rate/errors/duration + process uptime/memory).
 
 ## Deploy
 
