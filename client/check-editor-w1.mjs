@@ -5,10 +5,13 @@
  *
  *   #1 camera presets — Push In / Pan Right write two ◆ spanning the comp
  *      (easeInOutCubic) and the PREVIEW transform actually moves · lane hint.
- *   #2 auto-keyframe — top-bar ◆ toggle (exact title, amber, gd:autokey
- *      persisted); canvas drag on a TRACKED prop writes a ◆ at the playhead,
- *      an UNTRACKED prop patches the base value (no keyframe).
- *   #3 Transform rows are ◆-only: no inputs, read-only JetBrains Mono value.
+ *   #2 new shell (R8w1): the top-bar purge holds (NO autokey toggle, NO
+ *      Save/Load, NO share), the save control + grid toggle live in the
+ *      timeline transport bar (state colors, persisted gd:grid), autokey is
+ *      ALWAYS-ON so a canvas drag writes ◆ at the playhead on BOTH axes
+ *      (R8w3: untracked props start their track — no silent base patches).
+ *   #3 Transform card (R8w3 purge): x/y/rotation/scale rows GONE (canvas +
+ *      timeline own them); the Opacity row keeps ◆ toggle + slider + mono.
  *   #5 lock toggle renders distinct SVG padlocks (open dim / closed amber).
  *   #6 nothing selected → no keyframe controls · empty project → no ◆ lanes.
  *   #7 clips: corner grips scale the wrapper uniformly (scale prop), body-drag
@@ -50,9 +53,22 @@ import GraphicDestinationMotion from "../src/components/GraphicDestinationMotion
    40px clamp) — run it with smart snapping disabled so drags land unsnapped;
    snapping itself is covered by check-snapping-ui.mjs. */
 localStorage.setItem("gd:snapping", "0");
-createRoot(document.getElementById("root")).render(h(GraphicDestinationMotion, {
+/* R8w1 shell reality: the top-bar Save/Load modal is GONE — the only import
+   path is the cloud seam (initialProject on mount). __loadProject remounts
+   the editor with a fresh initialProject (key change → the mount effect
+   re-imports), and the shell props saveState/onSaveNow light up the
+   timeline-bar save control the Editor shell passes in production. */
+let key = 0;
+const root = createRoot(document.getElementById("root"));
+const render = (initialProject) => root.render(h(GraphicDestinationMotion, {
+  key: ++key,
+  initialProject,
   onChange: (json) => { window.__lastProject = json; },
+  saveState: "dirty",
+  onSaveNow: () => { window.__saves = (window.__saves || 0) + 1; },
 }));
+window.__loadProject = (json) => { window.__lastProject = ""; render(JSON.parse(json)); };
+render(null);
 window.__ready = true;
 `;
 
@@ -126,80 +142,106 @@ async function main() {
     await page.waitForFunction("window.__ready === true");
     await page.waitForTimeout(1200); /* fonts + first paint */
 
-    /* ==================== #2 top-bar auto-keyframe toggle ==================== */
-    console.log("\n#2 auto-keyframe — top-bar toggle");
-    const akBtn = page.locator('button[aria-label="Auto-keyframe: canvas edits write keyframes"]');
-    check("top-bar ◆ auto-keyframe toggle exists with the exact title", await akBtn.count() === 1);
-    check("toggle starts ON (amber)", await akBtn.evaluate((el) => el.getAttribute("aria-pressed") === "true" && /#F5A524|245, 165, 36/.test(el.getAttribute("style") || "")));
-    await akBtn.click();
+    /* ==================== #2 new shell — purge + timeline-bar controls ==== */
+    console.log("\n#2 new shell — top-bar purge, timeline save control + grid toggle");
+    check("top bar keeps the Main breadcrumb + stage preset + Brand + Export",
+      await page.locator('button:has-text("Main")').count() >= 1
+      && await page.locator('select[aria-label="Stage size preset"]').count() >= 1
+      && await page.locator('button:has-text("Brand")').count() >= 1
+      && await page.locator('button:has-text("Export")').count() >= 1);
+    check("top-bar purge: NO Save/Load, share or auto-keyframe controls anywhere",
+      await page.locator('button:has-text("Save / Load")').count() === 0
+      && await page.locator('button:has-text("Share")').count() === 0
+      && await page.locator('button[aria-label^="Auto-keyframe"]').count() === 0);
+    check("autokey always-on: the gd:autokey pref is gone for good", await page.evaluate(() => localStorage.getItem("gd:autokey") === null));
+
+    /* save control — relocated into the timeline transport bar (R8w1) */
+    const saveBtn = page.locator("button.gd-tl-save");
+    check("save control lives in the timeline bar, wired to the shell state", await saveBtn.count() === 1 && (await saveBtn.getAttribute("data-state")) === "dirty");
+    check("dirty state shows ● Save with the exact title", (await saveBtn.textContent()).includes("● Save") && (await saveBtn.getAttribute("title")) === "Unsaved changes — click to save now");
+    await saveBtn.click();
     await page.waitForTimeout(120);
-    check("toggling OFF persists gd:autokey=0", await page.evaluate(() => localStorage.getItem("gd:autokey") === "0"));
-    await akBtn.click();
-    await page.waitForTimeout(120);
-    check("toggling ON persists gd:autokey=1", await page.evaluate(() => localStorage.getItem("gd:autokey") === "1"));
+    check("clicking the save control fires the shell's onSaveNow", await page.evaluate(() => window.__saves === 1), `saves=${await page.evaluate(() => window.__saves)}`);
+
+    /* grid toggle — timeline bar, persisted, canvas overlay is export-safe */
+    const gridBtn = page.locator("button.gd-grid-toggle");
+    check("grid toggle lives in the timeline bar and starts OFF", await gridBtn.count() === 1 && (await gridBtn.getAttribute("aria-pressed")) === "false");
+    check("grid OFF → no canvas overlay", await page.locator(".gd-grid-overlay").count() === 0);
+    await gridBtn.click();
+    await page.waitForTimeout(150);
+    check("grid ON persists gd:grid=1 + aria-pressed flips", await page.evaluate(() => localStorage.getItem("gd:grid") === "1") && (await gridBtn.getAttribute("aria-pressed")) === "true");
+    check("grid ON → the export-safe canvas overlay renders", await page.locator(".gd-grid-overlay").count() === 1);
+    await gridBtn.click();
+    await page.waitForTimeout(150);
+    check("grid back OFF persists gd:grid=0 + overlay unmounts", await page.evaluate(() => localStorage.getItem("gd:grid") === "0") && await page.locator(".gd-grid-overlay").count() === 0);
 
     /* ==================== add a shape: #3 + #2 canvas behavior ==================== */
-    console.log("\n#3 ◆-only Transform rows + #2 canvas auto-keyframe");
+    console.log("\n#3 purged Transform card (opacity-only) + #2 canvas auto-keyframe");
     await page.locator('button:has(span:text-is("Shapes"))').first().click();
     await page.waitForTimeout(200);
     await page.locator('.gd-panel button[title="Rectangle"]').first().click();
     await page.waitForTimeout(250);
-    /* Transform card: no inputs at all, read-only mono values */
+    /* Transform card (R8w3 purge): x/y/rotation/scale rows are GONE — canvas
+       grips + the timeline own spatial transforms now. What remains for a
+       shape is the one row with NO canvas control: Opacity — with its ◆
+       toggle, ‹ › nav hooks, a live slider and the mono readout. */
     const tCard = await page.evaluate(() => {
       const card = [...document.querySelectorAll("div")].find((d) => d.firstElementChild && d.firstElementChild.textContent.startsWith("Transform"));
       if (!card) return { found: false };
-      const xRow = [...card.querySelectorAll("span")].find((s) => s.textContent === "Position X" && s.children.length === 0);
-      const valSpan = xRow && xRow.parentElement.querySelector('span[style*="JetBrains Mono"]');
+      const labels = [...card.querySelectorAll("span")].map((s) => s.textContent);
       return {
         found: true,
-        inputs: card.querySelectorAll("input").length,
-        rows: ["Position X", "Position Y", "Rotation", "Scale", "Opacity"].filter((l) => [...card.querySelectorAll("span")].some((s) => s.textContent === l)).length,
-        monoDim: !!valSpan && valSpan.style.fontFamily.includes("JetBrains Mono"),
+        purged: ["Position X", "Position Y", "Rotation", "Scale"].every((l) => !labels.includes(l)),
+        opacity: labels.includes("Opacity"),
+        kfBtns: card.querySelectorAll('button[title="Add keyframe at playhead"]').length,
+        sliders: card.querySelectorAll('input[type="range"]').length,
+        mono: [...card.querySelectorAll('span')].some((s) => (s.style.fontFamily || "").includes("JetBrains Mono")),
       };
     });
-    check("Transform card found with all 5 transform rows", tCard.found && tCard.rows === 5, JSON.stringify(tCard));
-    check("Transform rows are ◆-only (zero inputs)", tCard.found && tCard.inputs === 0, `inputs=${tCard.inputs}`);
-    check("current value read-only in JetBrains Mono", !!tCard.monoDim);
+    check("Transform card: x/y/rotation/scale rows purged, Opacity kept", tCard.found && tCard.purged && tCard.opacity, JSON.stringify(tCard));
+    check("Opacity row keeps its ◆ toggle + live slider + JetBrains Mono value", tCard.kfBtns === 1 && tCard.sliders === 1 && tCard.mono, JSON.stringify(tCard));
 
-    /* ◆ toggle on Position X (playhead at 0) → first keyframe */
+    /* ◆ toggle on Opacity (playhead at 0) → first keyframe */
     await page.evaluate(() => {
-      const xRow = [...document.querySelectorAll("span")].find((s) => s.textContent === "Position X" && s.children.length === 0);
-      xRow.parentElement.querySelector('button[title="Add keyframe at playhead"]').click();
+      const card = [...document.querySelectorAll("div")].find((d) => d.firstElementChild && d.firstElementChild.textContent.startsWith("Transform"));
+      card.querySelector('button[title="Add keyframe at playhead"]').click();
     });
     await page.waitForTimeout(150);
     let p = await proj(page);
     const shape = () => p.objects.find((o) => o.type === "shape");
-    check("◆ toggle wrote the first x keyframe", shape().tracks.x?.length === 1 && shape().tracks.x[0].t === 0, JSON.stringify(shape().tracks.x));
+    check("◆ toggle wrote the first opacity keyframe", shape().tracks.opacity?.length === 1 && shape().tracks.opacity[0].t === 0 && shape().tracks.opacity[0].v === 1, JSON.stringify(shape().tracks.opacity));
 
-    /* scrub to ~1s, then drag the shape: x (tracked) must get a ◆ at the
-       playhead; y (untracked) must patch its base value with NO keyframe */
+    /* scrub to ~1s, then drag the shape: autokey is ALWAYS-ON (R8w1) and a
+       move STARTS fresh tracks with a ◆ at the playhead on BOTH axes (R8w3 —
+       no silent base patches); the base mirrors the drop so the move also
+       survives ◆ deletion */
     await scrubTo(page, 1000 / 6000);
     let r = await stageRect(page);
     const before = shape();
-    const x0 = before.tracks.x[0].v, y0 = before.props.y;
+    const x0 = before.props.x, y0 = before.props.y;
     const from = toScreen(r, 640, 360);
     await drag(page, from, 120, 80);
     p = await proj(page);
     const sh = shape();
     const dSx = 120 / r.scale, dSy = 80 / r.scale;
     const kf2 = (sh.tracks.x || []).find((k) => k.t >= 900 && k.t <= 1100);
-    check("auto-key: drag on TRACKED x wrote a ◆ at the playhead", (sh.tracks.x || []).length === 2 && !!kf2, JSON.stringify(sh.tracks.x));
-    check("auto-key: the new ◆ carries the dragged value", !!kf2 && Math.abs(kf2.v - (x0 + dSx)) <= 3, kf2 ? `v=${kf2.v} expected≈${Math.round(x0 + dSx)}` : "missing");
-    check("auto-key: UNTRACKED y got NO keyframe", !(sh.tracks.y || []).length, JSON.stringify(sh.tracks.y || []));
-    check("auto-key: UNTRACKED y patched the base value", Math.abs(sh.props.y - (y0 + dSy)) <= 3, `y=${sh.props.y} expected≈${Math.round(y0 + dSy)}`);
+    check("auto-key: the drag STARTED the x track with a ◆ at the playhead", (sh.tracks.x || []).length === 1 && !!kf2, JSON.stringify(sh.tracks.x));
+    check("auto-key: the x ◆ carries the dragged value", !!kf2 && Math.abs(kf2.v - (x0 + dSx)) <= 3, kf2 ? `v=${kf2.v} expected≈${Math.round(x0 + dSx)}` : "missing");
+    const kfy = (sh.tracks.y || []).find((k) => k.t >= 900 && k.t <= 1100);
+    check("auto-key always-on: the y track STARTED with a ◆ at the playhead too", (sh.tracks.y || []).length === 1 && !!kfy, JSON.stringify(sh.tracks.y || []));
+    check("auto-key: the y ◆ carries the dragged value", !!kfy && Math.abs(kfy.v - (y0 + dSy)) <= 3, kfy ? `v=${kfy.v} expected≈${Math.round(y0 + dSy)}` : "missing");
+    check("auto-key: the x/y bases mirror the drop (survive ◆ deletion)", Math.abs(sh.props.x - (x0 + dSx)) <= 3 && Math.abs(sh.props.y - (y0 + dSy)) <= 3, `x=${sh.props.x} y=${sh.props.y}`);
 
-    /* rotate grip: auto-key ON + existing rotation track → ◆ at the playhead */
-    await page.evaluate(() => {
-      const row = [...document.querySelectorAll("span")].find((s) => s.textContent === "Rotation" && s.children.length === 0);
-      row.parentElement.querySelector('button[title="Add keyframe at playhead"]').click();
-    });
-    await page.waitForTimeout(150);
+    /* rotate grip: autokey always-on → the drag STARTS the rotation track
+       with a ◆ at the playhead (R8w3: fresh props key too — the old silent
+       base patch is gone) */
     const rotGrip = page.locator('div[title="Drag to rotate · Shift = 15° steps"]').first();
     const rb = await rotGrip.boundingBox();
     await drag(page, { x: rb.x + rb.width / 2, y: rb.y + rb.height / 2 }, 80, 0);
     p = await proj(page);
     const rotKf = (shape().tracks.rotation || []).find((k) => k.t >= 900 && k.t <= 1100);
-    check("auto-key: rotate drag wrote a rotation ◆ at the playhead", !!rotKf && rotKf.v > 10, JSON.stringify(shape().tracks.rotation || []));
+    check("auto-key: rotate drag STARTED the rotation track with a ◆ at the playhead", !!rotKf && rotKf.v > 10, JSON.stringify(shape().tracks.rotation || []));
+    check("auto-key: the rotation base mirrors the drop", Math.abs((shape().props.rotation || 0) - rotKf.v) <= 1, `rot=${shape().props.rotation}`);
 
     /* ==================== #8 number card: no Mode chips ==================== */
     console.log("\n#8 number card — mode chips removed");
@@ -369,12 +411,11 @@ async function runPart2(page, { check, proj, stageRect, toScreen, drag }) {
   check("nothing selected → Inspector shows the Stage card (no keyframe controls)",
     await page.evaluate(() => document.body.textContent.includes("Add layers from the rail.")
       && document.querySelectorAll('button[title="Add keyframe at playhead"]').length === 0));
-  /* import an empty project → no diamond lanes at all */
-  await page.locator('button:has-text("Save / Load")').first().click();
-  await page.waitForTimeout(200);
-  await page.locator("textarea").first().fill('{"objects":[]}');
-  await page.locator('button:has-text("Load project")').first().click();
-  await page.waitForTimeout(300);
+  /* import an empty project → no diamond lanes at all. R8w1: the top-bar
+     Save/Load modal is GONE — the only import path is the cloud seam
+     (initialProject on mount), exercised here through the harness remount. */
+  await page.evaluate(() => window.__loadProject('{"objects":[]}'));
+  await page.waitForTimeout(400);
   check("empty project → zero keyframe diamonds in the timeline", await page.evaluate(() => document.querySelectorAll(".gd-kf").length) === 0);
   check("empty project → camera lane shows the preset hint, no stray ◆", await page.evaluate(() => {
     const lane = document.querySelector('div[title="Scene camera · drag empty stage space to pan · Alt+wheel (or select this lane) to zoom"]');

@@ -314,18 +314,40 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   const [zoomMode, setZoomMode] = useState("fit"); /* "fit" (auto) or a manual factor from ZOOM_STEPS */
   const [tlH, setTlH] = useState(() => { try { const v = parseFloat(localStorage.getItem(TL_H_KEY)); return Number.isFinite(v) ? clampTlH(v) : TL_H_DEFAULT; } catch { return TL_H_DEFAULT; } });
   const [tlDragging, setTlDragging] = useState(false);
-  const [shapesOpen, setShapesOpen] = useState(false);
-  const [numbersOpen, setNumbersOpen] = useState(false);
-  const [mapsOpen, setMapsOpen] = useState(false);
-  const [imagesOpen, setImagesOpen] = useState(false);
-  const [templatesOpen, setTemplatesOpen] = useState(false);
-  const [chartsOpen, setChartsOpen] = useState(false);
-  const [confettiOpen, setConfettiOpen] = useState(false);
-  const [bgOpen, setBgOpen] = useState(false);
+  const [shapesOpen, setShapesOpenRaw] = useState(false);
+  const [numbersOpen, setNumbersOpenRaw] = useState(false);
+  const [mapsOpen, setMapsOpenRaw] = useState(false);
+  const [imagesOpen, setImagesOpenRaw] = useState(false);
+  const [templatesOpen, setTemplatesOpenRaw] = useState(false);
+  const [chartsOpen, setChartsOpenRaw] = useState(false);
+  const [confettiOpen, setConfettiOpenRaw] = useState(false);
+  const [bgOpen, setBgOpenRaw] = useState(false);
   const [tplQ, setTplQ] = useState(""); /* templates panel search (persists across open/close, like shapeQ) */
   const [tplCat, setTplCat] = useState("All");
-  const [iconsOpen, setIconsOpen] = useState(false); /* icons drawer (engine/kits.js) */
-  const [uiOpen, setUiOpen] = useState(false); /* UI elements drawer (engine/kits.js) */
+  const [iconsOpen, setIconsOpenRaw] = useState(false); /* icons drawer (engine/kits.js) */
+  const [uiOpen, setUiOpenRaw] = useState(false); /* UI elements drawer (engine/kits.js) */
+  /* rail panels are MUTUALLY EXCLUSIVE: every panel anchors at the same
+     left:84 / top:12 / zIndex:30, so two open panels stack exactly and the
+     one mounted first dead-blocks the other's clicks (R8w4 smoke: a Backdrop
+     insert leaves its panel open — the Templates panel then opened UNDER it,
+     unclickable). Opening one rail panel closes the rest; closing any panel
+     keeps working (it just closes the others too — a no-op when they are
+     already shut). */
+  const RAIL_PANEL_SETTERS = [setShapesOpenRaw, setNumbersOpenRaw, setMapsOpenRaw, setImagesOpenRaw, setTemplatesOpenRaw, setChartsOpenRaw, setConfettiOpenRaw, setBgOpenRaw, setIconsOpenRaw, setUiOpenRaw];
+  const openOnly = (setter) => (v) => {
+    RAIL_PANEL_SETTERS.forEach((s) => { if (s !== setter) s(false); });
+    setter(v);
+  };
+  const setShapesOpen = openOnly(setShapesOpenRaw);
+  const setNumbersOpen = openOnly(setNumbersOpenRaw);
+  const setMapsOpen = openOnly(setMapsOpenRaw);
+  const setImagesOpen = openOnly(setImagesOpenRaw);
+  const setTemplatesOpen = openOnly(setTemplatesOpenRaw);
+  const setChartsOpen = openOnly(setChartsOpenRaw);
+  const setConfettiOpen = openOnly(setConfettiOpenRaw);
+  const setBgOpen = openOnly(setBgOpenRaw);
+  const setIconsOpen = openOnly(setIconsOpenRaw);
+  const setUiOpen = openOnly(setUiOpenRaw);
   const [iconQ, setIconQ] = useState("");
   const [iconCat, setIconCat] = useState("All");
   const [uiQ, setUiQ] = useState("");

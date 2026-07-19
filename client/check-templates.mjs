@@ -329,4 +329,7 @@ async function checkThumbs() {
 checkThumbs().then(() => {
   if (failures) { console.error(`\n${failures} failure(s)`); process.exit(1); }
   console.log("\nAll templates match the engine schema, and every thumbnail renders.");
+  /* explicit exit — the vite build's esbuild service can hold the event loop
+     open after the assertions are done (every other check exits explicitly) */
+  process.exit(0);
 }).catch((e) => { console.error(e); fs.rmSync(tmpDir, { recursive: true, force: true }); process.exit(1); });

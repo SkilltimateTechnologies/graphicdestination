@@ -58,7 +58,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
-  CONFETTI_STYLES, confettiParticles, confettiLife, confettiStyleOf, confettiDurMs,
+  CONFETTI_STYLES, confettiLife, confettiDurMs,
   CONFETTI_DUR_MIN, CONFETTI_DUR_MAX, fitDurForConfetti,
   CHART_TYPES, chartModel, chartWindows, chartProgress,
   CHART_IN_FRAC, CHART_OUT_FRAC, CHART_IN_CAP, CHART_OUT_CAP, CHART_MIN_SPAN,

@@ -29,9 +29,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { valueAt, posOf } from "./src/engine/keyframes.js";
+import { valueAt } from "./src/engine/keyframes.js";
 import { cameraAt, cameraTransform, depthFactor, clampZoom, CAM_DEFAULTS } from "./src/engine/camera.js";
-import { layerOut, objSize } from "./src/components/editor/model.js";
+import { layerOut } from "./src/components/editor/model.js";
 import { SHAPE_DEFS } from "./src/engine/shapes.js";
 import { backdropDefaults } from "./src/engine/backdrops.js";
 

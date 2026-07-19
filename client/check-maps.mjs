@@ -31,7 +31,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   COUNTRIES, CONTINENTS, CONTINENT_NAMES, MAPS, WORLD, WORLD_D, WORLD_EXT, WORLD_H, WORLD_LIST,
-  normHi, hiColors, hiState, traceState, continentBox, countryCenter, ringsToPath, mapBox, rings100, HI_PALETTE,
+  normHi, hiColors, hiState, traceState, continentBox, countryCenter, mapBox, rings100, HI_PALETTE,
 } from "./src/engine/maps.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -81,7 +81,7 @@ async function main() {
   check("no empty continent", empty.length === 0, empty.join(","));
   check("every country assigned to exactly the continent its code says", ids.every((id) => CONTINENTS[Object.keys(CONTINENT_NAMES).find((n) => CONTINENT_NAMES[n] && CONTINENTS[n].includes(id))] && true));
   const contOfCountry = {};
-  Object.entries(CONTINENTS).forEach(([n, codes]) => codes.forEach((cc) => { contOfCountry[cc] = (contOfCountry[cc] || 0) + 1; }));
+  Object.entries(CONTINENTS).forEach(([_n, codes]) => codes.forEach((cc) => { contOfCountry[cc] = (contOfCountry[cc] || 0) + 1; }));
   check("no country in two continents", Object.values(contOfCountry).every((v) => v === 1));
   check("every COUNTRIES entry reachable from a continent", ids.every((id) => contOfCountry[id] === 1));
   check("legacy 6 continent keys kept (+ANTARCTICA)", ["AFRICA", "ASIA", "EUROPE", "NORTH AMERICA", "SOUTH AMERICA", "OCEANIA", "ANTARCTICA"].every((k) => CONTINENTS[k]));

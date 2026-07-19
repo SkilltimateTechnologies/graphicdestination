@@ -2,7 +2,7 @@
    import its pure exported math, and run every template layer's tracks through
    the real interpolation code paths across the whole 5000 ms timeline. */
 import { createRequire } from "node:module";
-import { writeFileSync, rmSync } from "node:fs";
+import { writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { TEMPLATES } from "./src/templates/templates.js";
 
@@ -15,9 +15,13 @@ const bundle = await rolldown({
   platform: "node",
 });
 const { output } = await bundle.generate({ format: "esm" });
-const tmp = "./.engine-smoke.bundle.mjs";
-/* neutralize vite env access for node */
-writeFileSync(tmp, output[0].code.replaceAll("import.meta.env.VITE_API_BASE", '""'));
+/* rolldown code-splits a shared runtime chunk (rolldown-runtime-*.js) that
+   the entry imports relatively — write EVERY chunk to a scratch dir and
+   import the entry chunk, neutralizing vite env access for node in each. */
+const tmpDir = "./.engine-smoke.out";
+mkdirSync(tmpDir, { recursive: true });
+for (const c of output) writeFileSync(`${tmpDir}/${c.fileName}`, c.code.replaceAll("import.meta.env.VITE_API_BASE", '""'));
+const tmp = `${tmpDir}/${output.find((o) => o.isEntry).fileName}`;
 
 let failures = 0;
 const fail = (m) => { failures += 1; console.error("  ✗ " + m); };
@@ -78,7 +82,7 @@ try {
     if (!failures) console.log("  ✓ all layers interpolate cleanly 0–5000 ms");
   }
 } finally {
-  rmSync(tmp, { force: true });
+  rmSync(tmpDir, { recursive: true, force: true });
 }
 
 if (failures) { console.error(`\n${failures} failure(s)`); process.exit(1); }

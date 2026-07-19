@@ -151,8 +151,11 @@ export default function Dashboard() {
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: T.canvas, fontFamily: "'Inter', system-ui, sans-serif" }}>
       <style>{CSS}</style>
 
-      {/* ============ TOP BAR (same 44px bar as the editor) ============ */}
-      <div style={{ height: 44, flexShrink: 0, display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", padding: "0 14px", background: T.panel, borderBottom: `1px solid ${T.border}` }}>
+      {/* ============ TOP BAR (same 44px bar as the editor) ============
+          sticky + zIndex (mirrors the editor shell barStyle): the project
+          grid legitimately scrolls the page, and without this the long-list
+          scroll carried the header off the top of the viewport. */}
+      <div style={{ height: 44, flexShrink: 0, display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", padding: "0 14px", background: T.panel, borderBottom: `1px solid ${T.border}`, position: "sticky", top: 0, zIndex: 50 }}>
         <div style={{ display: "flex", alignItems: "center" }}><BrandMark /></div>
         <div style={{ display: "flex", alignItems: "center", gap: 7, color: T.dim, fontSize: 12.5 }}>
           <span style={{ width: 7, height: 7, borderRadius: "50%", background: T.success, boxShadow: "0 0 6px rgba(63,182,139,0.7)", flexShrink: 0 }} />

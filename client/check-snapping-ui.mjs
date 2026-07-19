@@ -9,7 +9,10 @@
  *   3. magnet toggle OFF (persisted gd:snapping=0, dim icon) → no snap, no guides.
  *   4. Alt-drag with the toggle OFF → temporarily snaps (inversion).
  *   5. Alt-drag with the toggle ON → temporarily free (inversion), amber icon.
- *   6. west resize grip near a sibling's right edge → width snaps the edge on.
+ *   6. west resize grip near a sibling's right edge → the edge snaps on; the
+ *      drop lands on the SCALE track with base compensation (R8w3), so the
+ *      TRACK-AWARE rendered size (objSize × valueAt(scale)) is what carries
+ *      the snapped 286×120 — raw props.w/h are the compensated bases.
  *   7. rotation drags never snap and never show guides.
  *
  * Run:  node check-snapping-ui.mjs        (from client/)
@@ -23,6 +26,11 @@ import http from "node:http";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+/* R8w3: resize drops live on the scale track with base compensation — the
+   rendered size is the TRACK-AWARE objSize × valueAt(scale) (real engine
+   helpers, same math the renderer uses), not the raw compensated props. */
+import { valueAt } from "./src/engine/keyframes.js";
+import { objSize } from "./src/components/editor/model.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const harnessDir = path.join(here, ".snapping-ui-smoke");
@@ -206,9 +214,17 @@ async function main() {
       mid = { g: await guides(page) };
     });
     p = await proj(page);
-    check("resize snapped the left edge to x=500 (w=286)", B(p).props.w === 286, `w=${B(p).props.w}`);
+    /* R8w3: the snapped resize landed as a scale ◆ at the playhead (t=0) with
+       base compensation — assert the TRACK-AWARE rendered size (what the
+       canvas/export actually draws) plus the ◆ + compensation themselves. */
+    const sk = (B(p).tracks.scale || [])[0];
+    const rSize = (o, t) => { const s = valueAt(o, "scale", t) ?? 1; const b = objSize(o, t); return { w: b.w * s, h: b.h * s }; };
+    const rs = rSize(B(p), sk ? sk.t : 0);
+    check("resize snapped the left edge to x=500 (rendered w≈286, track-aware)", !!sk && Math.abs(rs.w - 286) <= 1.5, `renderedW=${rs.w} scale◆=${sk && sk.v} baseW=${B(p).props.w}`);
     check("resize: vertical guide at the snapped edge x=500", mid.g.some((g) => g.axis === "x" && g.pos === 500), JSON.stringify(mid.g));
-    check("resize: height untouched (h=120)", B(p).props.h === 120, `h=${B(p).props.h}`);
+    check("resize: height untouched (rendered h≈120, track-aware)", !!sk && Math.abs(rs.h - 120) <= 1.5, `renderedH=${rs.h} baseH=${B(p).props.h}`);
+    check("resize: scale ◆ at the playhead carries the snapped factor (2.38)", !!sk && sk.t === 0 && Math.abs(sk.v - 2.38) <= 0.01, JSON.stringify(B(p).tracks.scale));
+    check("resize: bases compensated by g (w≈120, h≈50 under scale 2.38)", Math.abs(B(p).props.w - 120) <= 1 && Math.abs(B(p).props.h - 50) <= 1 && Math.abs((B(p).props.scale || 1) - 2.38) <= 0.01, `w=${B(p).props.w} h=${B(p).props.h} scale=${B(p).props.scale}`);
 
     console.log("\n#7 rotation grip — never snaps, never guides");
     const rotGrip = page.locator('div[title="Drag to rotate · Shift = 15° steps"]').first();
