@@ -104,6 +104,36 @@ optionally add a "select a shape to morph" hint. Likely **no code change**.
 3. Update the relevant guard + AGENTS.md contract in the SAME commit.
 4. One small, focused commit per item.
 
+## ⚠️ Review found: tracks commit (748c573) is NOT merge-safe — fix these first
+A Fable 5 verification pass confirmed fixes 1–6 + settings are sound, but the
+CapCut-tracks commit ships 4 real defects (all small, all guard-testable). **Note:
+if we adopt the simpler "main + nested folders" model instead of tracks (pending
+user decision), bugs 2–4 become moot — but BUG 1 must be fixed either way.**
+
+1. **BUG 1 (worst) — clip-children z-order disagrees canvas ↔ export.**
+   `StageObject.jsx:329` renders `obj.children` in ARRAY order, but in-clip
+   editing uses `zOrder(ctxLayers)`. Since drag/reorder now change only `track`
+   (not array position), a group's child stacking shown in the clip editor
+   differs from what exits/exports. **Fix: render `zOrder(obj.children)` at
+   `StageObject.jsx:329`** (back-compat safe — migrated tracks = array index) +
+   add a guard. *Matters regardless of tracks-vs-folders.*
+2. **BUG 2 — `duplicateSelected` (GDM:~935) assigns no new `track`** → duplicate
+   lands on the source's lane with an identical span (full overlap). Mirror the
+   `pasteClipboard` pattern: `c.track = nextTrack(...)`.
+3. **BUG 3 — trims not clamped to track mates.** The rule-(a) clamp is only in
+   `mode==="move"` (GDM:~1841); the `in`/`out` edge-drag branches (GDM:~1850)
+   clamp only to `[0,ctxDur]` → an edge drag can overlap a lane neighbour. Clamp
+   `ni`/`no` against `trackMates`.
+4. **BUG 4 — trackless children (fresh template inserts) use inconsistent
+   fallbacks** (`?? 0` in reorder/moveToTrack vs `?? i` in trackRows/zOrder) →
+   ▲/▼ on such a child moves it wrong. `normalizeTracks` children at insert
+   (GDM:~849) or unify the fallback.
+
+Log-and-defer (product decisions, don't block merge once 1–4 are fixed):
+- **Shared-track z is unreachable + ▲/▼ can silently retime** via `trackSnap`.
+- **Emoji Animated/Static toggle still shows but every insert is static**
+  (`EmojiPanel.jsx` `pick` drops the variant) — remove the toggle or note the loss.
+
 ## ✅ Fixes 1–6 — DONE
 All six near-term fixes are implemented + committed (remove Animate nudge; emoji
 insert-as-image + `DEFAULT_INSERT_SIZE`; pin duration-extend; inline group/ungroup
