@@ -129,6 +129,56 @@ resolve to deterministic frames. Two ways to honor that:
 
 ---
 
+## 💡 Editable Templates (admin can edit existing + add new)
+
+**The ask:** the built-in templates shouldn't be frozen in code — an **admin
+should be able to edit existing templates and add new ones** through the app,
+and have those changes show up for everyone. (Pairs with the AI Asset Studio's
+"Save to Templates" — same store, different scope.)
+
+**Verdict: feasible and natural** — a template is *already just a project JSON*
+(the editor produces and consumes that shape via the `initialProject` / `onChange`
+cloud seam), so "edit a template" = load its JSON into the editor, change it,
+save it back. No new renderer, no new format.
+
+### Shape of it
+- **Templates become data, not only code.** `templates.js` stays as the seed /
+  built-in fallback (back-compat — old projects + a fresh DB still work). A server
+  store overlays editable ones on top.
+- **Three scopes, merged in the Templates panel:**
+  1. **built-in** — from `templates.js` (read-only baseline)
+  2. **global** — admin-authored/edited, visible to all users
+  3. **personal** — a user's own saved templates (from the AI Studio)
+  An admin editing a built-in one saves a **global override** with the same id;
+  the panel prefers global > built-in so nothing in code is mutated.
+- **Editing flow:** open a template → it loads into the normal editor → edit →
+  **"Save as template"** (admin → global scope; user → personal). Optionally an
+  admin "Templates" manager (list / rename / recategorize / delete / reorder /
+  set thumbnail).
+- **Role gate:** global create/edit/delete requires `role === "admin"` (the
+  `users` table already has `role`; `requireAuth` + a role check on the routes).
+
+### Server (additive)
+- `templates` table: `id, scope ("global"|"user"), owner_id?, name, category,
+  data JSON, thumbnail?, updated_at`. Owner-scoped for user rows; admin-only
+  writes for global rows.
+- Routes: `GET /api/templates` (built-in-merged list for the current user),
+  `POST/PUT/DELETE /api/templates[/:id]` (scope + role enforced), validated +
+  size-capped like `user_settings`.
+- Thumbnails: reuse the SSR hold-frame approach the panels already use, or store
+  a small rendered still.
+
+### Risks / notes
+- **Back-compat:** never delete or hard-edit `templates.js` entries (projects and
+  the seed rely on them); overlays only.
+- **Validation:** incoming template JSON is untrusted — sanitize/clamp like the
+  settings sanitizer; it must round-trip through `StageObject` + the export checks.
+- **Determinism:** a saved template is a normal project, so it inherits the same
+  deterministic-render guarantees; add a check that every stored template renders
+  non-empty + exports clean.
+
+---
+
 ## Backlog (smaller ideas)
 
 - **Always-visible scrub ruler polish** — the pinned overlay ships; revisit if any
