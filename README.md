@@ -116,3 +116,4 @@ Operational endpoints:
 | [docs/backup-restore.md](docs/backup-restore.md) | Backup/restore runbook — RPO/RTO, drills |
 | [CHANGELOG.md](CHANGELOG.md) | Notable changes per release |
 | [docs/UPDATES.md](docs/UPDATES.md) | "Life of updates" — planned features & ideas backlog |
+| [docs/NEXT-FOR-KIMI.md](docs/NEXT-FOR-KIMI.md) | Developer handoff — sequenced next steps (from the Fable 5 review) |

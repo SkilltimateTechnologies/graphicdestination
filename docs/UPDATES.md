@@ -41,17 +41,24 @@ independently, each needs its guard updated in the same change).
    stays 8s even when the parent/main timeline grows to 20s — its length is its
    own, independent of the main duration. Audit `setCtxDurMs` / the
    `stretchClips` path and the clip-duration logic; extending duration should
-   only add empty room, never rescale keyframes/spans. (There's a `stretchClips`
-   toggle — default it OFF for duration *extend*, and make sure nested clip
-   lengths are pinned.)
+   only add empty room, never rescale keyframes/spans. **Fable 5 confirmed the
+   exact bug:** `stretchClips` defaults **true** (`GraphicDestinationMotion.jsx`
+   ~`:422`); the duration input passes it through (`Timeline.jsx` ~`:281`) →
+   `setCtxDurMs` runs `scaleLayerTimes(o, nd/compDur)` over every object,
+   multiplying all keyframe/`inT`/`outT`/clip-`start`/clip-`dur` by the factor
+   (×4 for 5s→20s). Fix = pin the extend path (call `setCtxDurMs(v)` WITHOUT the
+   flag) + flip the checkbox default to false. Nested clip `dur` is already its
+   own field — pinning keeps scene lengths independent.
 
-5. **Shape morph regression — bring it back.** Shape-to-shape morphing
-   (`tracks.shape` + `morphPtsAt`, the Inspector morph card + A→B indicators) is
-   a FROZEN feature (`check-r9w2`, 340 assertions) but the user reports the UI to
-   trigger it disappeared. Investigate whether a refactor dropped the Inspector
-   morph card / target picker; restore the visible morph controls so a shape can
-   again morph into another shape. (Engine likely intact — this is probably a UI
-   regression, exactly the class AGENTS warns about.)
+5. **Shape morph — VERIFY-ONLY (re-diagnosed by the Fable 5 review).** The morph
+   UI is actually **intact and wired** — Inspector Shape card + dedicated Morph
+   card (A→B chip, live preview, target picker `data-morph-picker`, clear-morph)
+   are all present (`Inspector.jsx` ~452–517), guarded by `check-r9w2` (340).
+   Nothing was dropped. The real issue is **discoverability**: the controls only
+   appear when a **shape** is selected (only a shape can morph — not emoji/image/
+   kit). Action: browser-verify (select a shape → morph card shows), and maybe
+   add a one-line "select a shape to morph" hint. Likely **zero code change** —
+   lowest priority.
 
 6. **Group/ungroup as inline icons + real nesting (3 levels).** Grouping exists
    (⌘G / Inspector / timeline / right-click) but it's tucked into buttons. Put
