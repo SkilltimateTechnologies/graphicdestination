@@ -329,6 +329,38 @@ sharing a lane. The right synthesis:
 
 ---
 
+## 💡 Apply brand colors everywhere by default
+
+**Context:** Settings is now just **brand kits** (colors + fonts) + default bg —
+text styles removed, and kits **auto-save**. Today a kit only affects the app
+swatches + new text (fonts + `colors[4]`). **The ask:** when a brand kit is
+active, use its colors **by default across every insert**, not just text — so a
+user's brand shows up automatically.
+
+**Where brand colors should flow (brainstorm):**
+- **Shapes** → new shape fill = brand **primary** (stroke = **accent**).
+- **Text** → already uses `colors[4]` (text color) + brand fonts. ✓
+- **Charts** → series palette seeded from the brand (`primary, accent, bridge,
+  tint, text` = the mapped `colors[5]`) instead of the fixed swatches.
+- **Kits / UI elements** → the `accent` opt already exists; default it to the
+  brand accent instead of amber.
+- **Confetti** → particle palette from the brand colors.
+- **Default stage bg** → offer "use brand" (e.g. a dark tint of primary) as a bg
+  choice alongside the explicit color.
+- **Number/counter rings, progress fills, map highlights** → default to accent.
+
+**Shape of it:** the brand already maps to `colors[5]` via `kitToBrand`
+(`lib/settings.js`). Thread the active brand into each insert path (`addObject` /
+the panel inserts) so defaults read from `brand.colors` when a brand is active,
+falling back to the current fixed swatches when none is. Keep it a *default*
+(the user can still recolor per object). One central helper
+(`brandDefaultFor(type, brand)`) keeps it consistent + testable.
+
+**Notes:** deterministic (just default prop values); back-compat (no brand → old
+defaults); add a guard that inserts pick up brand colors when a brand is active.
+
+---
+
 ## 💡 Custom SVG animated icons (replace the Fluent emoji)
 
 **The ask:** the Microsoft Fluent (3D PNG) emoji keep causing issues — **retire

@@ -201,12 +201,14 @@ async function main() {
     check("TopBar renders the BrandSwitcher (Brand button gone)", tb.includes("<BrandSwitcher") && !tb.includes("setBrandOpen"));
     check("IconRail Text button toggles the panel when wired", rail.includes("setTextOpen(!textOpen)"));
     check("/settings route registered + page imported", app.includes('path="/settings"') && app.includes('import Settings from "./pages/Settings"'));
-    check("Settings page has the three sections", settingsPage.includes('data-section="brand-kits"') && settingsPage.includes('data-section="text-styles"') && settingsPage.includes('data-section="default-bg"'));
-    check("Settings page renders all four text-style tiers", settingsPage.includes("TEXT_TIERS.map") || TEXT_TIERS_SRC(settingsPage));
+    /* Text styles were removed from the Settings UI — only brand kits + default
+       bg remain (the lib keeps its text-style helpers; TextPanel resolves from
+       defaults + the brand). */
+    check("Settings page has brand-kits + default-bg sections (text styles removed)", settingsPage.includes('data-section="brand-kits"') && settingsPage.includes('data-section="default-bg"') && !settingsPage.includes('data-section="text-styles"'));
+    check("Settings page auto-persists brand kits (no forgotten second step)", settingsPage.includes("const persist =") && /saveKit[\s\S]{0,400}persist\(nextDoc\)/.test(settingsPage) && /deleteKit[\s\S]{0,400}persist\(nextDoc\)/.test(settingsPage));
     check("Settings page saves through lib/settings persistSettings (useUserSettings.save)", settingsPage.includes("useUserSettings") && settingsPage.includes("data-action=\"save-settings\""));
   }
 
-  function TEXT_TIERS_SRC(src) { return ["heading", "subheading", "body", "caption"].every((t) => src.includes(t)); }
 
   console.log(`\n${passed + failed} checks · ${failed} failed`);
   console.log(failed === 0 ? "ALL CHECKS PASSED" : "CHECKS FAILED");

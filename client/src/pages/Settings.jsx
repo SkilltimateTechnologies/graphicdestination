@@ -1,17 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../AuthContext";
 import { FONTS } from "../components/editor/model.js";
 import {
-  TEXT_TIERS, TEXT_TIER_LABELS, DEFAULT_TEXT_STYLES, DEFAULT_KIT_COLORS,
+  DEFAULT_TEXT_STYLES, DEFAULT_KIT_COLORS,
   normalizeSettings, normalizeKit, defaultStageBg, useUserSettings,
 } from "../lib/settings.js";
 
 /* ============================================================
-   SETTINGS — per-user brand kits, text styles and default stage
-   background (R9w3). Reads/writes GET/PUT /api/settings through
-   lib/settings.js; the same document drives the editor's brand
-   switcher, the Text panel presets and new-project stage bg.
+   SETTINGS — per-user brand kits + default stage background.
+   Reads/writes GET/PUT /api/settings through lib/settings.js; the same
+   document drives the editor's brand switcher and new-project stage bg.
+   Brand kits AUTO-SAVE on add/edit/delete (no separate step). Text styles
+   were removed from the UI; the lib keeps its text-style helpers so the Text
+   panel presets still resolve from defaults + the active brand's fonts.
    ============================================================ */
 
 const T = {
@@ -41,8 +43,6 @@ const CSS = `
 const sectionLabel = { fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: T.faint };
 const card = { background: T.panel, border: `1px solid ${T.border}`, borderRadius: 12, padding: 18 };
 const btn = { background: T.raised, border: `1px solid ${T.border}`, color: T.text, borderRadius: 6, padding: "7px 14px", cursor: "pointer", fontWeight: 600, fontSize: 12, fontFamily: "inherit" };
-const WEIGHTS = [400, 500, 600, 700, 800];
-const PREVIEW_TEXT = "The quick brown fox jumps";
 
 function newKit(n) {
   return normalizeKit({
@@ -148,25 +148,11 @@ export default function Settings() {
     setDoc((d) => ({ ...d, ...patch }));
   };
 
-  /* ---------- brand kits CRUD ---------- */
-  const saveKit = () => {
-    if (!editing || !editing.name.trim()) return;
-    const kit = normalizeKit(editing);
-    const exists = doc.brandKits.some((k) => k.id === kit.id);
-    update({ brandKits: exists ? doc.brandKits.map((k) => (k.id === kit.id ? kit : k)) : [...doc.brandKits, kit] });
-    setEditing(null);
-  };
-  const deleteKit = (id) => {
-    if (!window.confirm("Delete this brand kit? Projects that already applied it keep their copy.")) return;
-    update({ brandKits: doc.brandKits.filter((k) => k.id !== id) });
-    if (editing && editing.id === id) setEditing(null);
-  };
-
-  /* ---------- save ---------- */
-  const doSave = async () => {
+  /* ---------- persist (server + local mirror) ---------- */
+  const persist = async (nextDoc) => {
     setSaveState("saving");
     setSaveErr("");
-    const result = await save(doc);
+    const result = await save(nextDoc);
     dirtyRef.current = false;
     setDirty(false);
     if (result.ok) setSaveState("saved");
@@ -176,9 +162,30 @@ export default function Settings() {
     }
   };
 
+  /* ---------- brand kits CRUD ---------- AUTO-SAVE: adding / editing /
+     deleting a kit persists IMMEDIATELY (no separate "Save settings" step to
+     forget — that two-step was why kits "weren't getting saved"). */
+  const saveKit = () => {
+    if (!editing || !editing.name.trim()) return;
+    const kit = normalizeKit(editing);
+    const exists = doc.brandKits.some((k) => k.id === kit.id);
+    const nextDoc = { ...doc, brandKits: exists ? doc.brandKits.map((k) => (k.id === kit.id ? kit : k)) : [...doc.brandKits, kit] };
+    setDoc(nextDoc);
+    setEditing(null);
+    persist(nextDoc);
+  };
+  const deleteKit = (id) => {
+    if (!window.confirm("Delete this brand kit? Projects that already applied it keep their copy.")) return;
+    const nextDoc = { ...doc, brandKits: doc.brandKits.filter((k) => k.id !== id) };
+    setDoc(nextDoc);
+    if (editing && editing.id === id) setEditing(null);
+    persist(nextDoc);
+  };
+
+  /* the bottom bar still persists the whole doc (covers the default bg). */
+  const doSave = () => persist(doc);
+
   const doLogout = async () => { await logout(); navigate("/login"); };
-  const tiers = useMemo(() => TEXT_TIERS.map((id) => ({ id, label: TEXT_TIER_LABELS[id] })), []);
-  const setTier = (tier, patch) => update({ textStyles: { ...doc.textStyles, [tier]: { ...((doc.textStyles || {})[tier] || DEFAULT_TEXT_STYLES[tier]), ...patch } } });
   const bgSelected = doc.defaultBg; // null = none selected → new projects start black
 
   return (
@@ -234,36 +241,8 @@ export default function Settings() {
           </div>
         </section>
 
-        {/* ============ TEXT STYLES ============ */}
-        <section style={card} data-section="text-styles">
-          <span style={sectionLabel}>Text styles</span>
-          <p style={{ color: T.faint, fontSize: 11.5, lineHeight: 1.55, margin: "6px 0 14px" }}>
-            What headings and normal text should look like — the editor's Text panel presets (Heading / Subheading / Normal / Caption) insert with these fonts and sizes.
-          </p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {tiers.map(({ id, label }) => {
-              const tier = (doc.textStyles && doc.textStyles[id]) || DEFAULT_TEXT_STYLES[id];
-              return (
-                <div key={id} data-tier={id} style={{ display: "grid", gridTemplateColumns: "86px 1fr 74px 92px", gap: 8, alignItems: "center", background: T.raised, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 12px" }}>
-                  <span style={{ fontWeight: 700, fontSize: 12 }}>{label}</span>
-                  <select value={tier.fontFamily} onChange={(e) => setTier(id, { fontFamily: e.target.value })} aria-label={`${label} font`}>
-                    {FONTS.map((f) => <option key={f} value={f}>{f}</option>)}
-                  </select>
-                  <label style={{ display: "flex", alignItems: "center", gap: 5, color: T.faint, fontSize: 11 }}>
-                    <input type="number" min={6} max={400} value={tier.fontSize} onChange={(e) => setTier(id, { fontSize: Number(e.target.value) })} aria-label={`${label} size`} style={{ width: 52 }} />
-                    px
-                  </label>
-                  <select value={tier.fontWeight} onChange={(e) => setTier(id, { fontWeight: Number(e.target.value) })} aria-label={`${label} weight`}>
-                    {WEIGHTS.map((w) => <option key={w} value={w}>{w}</option>)}
-                  </select>
-                  <div style={{ gridColumn: "1 / -1", color: T.dim, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", fontFamily: `'${tier.fontFamily}'`, fontWeight: tier.fontWeight, fontSize: Math.min(34, Math.max(13, tier.fontSize * 0.45)), lineHeight: 1.3 }} data-tier-preview={id}>
-                    {PREVIEW_TEXT}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
+        {/* Text styles removed — settings focus on brand kits; the Text panel
+            presets fall back to sensible defaults + the active brand's fonts. */}
 
         {/* ============ DEFAULT BACKGROUND ============ */}
         <section style={card} data-section="default-bg">
@@ -289,7 +268,7 @@ export default function Settings() {
           </button>
           {saveState === "saved" && <span style={{ color: T.success, fontSize: 12, fontWeight: 600 }} data-save-state="saved">Saved{remote === false ? " locally — will sync when you're signed in" : " to your account"}</span>}
           {saveState === "local" && <span style={{ color: T.danger, fontSize: 12 }} data-save-state="local">Saved locally only — {saveErr}</span>}
-          {!dirty && !saveState && <span style={{ color: T.faint, fontSize: 11.5 }}>Brand kits, text styles and the default background apply across the editor.</span>}
+          {!dirty && !saveState && <span style={{ color: T.faint, fontSize: 11.5 }}>Brand kits save as you edit them; the default background applies to new projects.</span>}
         </div>
       </div>
     </div>
