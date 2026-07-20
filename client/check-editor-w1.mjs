@@ -653,4 +653,41 @@ async function runPart2(page, { check, proj, stageRect, toScreen, drag, scrubTo 
   const chip = await page.locator("[data-morph-chip]").first().getAttribute("data-morph-chip");
   check("a second, DIFFERENT target ◆ switches the chip to the A→B morphing state", chip === "star>bolt", chip);
   check("the animated A→B preview plays in the Morph card", (await page.locator("[data-morph-preview]").count()) === 1);
+
+  /* ==================== #T tracks — vertical drag = explicit track move ==== */
+  console.log("\ntracks — vertical bar drag reassigns lanes, sequential snap, gap pill");
+  const spanShape = (id, inT, outT, fill) => ({ id, type: "shape", name: id.toUpperCase(), tracks: {}, locked: false, hidden: false, props: { x: 400, y: 300, scale: 1, rotation: 0, opacity: 1, fill, w: 90, h: 90, inT, outT, path: null, prog: 0, shape: "rect", fillMode: "fill", sC: "#FFB224", sW: 3, cornerR: 0 } });
+  await page.evaluate((objs) => window.__loadProject(JSON.stringify({ objects: objs })),
+    [spanShape("a", 1000, 2500, "#FF6B6B"), spanShape("b", 3000, 5000, "#6EE7B7")]);
+  await page.waitForTimeout(400);
+  const barSel = 'div[title="Drag to move (keyframes travel with the bar) · drag edges to trim"]';
+  const barY = async (i) => { const bb = await page.locator(barSel).nth(i).boundingBox(); return bb ? Math.round(bb.y) : null; };
+  const trackOf = (p, nm) => p.objects.find((o) => o.name === nm)?.track;
+  p = await proj(page);
+  check("two shapes load onto their OWN lanes (migrated tracks 0 and 1)", trackOf(p, "A") === 0 && trackOf(p, "B") === 1 && (await barY(0)) !== (await barY(1)), `A y=${await barY(0)} B y=${await barY(1)}`);
+  /* drag B's bar straight UP one lane → explicit track reassignment on drop */
+  {
+    const bb = await page.locator(barSel).nth(1).boundingBox();
+    await drag(page, { x: bb.x + bb.width / 2, y: bb.y + bb.height / 2 }, 0, -34); /* 60% into the lane above = explicit track intent (deadzone) */
+    await page.waitForTimeout(250);
+  }
+  p = await proj(page);
+  check("vertical drag moves B onto A's track (ONE lane, two bars)", trackOf(p, "B") === 0 && Math.abs((await barY(0)) - (await barY(1))) <= 2, `tracks A=${trackOf(p, "A")} B=${trackOf(p, "B")} · y ${await barY(0)} vs ${await barY(1)}`);
+  check("the shared lane shows the gap pill between the two clips", (await page.locator(".gd-gap-pill").count()) === 1, `${await page.locator(".gd-gap-pill").count()} pills`);
+  /* retime B LEFT onto A's span — the sequential clamp stops it flush at A.end */
+  {
+    const bb = await page.locator(barSel).nth(1).boundingBox();
+    await drag(page, { x: bb.x + bb.width / 2, y: bb.y + bb.height / 2 }, -400, 0);
+    await page.waitForTimeout(250);
+  }
+  p = await proj(page);
+  check("rule (a): retiming onto a track-mate clamps FLUSH at its end (B.inT = A.end)", p.objects.find((o) => o.name === "B").props.inT === 2500, `B.inT=${p.objects.find((o) => o.name === "B").props.inT}`);
+  /* drag B BELOW the last lane → a NEW track is created for it */
+  {
+    const bb = await page.locator(barSel).nth(1).boundingBox();
+    await drag(page, { x: bb.x + bb.width / 2, y: bb.y + bb.height / 2 }, 0, 48);
+    await page.waitForTimeout(250);
+  }
+  p = await proj(page);
+  check("dropping below the last lane creates a NEW track (2 lanes again)", trackOf(p, "B") === 1 && (await barY(0)) !== (await barY(1)), `tracks A=${trackOf(p, "A")} B=${trackOf(p, "B")}`);
 }

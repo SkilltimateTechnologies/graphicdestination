@@ -17,7 +17,7 @@
    column gained a color tag, per-type icons and hover duplicate/delete.
    ============================================================ */
 import { Fragment, useEffect, useRef, useState } from "react";
-import { C, PROP_LABEL, KF_PROPS, TYPE_BAR, layerSpan, transportBtn, chipStyle, inputStyle } from "./model";
+import { C, PROP_LABEL, KF_PROPS, TYPE_BAR, layerSpan, trackRows, transportBtn, chipStyle, inputStyle } from "./model";
 import { NoteIcon, MiniBtn, CamIcon } from "./ui";
 import { EASE_LABEL } from "../../engine/easing.js";
 import { colorAt } from "../../engine/keyframes.js";
@@ -236,14 +236,15 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
   }, [time, ctxDur]);
   /* duration-based min width: long comps get room instead of cramping */
   const contentMinW = Math.max(0, Math.round((ctxDur / 1000) * TL_MIN_PX_PER_SEC));
-  /* ---------- ONE LAYER PER ROW ----------
-     Every object gets its OWN row, in layer (z) order — the After-Effects /
-     CapCut model. No packing: two objects never share a row, so a lane never
-     shows two labels, and moving a clip in time never reshuffles anything.
-     spanById holds each object's [start, end] exactly as its bar renders it. */
+  /* ---------- TRACKS (CapCut model) ----------
+     Every object has a persistent `track` field; lanes are the ascending
+     track groups. Multiple objects share a lane by TIME (rule a keeps them
+     sequential); a vertical bar drag is an explicit track reassignment on
+     drop. spanById holds each object's [start, end] exactly as its bar
+     renders it. */
   const spans = ctxLayers.map((o) => { const [start, end] = layerSpan(o, ctxDur); return { id: o.id, start, end }; });
   const spanById = new Map(spans.map((s) => [s.id, [s.start, s.end]]));
-  const rows = ctxLayers.map((o) => [o]);
+  const rows = trackRows(ctxLayers);
   /* cursor time within the lanes (same math the ruler scrub uses) */
   const laneT = (e) => {
     const r = rulerRef.current.getBoundingClientRect();
@@ -579,7 +580,7 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
                   <div key={ri}
                     onDoubleClick={(e) => { const o = objAtTime(row, laneT(e)); if (o && o.type === "clip") enterClip(o.id); }}
                     onContextMenu={(e) => { const o = objAtTime(row, laneT(e)); if (o) onLaneContext(e, o); }}
-                    style={{ height: 30, position: "relative", borderBottom: `1px solid ${C.bg2}`, background: anySel ? "rgba(245,165,36,.04)" : "transparent" }}>
+                    style={{ height: 30, position: "relative", borderBottom: `1px solid ${C.bg2}`, background: barDrag && barDrag.row === ri && !row.some((o) => o.id === barDrag.id) ? "rgba(245,165,36,.10)" : anySel ? "rgba(245,165,36,.04)" : "transparent" }}>
                     {/* empty-gap pills: dashed "empty" spans between two clips of
                         THIS row. Click selects the gap; the ✕ Close gap chip in the
                         transport bar (or Delete) ripples the row's later clips left. */}

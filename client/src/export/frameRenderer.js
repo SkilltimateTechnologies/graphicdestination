@@ -29,6 +29,7 @@ import { Component, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { StageObject, FONT_IMPORT } from "../components/GraphicDestinationMotion.jsx";
+import { zOrder } from "../components/editor/model.js";
 import { cameraFromJson } from "../engine/camera.js";
 
 /* ---------- small utils ---------- */
@@ -172,7 +173,7 @@ export async function createFrameRenderer({ project, ctx, width, height, warn })
           textRendering: "optimizeLegibility",
         },
       },
-      objects.map((o) =>
+      zOrder(objects).map((o) => /* track-major paint — matches the editor canvas exactly */
         h(LayerBoundary, { key: o.id, layer: o, onLayerError },
           h(StageObject, { obj: o, time, stage, camera, selected: false, interactive: false }))
       )

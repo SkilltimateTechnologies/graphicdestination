@@ -17,7 +17,7 @@
  * (no dependencies needed — pure functions)
  */
 
-import { packRows, layerSpan } from "./src/components/editor/model.js";
+import { packRows, layerSpan, normalizeTracks, renumberTracks, trackRows, zOrder, nextTrack, trackSnap } from "./src/components/editor/model.js";
 import fs from "node:fs";
 
 /* the R8w1 timeline helpers are pure functions exported from Timeline.jsx —
@@ -140,6 +140,43 @@ console.log("rippleShift — closing a gap shifts later clips left");
   check("applying it closes the gap exactly (b.start lands on a.end)", spans.find((s) => s.id === "b").start - 150 === 100);
   check("left clip untouched — other rows never enter the list", !shifts.some((s) => s.id === "a"));
   check("zero-width gap → no shifts", eq(rippleShift(spans, { leftId: "a", rightId: "a", start: 50, end: 50 }), []));
+}
+
+/* ==================== TRACKS (CapCut model) ==================== */
+console.log("\ntracks — normalize / renumber / rows / zOrder / nextTrack / trackSnap");
+{
+  const O = (id, track, extra = {}) => ({ id, type: "shape", name: id, tracks: {}, locked: false, hidden: false, ...(track != null ? { track } : {}), props: { inT: 0, outT: null, ...extra } });
+
+  /* normalizeTracks — back-compat: trackless objects get their array index */
+  const mig = normalizeTracks([O("a"), O("b"), O("c")]);
+  check("normalize: trackless → array index (one-layer-per-row preserved)", eq(mig.map((o) => o.track), [0, 1, 2]));
+  const mixed = normalizeTracks([O("a", 5), O("b"), O("c", 2), O("d")]);
+  check("normalize: tracked keep their lane, trackless fill above the max", eq(mixed.map((o) => o.track), [5, 6, 2, 7]));
+  const nested = normalizeTracks([{ ...O("clip", 0, {}), children: [O("x"), O("y")] }]);
+  check("normalize: clip children get their OWN track space", eq(nested[0].children.map((k) => k.track), [0, 1]));
+
+  /* renumberTracks — holes collapse to contiguous 0..n-1 */
+  check("renumber: holes collapse (numeric order preserved)", eq(renumberTracks([O("a", 4), O("b", 4), O("c", 9)]).map((o) => o.track), [0, 0, 1]));
+
+  /* trackRows — lanes group by ascending track, members in array order */
+  const rows = trackRows([O("a", 2), O("b", 0), O("c", 2), O("d", 1)]);
+  check("trackRows: grouped by ascending track", eq(rows.map((r) => r.map((o) => o.id)), [["b"], ["d"], ["a", "c"]]));
+
+  /* zOrder — track-major paint (higher track on top), stable within a track */
+  check("zOrder: ascending track, array order within a track", eq(zOrder([O("a", 2), O("b", 0), O("c", 2), O("d", 1)]).map((o) => o.id), ["b", "d", "a", "c"]));
+  check("zOrder: migrated projects (= array index) keep the OLD paint order", eq(zOrder(mig).map((o) => o.id), ["a", "b", "c"]));
+
+  /* nextTrack — new inserts land one lane above the current max */
+  check("nextTrack: max+1 (0 for an empty lane list)", nextTrack([O("a", 3), O("b", 1)]) === 4 && nextTrack([]) === 0);
+
+  /* trackSnap — rule (a): sequential within a track */
+  const mates = [S("m", 100, 300)];
+  check("trackSnap: no overlap → the span stays", trackSnap(mates, "x", 400, 600, 1000) === 400);
+  check("trackSnap: overlap → flush against the NEARER side (right here)", trackSnap(mates, "x", 250, 450, 1000) === 300, `got ${trackSnap(mates, "x", 250, 450, 1000)}`);
+  check("trackSnap: overlap with no room on the left → flush right", trackSnap(mates, "x", 50, 250, 1000) === 300, `got ${trackSnap(mates, "x", 50, 250, 1000)}`);
+  check("trackSnap: blocker chain resolves to a free slot", [0, 300].includes(trackSnap([S("a", 100, 200), S("b", 200, 300)], "x", 150, 250, 1000)), `got ${trackSnap([S("a", 100, 200), S("b", 200, 300)], "x", 150, 250, 1000)}`);
+  check("trackSnap: a span that can't fit stays put (no fling past maxEnd)", trackSnap(mates, "x", 50, 900, 1000) === 50);
+  check("trackSnap: self is ignored", trackSnap([S("x", 0, 500)], "x", 100, 600, 1000) === 100);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
