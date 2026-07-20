@@ -386,7 +386,6 @@ async function main() {
 
     const stageRect = () => page.evaluate(STAGE_RECT);
     const stageText = () => page.evaluate(STAGE_TEXT);
-    const toScreen = (r, sx, sy) => ({ x: r.left + sx * r.scale, y: r.top + sy * r.scale });
     const drag = async (from, ddx, ddy) => {
       await page.mouse.move(from.x, from.y);
       await page.mouse.down();
@@ -397,7 +396,6 @@ async function main() {
     const laneCount = () => page.evaluate(() => document.querySelectorAll("button.gd-tl-hide").length);
     const laneNames = () => page.evaluate(() => [...document.querySelectorAll("button.gd-tl-hide")].map((b) => b.getAttribute("aria-label").replace(/^(Hide|Show) /, "")));
     const triCount = () => page.evaluate(() => document.querySelectorAll('.gd-kf [data-glyph="triangle"]').length);
-    const diaCount = () => page.evaluate(() => document.querySelectorAll('.gd-kf [data-glyph="diamond"]').length);
     /* ruler click scrubs the playhead (fraction of the 6s comp) */
     const scrubTo = async (frac) => {
       const r = await page.evaluate(() => { const el = document.querySelector("div[style*='col-resize']"); const b = el.getBoundingClientRect(); return { left: b.left, top: b.top, width: b.width, height: b.height }; });

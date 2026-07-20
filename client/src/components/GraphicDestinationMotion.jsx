@@ -11,6 +11,7 @@ import { normHi } from "../engine/maps.js";
 import { FONT_IMPORT } from "../engine/fx.js";
 import { kitRenderSpec } from "../engine/kits.js";
 import { C, KF_PROPS, STAGE_PRESETS, kfAt, layerOut, layerSpan, packRows, objSize, reframeClipToContent, objectsInRect, DEFAULT_INSERT_SIZE } from "./editor/model";
+import { svgDataUri, iconInsertSize } from "../engine/svgIcon.js";
 import { computeSnap, SNAP_THRESHOLD } from "./editor/snapping";
 import TopBar from "./editor/TopBar";
 import IconRail from "./editor/IconRail";
@@ -21,6 +22,7 @@ import ImagePanel from "./editor/panels/ImagePanel";
 import AudioPanel from "./editor/panels/AudioPanel";
 import TemplatesPanel from "./editor/panels/TemplatesPanel";
 import EmojiPanel from "./editor/panels/EmojiPanel";
+import IconsPanel from "./editor/panels/IconsPanel";
 import UIElementsPanel from "./editor/panels/UIElementsPanel";
 import ConfettiPanel from "./editor/panels/ConfettiPanel";
 import ChartsPanel from "./editor/panels/ChartsPanel";
@@ -357,6 +359,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   const [tplCat, setTplCat] = useState("All");
   const [iconsOpen, setIconsOpenRaw] = useState(false); /* icons drawer (engine/kits.js) */
   const [uiOpen, setUiOpenRaw] = useState(false); /* UI elements drawer (engine/kits.js) */
+  const [svgIconsOpen, setSvgIconsOpenRaw] = useState(false); /* SVG icon library drawer (admin store) */
   /* rail panels are MUTUALLY EXCLUSIVE: every panel anchors at the same
      left:84 / top:12 / zIndex:30, so two open panels stack exactly and the
      one mounted first dead-blocks the other's clicks (R8w4 smoke: a Backdrop
@@ -364,7 +367,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
      unclickable). Opening one rail panel closes the rest; closing any panel
      keeps working (it just closes the others too — a no-op when they are
      already shut). */
-  const RAIL_PANEL_SETTERS = [setShapesOpenRaw, setTextOpenRaw, setNumbersOpenRaw, setMapsOpenRaw, setImagesOpenRaw, setTemplatesOpenRaw, setChartsOpenRaw, setConfettiOpenRaw, setBgOpenRaw, setIconsOpenRaw, setUiOpenRaw];
+  const RAIL_PANEL_SETTERS = [setShapesOpenRaw, setTextOpenRaw, setNumbersOpenRaw, setMapsOpenRaw, setImagesOpenRaw, setTemplatesOpenRaw, setChartsOpenRaw, setConfettiOpenRaw, setBgOpenRaw, setIconsOpenRaw, setUiOpenRaw, setSvgIconsOpenRaw];
   const openOnly = (setter) => (v) => {
     RAIL_PANEL_SETTERS.forEach((s) => { if (s !== setter) s(false); });
     setter(v);
@@ -380,6 +383,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   const setBgOpen = openOnly(setBgOpenRaw);
   const setIconsOpen = openOnly(setIconsOpenRaw);
   const setUiOpen = openOnly(setUiOpenRaw);
+  const setSvgIconsOpen = openOnly(setSvgIconsOpenRaw);
   const [uiQ, setUiQ] = useState("");
   const [uiCat, setUiCat] = useState("All");
   const [assets, setAssets] = useState(null); /* null = not fetched yet; [] = fetched, empty */
@@ -898,6 +902,21 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     setLayers((ls) => [...ls, o]);
     setSelIds([o.id]);
     setIconsOpen(false);
+  };
+  /* insert a sanitized SVG icon (admin library) as a plain IMAGE layer: the
+     src is an inline-SVG DATA-URI (never a blob URL — blob SVGs taint the
+     export canvas), so it resizes/exports exactly like emoji/images. The box
+     is the icon's own aspect capped to the standard insert size. */
+  const insertSvgIcon = (icon) => {
+    const o = makeObject("image", {
+      name: icon.name,
+      props: { src: svgDataUri(icon.svg), ...iconInsertSize(icon.svg, DEFAULT_INSERT_SIZE) },
+    });
+    o.props.x = stage.w / 2; o.props.y = stage.h / 2;
+    o.props.outT = ctxDur;
+    setLayers((ls) => [...ls, o]);
+    setSelIds([o.id]);
+    setSvgIconsOpen(false);
   };
   const copySelection = () => { if (!selMany.length) return; clipboardRef.current = selMany.map((o) => JSON.parse(JSON.stringify(o))); setClipCount(clipboardRef.current.length); };
   const pasteClipboard = () => {
@@ -2026,6 +2045,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
           numbersOpen={numbersOpen} setNumbersOpen={setNumbersOpen}
           bgOpen={bgOpen} setBgOpen={setBgOpen}
           iconsOpen={iconsOpen} setIconsOpen={setIconsOpen} uiOpen={uiOpen} setUiOpen={setUiOpen}
+          svgIconsOpen={svgIconsOpen} setSvgIconsOpen={setSvgIconsOpen}
           audioTrack={audioTrack} addObject={addObject} />
 
         {/* templates drawer: search + categories, inserts as one editable clip at the playhead */}
@@ -2033,6 +2053,9 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
 
         {/* emoji drawer: featured teaser + → arrow, full library inline (no modal); inserts as a plain 100×100 image */}
         {iconsOpen && <EmojiPanel insertEmoji={insertEmoji} />}
+
+        {/* SVG icons drawer: the admin-managed library (sanitized server-side); inserts as a plain image */}
+        {svgIconsOpen && <IconsPanel insertSvgIcon={insertSvgIcon} />}
 
         {/* UI elements drawer: 13 animated interface pieces, insert as looping clips */}
         {uiOpen && <UIElementsPanel uiQ={uiQ} setUiQ={setUiQ} uiCat={uiCat} setUiCat={setUiCat} insertKitClip={insertKitClip} />}

@@ -59,6 +59,8 @@ for (const base of [path.join(here, "node_modules"), "/home/kimi/.npm-global/lib
   try { playwright = req(req.resolve("playwright", { paths: [base] })); break; } catch { /* next */ }
 }
 if (!playwright) { console.error("playwright not found"); process.exit(1); }
+/* admin JWT minting for the svg-icon seed (server dep, loaded from the vendored server node_modules) */
+const jwt = req(req.resolve("jsonwebtoken", { paths: [path.join(here, "..", "server", "node_modules")] }));
 
 /* ---------- spawn the real server on an ephemeral port ---------- */
 const PORT = 8300 + Math.floor(Math.random() * 900);
@@ -359,6 +361,36 @@ async function main() {
       check(`insert template-as-group → new lane (${before} → ${before + 1})`, (await laneCount()) === before + 1, (await laneNames()).join(" · "));
     }
     check("all 9 widgets inserted → 9 lanes", (await laneCount()) === 9, `${await laneCount()} lanes: ${(await laneNames()).join(" · ")}`);
+
+    /* ==================== 8b. SVG icon library — admin store → panel → insert ==== */
+    console.log("\n#8b svg icons — admin-seeded icon inserts from the Icons panel (8-way resize)");
+    {
+      /* seed one icon through the ADMIN route (minted admin JWT — the route's
+         requireAdmin reads the role off the session, no DB user needed) */
+      const adminCookie = `gd_session=${jwt.sign({ sub: 1, username: "admin", role: "admin" }, "r8w4-smoke-secret", { expiresIn: "1h" })}`;
+      const ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 16 0 8 8 0 0 0-16 0" fill="none" stroke="#F5A524" stroke-width="2"/></svg>';
+      const iconName = `Pulse ${Date.now().toString(36)}`; /* unique per run — the dev DB keeps earlier seeds */
+      const seed = await apiFetch("/api/svg-icons", { method: "POST", body: JSON.stringify({ name: iconName, category: "Indicators", tags: ["pulse"], svg: ICON_SVG }) }, adminCookie);
+      check("admin seeds an SVG icon → 201 (sanitized)", seed.status === 201, `got ${seed.status}`);
+      const before = await laneCount();
+      await page.locator('button:has(span:text-is("Icons"))').first().click();
+      await page.waitForTimeout(600); /* panel fetches /api/svg-icons */
+      await page.locator('[data-icons-panel] input[placeholder="Search icons…"]').fill(iconName);
+      await page.waitForTimeout(250);
+      check("Icons panel lists the seeded icon (search-filtered)", (await page.locator("[data-svg-icon-card]").count()) === 1, `${await page.locator("[data-svg-icon-card]").count()} cards`);
+      await page.locator("[data-svg-icon-card]").first().click();
+      await page.waitForTimeout(340);
+      check(`insert svg icon → new lane (${before} → ${before + 1})`, (await laneCount()) === before + 1, (await laneNames()).join(" · "));
+      /* plain image layer: standard 8-way grips, resize writes a scale ◆ */
+      check("selected svg icon shows the STANDARD resize grips (image, not clip)",
+        (await page.locator('div[title="Drag to resize · Shift = keep aspect"]').count()) >= 4);
+      kf = await kfCount();
+      grip = page.locator('div[title="Drag to resize · Shift = keep aspect"]').first();
+      gb = await grip.boundingBox();
+      await drag({ x: gb.x + gb.width / 2, y: gb.y + gb.height / 2 }, 26, 20);
+      kf2 = await kfCount();
+      check("svg icon canvas RESIZE wrote a ◆ diamond (scale track)", kf2 > kf, `${kf} → ${kf2}`);
+    }
 
     /* ==================== 9. save control → server persistence ============ */
     console.log("\n#9 timeline save control → server persistence");
