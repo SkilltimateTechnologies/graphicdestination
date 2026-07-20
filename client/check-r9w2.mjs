@@ -36,7 +36,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
-  SHAPE_IDS, SHAPE_DEFS, shapePtsOf, alignPts, lerpPts, ptsToStr,
+  SHAPE_IDS, SHAPE_DEFS, shapePtsOf, lerpPts, ptsToStr,
   morphPtsAt, morphPairAt, shapeIdAt, progKeyPlan, pointOnPath, pathSamples,
 } from "./src/engine/shapes.js";
 import { posOf, valueAt } from "./src/engine/keyframes.js";

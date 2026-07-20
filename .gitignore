@@ -7,3 +7,6 @@ server/data/admin-credentials.json
 *.log
 server/hyperframes/__test_output__/
 *.mp4
+
+# local env tooling (ffmpeg/node download — not project code)
+.tools/

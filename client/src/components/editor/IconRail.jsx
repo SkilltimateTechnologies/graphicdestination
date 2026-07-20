@@ -7,7 +7,7 @@ import { RailBtn, NoteIcon } from "./ui";
 import { ptsToStr, SHAPE_DEFS } from "../../engine/shapes.js";
 import { ringsToPath, MAPS } from "../../engine/maps.js";
 
-export default function IconRail({ shapesOpen, setShapesOpen, textOpen, setTextOpen, imagesOpen, setImagesOpen, audioOpen, setAudioOpen, mapsOpen, setMapsOpen, templatesOpen, setTemplatesOpen, chartsOpen, setChartsOpen, confettiOpen, setConfettiOpen, numbersOpen, setNumbersOpen, bgOpen, setBgOpen, iconsOpen, setIconsOpen, uiOpen, setUiOpen, audioTrack, addObject }) {
+export default function IconRail({ shapesOpen, setShapesOpen, textOpen, setTextOpen, imagesOpen, setImagesOpen, audioOpen, setAudioOpen, mapsOpen, setMapsOpen, templatesOpen, setTemplatesOpen, chartsOpen, setChartsOpen, confettiOpen, setConfettiOpen, numbersOpen, setNumbersOpen, iconsOpen, setIconsOpen, uiOpen, setUiOpen, audioTrack, addObject }) {
   return (
         <div style={{ width: 76, background: C.bg1, borderRight: `1px solid ${C.line}`, display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 12, gap: 9, flexShrink: 0, zIndex: 20, overflowY: "auto" }}>
           <RailBtn label="Templates" active={templatesOpen} onClick={() => setTemplatesOpen(!templatesOpen)} glyph={<svg width="17" height="17" viewBox="0 0 18 18"><rect x="1" y="1" width="7" height="7" rx="1.5" fill={C.dim} /><rect x="10" y="1" width="7" height="7" rx="1.5" fill={C.dim} /><rect x="1" y="10" width="7" height="7" rx="1.5" fill={C.dim} /><rect x="10" y="10" width="7" height="7" rx="1.5" fill={C.dim} /></svg>} />

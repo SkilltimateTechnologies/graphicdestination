@@ -51,8 +51,6 @@ export { FONT_IMPORT, charFx, numberValue, numberColumns, numMode, formatNumber,
 
 const STAGE_W = 1280;
 const STAGE_H = 720;
-const DUR = 5000;
-const FPS = 60;
 const DRAG_MIN_VISIBLE = 40; /* stage drag: px of an object that must stay inside the stage bounds on every axis (live clamp) */
 
 /* timeline vertical resize + stage zoom */
@@ -1962,7 +1960,6 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
      shell (Editor.jsx) passes saveState + onSaveNow; the standalone/demo
      route passes neither and the button stays hidden. */
   const saveCtl = saveState && onSaveNow ? { state: saveState, onSave: onSaveNow } : null;
-  const stageCX = stage.w / 2, stageCY = stage.h / 2;
   /* stage size preset picker (top bar + inspector share it): apply by "WxH" value */
   const applyStagePreset = (v) => { const p = STAGE_PRESETS.find((s) => `${s.w}x${s.h}` === v); if (p) setStage({ w: p.w, h: p.h }); };
   const stageIsPreset = STAGE_PRESETS.some((s) => s.w === stage.w && s.h === stage.h);

@@ -49,7 +49,7 @@ export function ColorKfRow({ label, obj, time, sw, onEdit, onKf }) {
     </div>
   );
 }
-export function PropRow({ obj, prop, time, ctxDur, stage, onEdit, onKfToggle, onNav, cfgMap, label, readOnly }) {
+export function PropRow({ obj, prop, time, stage, onEdit, onKfToggle, onNav, cfgMap, label, readOnly }) {
   const v = valueAt(obj, prop, time);
   const track = obj.tracks[prop] || [];
   const has = !!kfAt(track, Math.round(time / 10) * 10);
@@ -109,7 +109,7 @@ export function FontControls({ P, onChange, showSpacing, brand }) {
     </>
   );
 }
-export function WorldPicker({ hi, onAdd, onRetime, onRemove, onSetOut, onClearOut, onSetZoomIn, onClearZoomIn, onSetZoomOut, onClearZoomOut, onToggleZoom, zoomHoldMs, scopeCodes, fmt }) {
+export function WorldPicker({ hi, onAdd, onRetime, onRemove, onSetOut, onClearOut, onSetZoomIn, onClearZoomIn, onSetZoomOut, onClearZoomOut, onToggleZoom, zoomHoldMs, scopeCodes }) {
   const [q, setQ] = useState("");
   const selected = hi.map((h) => h.cc);
   const pool = scopeCodes ? WORLD_LIST.filter((c) => scopeCodes.includes(c.cc)) : WORLD_LIST;

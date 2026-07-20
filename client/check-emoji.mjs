@@ -5,7 +5,7 @@
  *
  *   node check-emoji.mjs
  */
-import { EMOJIS, EMOJI_CATS, buildEmojiClip, holdFor, FLUENT_EMOJI, FEATURED_EMOJI } from "./src/engine/emoji.js";
+import { EMOJIS, EMOJI_CATS, holdFor, FLUENT_EMOJI, FEATURED_EMOJI } from "./src/engine/emoji.js";
 
 let passed = 0, failed = 0;
 const check = (name, cond, extra = "") => {
