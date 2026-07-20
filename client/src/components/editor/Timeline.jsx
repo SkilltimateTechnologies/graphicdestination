@@ -487,7 +487,7 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
             ))}
             {/* audio lane header (main timeline only — project audio lives at root) */}
             {!inClip && (
-              <div onPointerDown={onAudioLaneDown} title={audioTrack ? `${audioTrack.name} — click to select` : "No audio attached — open the Audio panel from the rail to add a track"}
+              <div onPointerDown={onAudioLaneDown} title={audioTrack ? `${audioTrack.name} — click to select` : "No audio attached — open Uploads from the rail to add a track"}
                 style={{ height: 36, display: "flex", alignItems: "center", gap: 6, padding: "0 8px", cursor: "pointer", borderTop: `1px solid ${C.line}`, background: audioLaneSel ? C.bg3 : "transparent", borderLeft: audioLaneSel ? `2px solid ${C.amber}` : "2px solid transparent", boxSizing: "border-box" }}>
                 <NoteIcon size={13} color={audioTrack ? C.amber : C.faint} />
                 <span style={{ fontSize: 12, fontWeight: 600, color: audioLaneSel ? C.txt : audioTrack ? C.dim : C.faint, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>
@@ -659,7 +659,7 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
               </div>
               {/* audio lane — flat labeled bar (waveform deliberately deferred); drag the bar to retime startT */}
               {!inClip && (
-                <div onPointerDown={onAudioLaneDown} title={audioTrack ? undefined : "No audio attached — open the Audio panel from the rail to add a track"}
+                <div onPointerDown={onAudioLaneDown} title={audioTrack ? undefined : "No audio attached — open Uploads from the rail to add a track"}
                   style={{ height: 36, position: "relative", borderTop: `1px solid ${C.line}`, background: audioLaneSel ? "rgba(245,165,36,.04)" : "transparent" }}>
                   {audioTrack ? (
                     <div onPointerDown={onAudioBarDown}
@@ -671,7 +671,7 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
                     </div>
                   ) : (
                     <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", padding: "0 10px", gap: 6, color: C.faint, fontSize: 10.5, pointerEvents: "none" }}>
-                      <NoteIcon size={12} color={C.faint} /> No audio attached — open the Audio panel to add a track
+                      <NoteIcon size={12} color={C.faint} /> No audio attached — open Uploads to add a track
                     </div>
                   )}
                 </div>

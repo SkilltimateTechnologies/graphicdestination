@@ -414,6 +414,33 @@ async function main() {
       check("the stored template round-trips a real project (objects + stage)", (() => { const t = stored.find((x) => x.name === tplName); return !!t && Array.isArray(t.data.objects) && t.data.objects.length >= 5 && !!t.data.stage; })());
     }
 
+    /* ==================== 8e. uploads hub — picker upload → scoped insert ==== */
+    console.log("\n#8e uploads hub — picker upload lands project-scoped + inserts by reference");
+    {
+      const PIXEL_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+      const before = await laneCount();
+      await page.locator('button:has(span:text-is("Uploads"))').first().click();
+      await page.waitForTimeout(500);
+      check("the hub opens with the dropzone + This-project scope", (await page.locator("[data-upload-dropzone]").count()) === 1 && (await page.locator('[data-uploads-scope="project"]').count()) === 1);
+      await page.locator('input[accept*="image/png"]').setInputFiles({ name: "hub-pixel.png", mimeType: "image/png", buffer: Buffer.from(PIXEL_PNG, "base64") });
+      /* the image upload inserts a layer — and like every other insert, that
+         closes the rail panel (addObject's openOnly setters). Reopen to see
+         the freshly-listed asset card. */
+      await page.waitForFunction((n) => document.querySelectorAll("button.gd-tl-hide").length === n + 1, before, { timeout: 8000 }).catch(() => {});
+      check(`image upload → new lane (${before} → ${before + 1})`, (await laneCount()) === before + 1, `${await laneCount()} lanes`);
+      await page.locator('button:has(span:text-is("Uploads"))').first().click();
+      await page.waitForFunction(() => document.querySelectorAll("[data-upload-card]").length >= 1, null, { timeout: 8000 }).catch(() => {});
+      check("the uploaded asset lists in the hub (insert by reference)", (await page.locator("[data-upload-card]").count()) >= 1, `${await page.locator("[data-upload-card]").count()} cards`);
+      const scoped = await (await apiFetch(`/api/assets?project=${projId}`, {}, cookieHdr)).json();
+      check("server-side: the upload landed in THIS project's scope", scoped.some((a) => a.name === "hub-pixel.png" && a.projectId === projId), scoped.map((a) => `${a.name}@${a.projectId}`).join(" · "));
+      await page.locator('[data-uploads-scope="all"]').click();
+      await page.waitForTimeout(500);
+      check("the All-projects view searches the whole library (asset still listed)", (await page.locator("[data-upload-card]").count()) >= 1);
+      await page.locator('.gd-panel input[placeholder="Search all my uploads…"]').fill("hub-pixel");
+      await page.waitForTimeout(250);
+      check("cross-project search filters to the uploaded asset", (await page.locator("[data-upload-card]").count()) === 1, `${await page.locator("[data-upload-card]").count()} cards`);
+    }
+
     /* ==================== 9. save control → server persistence ============ */
     console.log("\n#9 timeline save control → server persistence");
     const saveBtn = page.locator("button.gd-tl-save");

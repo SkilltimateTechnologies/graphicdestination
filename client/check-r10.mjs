@@ -2,11 +2,11 @@
  * check-r10.mjs — guard suite for the R10 UX wave (12 fixes). Two parts:
  *
  *   PART A — source-level guards (cheap, runs anywhere node does):
- *     1. AudioPanel wired to the REAL audioFileRef (not assetFileRef) — the
- *        Upload button must click the audio input (AUDIO_ACCEPT_ATTR +
- *        onPickAudioAsset), not the image-asset input.
+ *     1. Uploads hub: ONE combined picker (UPLOAD_ACCEPT_ATTR = images +
+ *        AUDIO_ACCEPT_ATTR) routing every media upload through onUploadFiles
+ *        by MIME — the standalone Image/Audio panels are gone.
  *     2. Empty audio lane click selects nothing / opens nothing — only a
- *        real track selects; the rail Audio button is the only panel opener.
+ *        real track selects; the rail Uploads button is the panel opener.
  *     3. Undo-delete: undoRef/pushUndo/undoDelete wired into removeSelected +
  *        removeLayer + the Ctrl/Cmd+Z keydown handler, with a form-field bail
  *        so text inputs keep native undo.
@@ -69,7 +69,7 @@ function check(name, cond, detail = "") {
 
 const read = (rel) => fs.readFileSync(path.join(here, rel), "utf8");
 const GDM = read("src/components/GraphicDestinationMotion.jsx");
-const AP = read("src/components/editor/panels/AudioPanel.jsx");
+const UP = read("src/components/editor/panels/UploadsPanel.jsx");
 const TL = read("src/components/editor/Timeline.jsx");
 const TB = read("src/components/editor/TopBar.jsx");
 const ED = read("src/pages/Editor.jsx");
@@ -122,33 +122,34 @@ const noComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/
    ================================================================ */
 console.log("\n=== PART A — source-level guards ===");
 
-/* ---------- 1. AudioPanel ← the REAL audioFileRef ---------- */
-console.log("\n#A1 AudioPanel wired to the real audioFileRef (not assetFileRef)");
+/* ---------- 1. Uploads hub — ONE picker, MIME-routed upload ---------- */
+console.log("\n#A1 Uploads hub — one combined picker, images + audio routed by MIME");
 {
-  const ap = jsxProps(GDM, "AudioPanel");
-  check("GDM renders <AudioPanel audioFileRef={audioFileRef}>", /\baudioFileRef=\{audioFileRef\}/.test(ap), ap.slice(0, 90));
-  check("GDM's AudioPanel wiring never touches assetFileRef (the old bug)", !/assetFileRef/.test(ap));
-  check("AudioPanel destructures the audioFileRef prop", /\{\s*audioFileRef,/.test(AP) || /,\s*audioFileRef,/.test(AP));
-  check("AudioPanel never references assetFileRef", !/assetFileRef/.test(AP));
-  check("the Upload button clicks audioFileRef.current?.click()", AP.includes("audioFileRef.current?.click()"));
-  const audioInput = GDM.match(/<input ref=\{audioFileRef\}[^>]*>/);
-  check("GDM mounts a dedicated audio file input", !!audioInput);
-  check("the audio input carries accept={AUDIO_ACCEPT_ATTR} + onChange={onPickAudioAsset}",
-    !!audioInput && audioInput[0].includes("accept={AUDIO_ACCEPT_ATTR}") && audioInput[0].includes("onChange={onPickAudioAsset}"), audioInput ? audioInput[0] : "missing");
-  const pick = fnBody(GDM, "onPickAudioAsset");
-  check("onPickAudioAsset validates (validateAudioFile), uploads (api.uploadAsset), attaches (attachAudioAsset)",
-    pick.includes("validateAudioFile(") && pick.includes("api.uploadAsset(") && pick.includes("attachAudioAsset("));
+  const up = jsxProps(GDM, "UploadsPanel");
+  check("GDM renders <UploadsPanel … onUploadFiles={onUploadFiles}>", /\bonUploadFiles=\{onUploadFiles\}/.test(up), up.slice(0, 90));
+  check("the hub gets the project scope (projectId + scope/setScope)", /\bprojectId=\{projectId\}/.test(up) && /\bscope=\{uploadScope\}/.test(up) && /\bsetScope=\{setUploadScope\}/.test(up));
+  const input = GDM.match(/<input ref=\{uploadFileRef\}[^>]*>/);
+  check("the single upload picker carries the COMBINED accept + onChange={onPickUpload}",
+    !!input && input[0].includes("accept={UPLOAD_ACCEPT_ATTR}") && input[0].includes("onChange={onPickUpload}"), input ? input[0] : "missing");
+  check("UPLOAD_ACCEPT_ATTR = images + AUDIO_ACCEPT_ATTR (one picker for every media type)", GDM.includes("UPLOAD_ACCEPT_ATTR = `image/png,image/jpeg,image/webp,image/gif,${AUDIO_ACCEPT_ATTR}`"));
+  const fn = fnBody(GDM, "onUploadFiles");
+  check("onUploadFiles routes images via prepareImageFile + addImageLayer", fn.includes("prepareImageFile") && fn.includes("addImageLayer"));
+  check("onUploadFiles routes audio via validateAudioFile + attachAudioAsset", fn.includes("validateAudioFile") && fn.includes("attachAudioAsset"));
+  check("uploads carry the project scope (scopedId from uploadScope/projectId)", fn.includes("scopedId") && fn.includes("uploadScope"));
+  check("the standalone panels are gone (ImagePanel.jsx / AudioPanel.jsx deleted)",
+    !fs.existsSync(path.join(here, "src", "components", "editor", "panels", "ImagePanel.jsx")) && !fs.existsSync(path.join(here, "src", "components", "editor", "panels", "AudioPanel.jsx")));
+  check("UploadsPanel renders the dropzone + kind chips + scope toggle", UP.includes("data-upload-dropzone") && UP.includes("data-uploads-kind") && UP.includes("data-uploads-scope"));
 }
 
 /* ---------- 2. Empty audio lane click does NOT pop the panel ---------- */
-console.log("\n#A2 empty audio lane click doesn't call setAudioOpen");
+console.log("\n#A2 empty audio lane click doesn't pop a panel");
 {
   const lane = fnBody(GDM, "onAudioLaneDown");
-  check("onAudioLaneDown never calls setAudioOpen (the old surprise upload window)", !lane.includes("setAudioOpen"), noComments(lane).replace(/\s+/g, " ").slice(0, 120));
+  check("onAudioLaneDown never calls setUploadsOpen (the old surprise upload window)", !lane.includes("setUploadsOpen") && !lane.includes("setAudioOpen"), noComments(lane).replace(/\s+/g, " ").slice(0, 120));
   check("onAudioLaneDown still selects a real attached track", lane.includes("if (audioTrack) selectAudio()"));
   check("onAudioLaneDown keeps the right-button bail + stopPropagation", lane.includes("e.button === 2") && lane.includes("e.stopPropagation()"));
-  check("timeline lane header hint points at the rail (not a click-to-open)", TL.includes("No audio attached — open the Audio panel from the rail to add a track"));
-  check("timeline lane bar empty-state hint points at the Audio panel", TL.includes("No audio attached — open the Audio panel to add a track"));
+  check("timeline lane header hint points at the Uploads hub", TL.includes("No audio attached — open Uploads from the rail to add a track"));
+  check("timeline lane bar empty-state hint points at Uploads", TL.includes("No audio attached — open Uploads to add a track"));
 }
 
 /* ---------- 3. Undo-delete ---------- */
@@ -468,7 +469,7 @@ async function main() {
     });
     await chain("image", async () => {
       const before = await laneCount();
-      await page.locator('input[accept="image/png,image/jpeg,image/webp,image/gif"]').setInputFiles({ name: "r10-pixel.png", mimeType: "image/png", buffer: Buffer.from(PNG_B64, "base64") });
+      await page.locator('input[accept*="image/png"]').setInputFiles({ name: "r10-pixel.png", mimeType: "image/png", buffer: Buffer.from(PNG_B64, "base64") });
       await page.waitForFunction((n) => document.querySelectorAll("button.gd-tl-hide").length === n + 1, before, { timeout: 9000 }).catch(() => {});
       await page.waitForTimeout(200);
     });
@@ -571,17 +572,17 @@ async function main() {
     check("un-hide brings the canvas node back", (await stageText()).includes("R10 Livetype"));
 
     /* ==================== B10. audio probe ================================ */
-    console.log("\n#B10 audio — accept attr + empty lane never auto-opens the panel");
-    check("the hidden audio input carries the exact accept attr",
-      await page.evaluate(() => [...document.querySelectorAll('input[type="file"]')].some((i) => i.getAttribute("accept") === ".mp3,.wav,.ogg,.m4a,.aac")));
-    await page.locator('div[title="No audio attached — open the Audio panel from the rail to add a track"]').first().click();
+    console.log("\n#B10 audio — combined accept attr + empty lane never auto-opens the panel");
+    check("the hidden upload picker carries the combined accept (images + audio)",
+      await page.evaluate(() => [...document.querySelectorAll('input[type="file"]')].some((i) => { const a = i.getAttribute("accept") || ""; return a.includes("image/png") && a.includes(".mp3"); })));
+    await page.locator('div[title="No audio attached — open Uploads from the rail to add a track"]').first().click();
     await page.waitForTimeout(300);
     check("clicking the EMPTY audio lane opens NO panel", (await page.locator(".gd-panel").count()) === 0, `${await page.locator(".gd-panel").count()} panels`);
-    await page.locator('button:has(span:text-is("Audio"))').first().click();
+    await page.locator('button:has(span:text-is("Uploads"))').first().click();
     await page.waitForTimeout(300);
-    check("the rail Audio button DOES open the panel (Upload audio inside)",
-      (await page.locator(".gd-panel").count()) === 1 && (await page.locator('.gd-panel button:has-text("Upload audio")').count()) === 1);
-    await page.locator('button:has(span:text-is("Audio"))').first().click();
+    check("the rail Uploads button DOES open the hub (dropzone inside)",
+      (await page.locator(".gd-panel").count()) === 1 && (await page.locator("[data-upload-dropzone]").count()) === 1);
+    await page.locator('button:has(span:text-is("Uploads"))').first().click();
     await page.waitForTimeout(250);
     check("the panel toggles closed again", (await page.locator(".gd-panel").count()) === 0);
 

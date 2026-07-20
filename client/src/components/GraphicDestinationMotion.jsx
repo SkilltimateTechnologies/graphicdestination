@@ -3,6 +3,7 @@ import ExportDialog from "./ExportDialog";
 import { api } from "../api";
 import { prepareImageFile } from "../lib/imagePrep";
 import { makeAudioTrack, audioToJson, audioFromJson, audioGainAt, audioWithinAt, validateAudioFile, AUDIO_ACCEPT_ATTR } from "../lib/audioTrack";
+const UPLOAD_ACCEPT_ATTR = `image/png,image/jpeg,image/webp,image/gif,${AUDIO_ACCEPT_ATTR}`; /* the Uploads hub's combined picker accept */
 import { clamp01 } from "../engine/easing.js";
 import { SHAPE_DEFS } from "../engine/shapes.js";
 import { valueAt, posOf, clipLocalTime } from "../engine/keyframes.js";
@@ -18,10 +19,9 @@ import IconRail from "./editor/IconRail";
 import ShapesPanel from "./editor/panels/ShapesPanel";
 import NumberPanel from "./editor/panels/NumberPanel";
 import MapsPanel from "./editor/panels/MapsPanel";
-import ImagePanel from "./editor/panels/ImagePanel";
-import AudioPanel from "./editor/panels/AudioPanel";
 import TemplatesPanel from "./editor/panels/TemplatesPanel";
 import IconsPanel from "./editor/panels/IconsPanel";
+import UploadsPanel from "./editor/panels/UploadsPanel";
 import UIElementsPanel from "./editor/panels/UIElementsPanel";
 import ConfettiPanel from "./editor/panels/ConfettiPanel";
 import ChartsPanel from "./editor/panels/ChartsPanel";
@@ -279,17 +279,11 @@ function scaleLayerTimes(o, f) {
 export { STAGE_PRESETS } from "./editor/model";
 const DEFAULT_BRAND = { id: "b1", name: "Zwoosh", colors: ["#FFB224", "#FF6B6B", "#5B8CFF", "#6EE7B7", "#F9F9F9"], headFont: "Space Grotesk", bodyFont: "Inter" };
 
-/* map /api/assets failures (and image-prep rejections) to panel-friendly copy */
+/* map /api/assets failures (and file-prep rejections) to panel-friendly copy —
+   one mapper for the unified Uploads hub (images + audio) */
 function assetErrorText(err) {
-  if (err?.status === 413) return "That image is too large for the server — try a smaller one.";
-  if (err?.status === 415) return "That file type isn't supported. Use PNG, JPEG, WebP or GIF.";
-  if (err?.status === 409) return "Your asset storage is full — delete some assets to make room.";
-  return err?.message || "Something went wrong — please try again.";
-}
-/* same mapping, audio-flavored copy (client-side type/size rejects come from validateAudioFile) */
-function audioErrorText(err) {
-  if (err?.status === 413) return "That audio file is too large for the server — try a shorter or more compressed one.";
-  if (err?.status === 415) return "That file type isn't supported. Use MP3, WAV, OGG, M4A or AAC.";
+  if (err?.status === 413) return "That file is too large for the server — images max 3 MB, audio 5 MB.";
+  if (err?.status === 415) return "That file type isn't supported — or the content doesn't match it. Use PNG, JPEG, WebP, GIF, MP3, WAV, OGG or M4A.";
   if (err?.status === 409) return "Your asset storage is full — delete some assets to make room.";
   return err?.message || "Something went wrong — please try again.";
 }
@@ -297,7 +291,7 @@ function audioErrorText(err) {
 /* ============================================================
    APP
    ============================================================ */
-export default function GraphicDestinationMotion({ initialProject, onChange, saveState, onSaveNow, user, onLogout, onProfile, onDashboard, onSettings } = {}) {
+export default function GraphicDestinationMotion({ initialProject, onChange, saveState, onSaveNow, user, onLogout, onProfile, onDashboard, onSettings, projectId = null } = {}) {
   const [objects, setObjects] = useState(demoProject);
   const [stage, setStage] = useState({ w: 1280, h: 720 });
   const [compDur, setCompDur] = useState(6000);
@@ -349,7 +343,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   const [textOpen, setTextOpenRaw] = useState(false);
   const [numbersOpen, setNumbersOpenRaw] = useState(false);
   const [mapsOpen, setMapsOpenRaw] = useState(false);
-  const [imagesOpen, setImagesOpenRaw] = useState(false);
+  const [uploadsOpen, setUploadsOpenRaw] = useState(false); /* Uploads hub drawer (unified images+audio) */
   const [templatesOpen, setTemplatesOpenRaw] = useState(false);
   const [chartsOpen, setChartsOpenRaw] = useState(false);
   const [confettiOpen, setConfettiOpenRaw] = useState(false);
@@ -365,7 +359,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
      unclickable). Opening one rail panel closes the rest; closing any panel
      keeps working (it just closes the others too — a no-op when they are
      already shut). */
-  const RAIL_PANEL_SETTERS = [setShapesOpenRaw, setTextOpenRaw, setNumbersOpenRaw, setMapsOpenRaw, setImagesOpenRaw, setTemplatesOpenRaw, setChartsOpenRaw, setConfettiOpenRaw, setBgOpenRaw, setUiOpenRaw, setSvgIconsOpenRaw];
+  const RAIL_PANEL_SETTERS = [setShapesOpenRaw, setTextOpenRaw, setNumbersOpenRaw, setMapsOpenRaw, setUploadsOpenRaw, setTemplatesOpenRaw, setChartsOpenRaw, setConfettiOpenRaw, setBgOpenRaw, setUiOpenRaw, setSvgIconsOpenRaw];
   const openOnly = (setter) => (v) => {
     RAIL_PANEL_SETTERS.forEach((s) => { if (s !== setter) s(false); });
     setter(v);
@@ -374,7 +368,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   const setTextOpen = openOnly(setTextOpenRaw);
   const setNumbersOpen = openOnly(setNumbersOpenRaw);
   const setMapsOpen = openOnly(setMapsOpenRaw);
-  const setImagesOpen = openOnly(setImagesOpenRaw);
+  const setUploadsOpen = openOnly(setUploadsOpenRaw);
   const setTemplatesOpen = openOnly(setTemplatesOpenRaw);
   const setChartsOpen = openOnly(setChartsOpenRaw);
   const setConfettiOpen = openOnly(setConfettiOpenRaw);
@@ -386,7 +380,6 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   const [assets, setAssets] = useState(null); /* null = not fetched yet; [] = fetched, empty */
   const [assetsBusy, setAssetsBusy] = useState(false);
   const [assetErr, setAssetErr] = useState("");
-  const [assetUploading, setAssetUploading] = useState(false);
   /* project-level audio track: { src, name, startT, volume, fadeIn, fadeOut } | null — all times engine ms */
   const [audioTrack, setAudioTrack] = useState(null);
   const [audioSel, setAudioSel] = useState(false); /* audio lane selected → inspector shows audio props */
@@ -395,10 +388,10 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   const [camera, setCamera] = useState(null);
   const [cameraSel, setCameraSel] = useState(false); /* camera lane selected → inspector shows camera props */
   const [selCamKf, setSelCamKf] = useState(null); /* {prop, t} — selected camera keyframe (easing card) */
-  const [audioOpen, setAudioOpen] = useState(false);
-  const [audioErr, setAudioErr] = useState("");
-  const [audioUploading, setAudioUploading] = useState(false);
   const [audioDurMs, setAudioDurMs] = useState(null); /* attached file's own duration once metadata loads (null = unknown) */
+  const [uploadScope, setUploadScope] = useState("project"); /* Uploads hub: "project" (scoped) | "all" (cross-project library) */
+  const [uploading, setUploading] = useState(false);
+  const [uploadErr, setUploadErr] = useState("");
   const [shapeQ, setShapeQ] = useState("");
   const [morphQ, setMorphQ] = useState("");
   const [overflowShow, setOverflowShow] = useState(true);
@@ -433,8 +426,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   const rowsRef = useRef(null); /* packed-lanes container — the row-jump deadzone maps pointer y through its rect */
   const barDragRef = useRef(null); /* live drag pin { id, row, rowCount } — read inside the pointermove closure */
   const fileRef = useRef(null);
-  const assetFileRef = useRef(null);
-  const audioFileRef = useRef(null);
+  const uploadFileRef = useRef(null); /* the Uploads hub's picker (dropzone is primary; click-to-browse backup) */
   const audioElRef = useRef(null); /* lazily-created HTMLAudioElement for preview sync */
   const audioLoadedSrcRef = useRef(""); /* src currently assigned to that element */
   const zoomModeRef = useRef("fit");
@@ -1159,24 +1151,45 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   };
   const refreshAssets = useCallback(async () => {
     setAssetsBusy(true);
-    try { setAssets(await api.listAssets()); setAssetErr(""); }
+    try { setAssets(await api.listAssets(uploadScope === "project" && projectId != null ? projectId : undefined)); setAssetErr(""); }
     catch (err) { setAssetErr(assetErrorText(err)); }
     finally { setAssetsBusy(false); }
-  }, []);
-  useEffect(() => { if ((imagesOpen || audioOpen) && assets === null) refreshAssets(); }, [imagesOpen, audioOpen, assets, refreshAssets]);
-  const onPickAsset = async (e) => {
-    const f = e.target.files?.[0];
-    e.target.value = "";
-    if (!f) return;
-    setAssetUploading(true); setAssetErr("");
+  }, [uploadScope, projectId]);
+  useEffect(() => { if (uploadsOpen) refreshAssets(); }, [uploadsOpen, uploadScope, refreshAssets]); /* fetch on open + on scope flip */
+  const readAsDataUrl = (f) => new Promise((res, rej) => {
+    const rd = new FileReader();
+    rd.onload = () => res(rd.result);
+    rd.onerror = () => rej(new Error("Couldn't read that file — please try again."));
+    rd.readAsDataURL(f);
+  });
+  /* Uploads hub: one entry for every media file — images insert a layer by
+     reference, audio attaches as the project track. The SERVER magic-byte
+     verifies the bytes; the client split is just UX. Uploads land in the
+     current project scope (or the unscoped library in "all" mode / demo). */
+  const onUploadFiles = async (files) => {
+    setUploading(true); setUploadErr("");
+    const scopedId = uploadScope === "project" ? projectId : undefined;
     try {
-      const prep = await prepareImageFile(f);
-      const asset = await api.uploadAsset({ name: prep.name, mime: prep.mime, dataUrl: prep.dataUrl });
-      addImageLayer(asset.url, prep.width, prep.height);
+      for (const f of files) {
+        if (f.type.startsWith("image/")) {
+          const prep = await prepareImageFile(f);
+          const asset = await api.uploadAsset({ name: prep.name, mime: prep.mime, dataUrl: prep.dataUrl, projectId: scopedId });
+          addImageLayer(asset.url, prep.width, prep.height);
+        } else if (f.type.startsWith("audio/")) {
+          const verdict = validateAudioFile(f);
+          if (!verdict.ok) { setUploadErr(verdict.error); continue; }
+          const dataUrl = await readAsDataUrl(f);
+          const asset = await api.uploadAsset({ name: f.name, mime: verdict.mime, dataUrl, projectId: scopedId });
+          attachAudioAsset({ url: asset.url, name: asset.name || f.name });
+        } else {
+          setUploadErr(`"${f.name}" isn't an image or audio file.`);
+        }
+      }
       refreshAssets();
-    } catch (err) { setAssetErr(assetErrorText(err)); }
-    finally { setAssetUploading(false); }
+    } catch (err) { setUploadErr(assetErrorText(err)); }
+    finally { setUploading(false); }
   };
+  const onPickUpload = (e) => { const fs = [...(e.target.files || [])]; e.target.value = ""; if (fs.length) onUploadFiles(fs); };
   const addAssetLayer = (asset) => {
     const img = new Image();
     img.onload = () => addImageLayer(asset.url, img.naturalWidth || 320, img.naturalHeight || 220);
@@ -1184,9 +1197,9 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     img.src = asset.url;
   };
   const onDeleteAsset = async (asset) => {
-    if (!window.confirm(`Delete "${asset.name}" from your assets? Layers already using it will lose the image.`)) return;
+    if (!window.confirm(`Delete "${asset.name}" from your assets? Layers already using it will lose the media.`)) return;
     setAssetErr("");
-    try { await api.deleteAsset(asset.id); refreshAssets(); }
+    try { await api.deleteAsset(asset.id); if (audioTrack?.src === asset.url) detachAudio(); refreshAssets(); }
     catch (err) { setAssetErr(assetErrorText(err)); }
   };
 
@@ -1199,35 +1212,6 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     setAudioSel(true); setCameraSel(false); setSelIds([]); setSelKf(null);
   }, []);
   const detachAudio = useCallback(() => { setAudioTrack(null); setAudioSel(false); }, []);
-  const onPickAudioAsset = async (e) => {
-    const f = e.target.files?.[0];
-    e.target.value = "";
-    if (!f) return;
-    const verdict = validateAudioFile(f);
-    if (!verdict.ok) { setAudioErr(verdict.error); return; }
-    setAudioUploading(true); setAudioErr("");
-    try {
-      const dataUrl = await new Promise((res, rej) => {
-        const rd = new FileReader();
-        rd.onload = () => res(rd.result);
-        rd.onerror = () => rej(new Error("Couldn't read that file — please try again."));
-        rd.readAsDataURL(f);
-      });
-      const asset = await api.uploadAsset({ name: f.name, mime: verdict.mime, dataUrl });
-      attachAudioAsset({ url: asset.url, name: asset.name || f.name });
-      refreshAssets();
-    } catch (err) { setAudioErr(audioErrorText(err)); }
-    finally { setAudioUploading(false); }
-  };
-  const onDeleteAudioAsset = async (asset) => {
-    if (!window.confirm(`Delete "${asset.name}" from your assets? If it's attached to this project, the audio will stop working.`)) return;
-    setAudioErr("");
-    try {
-      await api.deleteAsset(asset.id);
-      if (audioTrack?.src === asset.url) detachAudio();
-      refreshAssets();
-    } catch (err) { setAudioErr(audioErrorText(err)); }
-  };
 
   const applyPreset = (preset) => {
     if (!sel || sel.locked) return;
@@ -1412,7 +1396,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
      moved so marquee can be the intuitive default). Space stays play/pause. */
   const onStageEmptyDown = (e) => {
     setSelKf(null); setSelCamKf(null); setAudioSel(false); setCameraSel(false);
-    setShapesOpen(false); setMapsOpen(false); setImagesOpen(false); setAudioOpen(false); setNumbersOpen(false);
+    setShapesOpen(false); setMapsOpen(false); setUploadsOpen(false); setNumbersOpen(false);
     if (e.button !== 0 && e.button !== 1) return; /* ignore right-click etc. */
     if (path.length > 0) return; /* path-editing mode keeps its own gestures */
 
@@ -1975,8 +1959,6 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   }, [selCamKf, camera]);
   /* bar length: the file's own duration once known, else to the end of the comp (min 100ms so it stays grabbable) */
   const audioBarMs = audioTrack ? Math.max(100, Math.min(ctxDur - audioTrack.startT, audioDurMs != null ? Math.min(audioDurMs, ctxDur) : ctxDur - audioTrack.startT)) : 0;
-  const audioAssets = (assets || []).filter((a) => a.kind === "audio");
-  const fmtBytes = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
   /* save control relocated into the docked timeline bar (R8w1): the editor
      shell (Editor.jsx) passes saveState + onSaveNow; the standalone/demo
@@ -2024,8 +2006,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
         .gd-main > .gd-panel{width:268px !important}
       `}</style>
       <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onPickImage} />
-      <input ref={assetFileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" style={{ display: "none" }} onChange={onPickAsset} />
-      <input ref={audioFileRef} type="file" accept={AUDIO_ACCEPT_ATTR} style={{ display: "none" }} onChange={onPickAudioAsset} />
+      <input ref={uploadFileRef} type="file" multiple accept={UPLOAD_ACCEPT_ATTR} style={{ display: "none" }} onChange={onPickUpload} />
 
       {/* ============ TOP BAR (R10 slim 40px row) ============ */}
       {/* BrandMark + "Zwoosh" left · BrandSwitcher kept · avatar menu at the
@@ -2039,15 +2020,16 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
 
       {/* ============ MAIN ============ */}
       <div className="gd-main" style={{ display: "flex", flex: 1, minHeight: 0, position: "relative" }}>
-        <IconRail shapesOpen={shapesOpen} setShapesOpen={setShapesOpen} textOpen={textOpen} setTextOpen={setTextOpen} imagesOpen={imagesOpen} setImagesOpen={setImagesOpen}
-          audioOpen={audioOpen} setAudioOpen={setAudioOpen} mapsOpen={mapsOpen} setMapsOpen={setMapsOpen}
+        <IconRail shapesOpen={shapesOpen} setShapesOpen={setShapesOpen} textOpen={textOpen} setTextOpen={setTextOpen}
+          mapsOpen={mapsOpen} setMapsOpen={setMapsOpen}
           templatesOpen={templatesOpen} setTemplatesOpen={setTemplatesOpen} chartsOpen={chartsOpen} setChartsOpen={setChartsOpen}
           confettiOpen={confettiOpen} setConfettiOpen={setConfettiOpen}
           numbersOpen={numbersOpen} setNumbersOpen={setNumbersOpen}
           bgOpen={bgOpen} setBgOpen={setBgOpen}
           uiOpen={uiOpen} setUiOpen={setUiOpen}
+          uploadsOpen={uploadsOpen} setUploadsOpen={setUploadsOpen}
           svgIconsOpen={svgIconsOpen} setSvgIconsOpen={setSvgIconsOpen}
-          audioTrack={audioTrack} addObject={addObject} />
+          addObject={addObject} />
 
         {/* templates drawer: search + categories, inserts as one editable clip at the playhead */}
         {templatesOpen && <TemplatesPanel tplQ={tplQ} setTplQ={setTplQ} tplCat={tplCat} setTplCat={setTplCat} insertTemplateClip={insertTemplateClip} storeReloadKey={tplStoreKey} saveCurrentAsTemplate={saveCurrentAsTemplate} isAdmin={user?.role === "admin"} />}
@@ -2080,14 +2062,13 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
         {/* maps drawer */}
         {mapsOpen && <MapsPanel addObject={addObject} setMapsOpen={setMapsOpen} />}
 
-        {/* images drawer: upload + your asset library */}
-        {imagesOpen && <ImagePanel assetFileRef={assetFileRef} assetUploading={assetUploading} assetErr={assetErr} assets={assets} assetsBusy={assetsBusy} refreshAssets={refreshAssets} addAssetLayer={addAssetLayer} onDeleteAsset={onDeleteAsset} />}
-
-        {/* audio drawer: upload + attached track + reusable audio assets.
-            R10: the panel's Upload button must click the REAL audio input
-            (audioFileRef — AUDIO_ACCEPT_ATTR + onPickAudioAsset), not the
-            image-asset input (assetFileRef) it was mistakenly wired to. */}
-        {audioOpen && <AudioPanel audioFileRef={audioFileRef} audioUploading={audioUploading} audioErr={audioErr} audioTrack={audioTrack} detachAudio={detachAudio} assets={assets} assetsBusy={assetsBusy} assetErr={assetErr} refreshAssets={refreshAssets} audioAssets={audioAssets} attachAudioAsset={attachAudioAsset} onDeleteAudioAsset={onDeleteAudioAsset} fmtBytes={fmtBytes} fmt={fmt} />}
+        {/* uploads hub: ONE home for images + audio — dropzone upload (server
+            magic-byte-verified), project-scoped by default with a cross-project
+            search; images insert by reference, audio attaches as the track */}
+        {uploadsOpen && <UploadsPanel projectId={projectId} assets={assets} assetsBusy={assetsBusy} assetErr={assetErr}
+          uploading={uploading} uploadErr={uploadErr} scope={uploadScope} setScope={setUploadScope}
+          onUploadFiles={onUploadFiles} addAssetLayer={addAssetLayer} attachAudioAsset={attachAudioAsset}
+          onDeleteAsset={onDeleteAsset} refreshAssets={refreshAssets} />}
 
         {/* ---- stage ----
             R10: hidden layers are FULLY invisible on the canvas (they used to
@@ -2100,7 +2081,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
           onObjectDown={onObjectDown} enterClip={enterClip} displayValue={displayValue} onResizeDown={onResizeDown} onRotateDown={onRotateDown}
           onClipScaleDown={onClipScaleDown}
           onPathPtDown={onPathPtDown} patchPath={patchPath} setOverflowShow={setOverflowShow}
-          setSelIds={setSelIds} setSelKf={setSelKf} setAudioSel={setAudioSel} setShapesOpen={setShapesOpen} setMapsOpen={setMapsOpen} setImagesOpen={setImagesOpen} setAudioOpen={setAudioOpen}
+          setSelIds={setSelIds} setSelKf={setSelKf} setAudioSel={setAudioSel} setShapesOpen={setShapesOpen} setMapsOpen={setMapsOpen} setUploadsOpen={setUploadsOpen}
           camera={camera} cameraLaneSel={cameraLaneSel} onStageEmptyDown={onStageEmptyDown} stageElRef={stageElRef} marquee={marquee}
           snapGuides={snapGuides} snapOn={snapOn} onToggleSnap={() => setSnapOnPersist(!snapOn)}
           showGrid={showGrid}

@@ -119,7 +119,7 @@ export default function Editor() {
             Loading project…
           </div>
         ) : (
-          <GraphicDestinationMotion key={proj.id} initialProject={proj.data} onChange={onEngineChange} saveState={saveState} onSaveNow={saveNow} {...shellMenu} />
+          <GraphicDestinationMotion key={proj.id} projectId={proj.id} initialProject={proj.data} onChange={onEngineChange} saveState={saveState} onSaveNow={saveNow} {...shellMenu} />
         )}
       </div>
     </div>

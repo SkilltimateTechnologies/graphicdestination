@@ -36,7 +36,7 @@ export const api = {
   disableShare: (id) => request(`/api/projects/${id}/share`, { method: "DELETE" }),
   getSharedProject: (token) => request(`/api/share/${encodeURIComponent(token)}`),
 
-  listAssets: () => request("/api/assets"),
-  uploadAsset: ({ name, mime, dataUrl }) => request("/api/assets", { method: "POST", body: JSON.stringify({ name, mime, dataUrl }) }),
+  listAssets: (projectId) => request(projectId ? `/api/assets?project=${encodeURIComponent(projectId)}` : "/api/assets"),
+  uploadAsset: ({ name, mime, dataUrl, projectId }) => request("/api/assets", { method: "POST", body: JSON.stringify({ name, mime, dataUrl, ...(projectId ? { projectId } : {}) }) }),
   deleteAsset: (id) => request(`/api/assets/${id}`, { method: "DELETE" }),
 };
