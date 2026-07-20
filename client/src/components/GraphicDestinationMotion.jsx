@@ -415,7 +415,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   const undoRef = useRef(null);
   const [clipCount, setClipCount] = useState(0);
   const [menu, setMenu] = useState(null); // context menu {x,y,kind,...}
-  const [stretchClips, setStretchClips] = useState(true);
+  const [stretchClips, setStretchClips] = useState(false); /* duration edits PIN timings by default (extend adds empty room); the checkbox opts into proportional stretching */
   const [name] = useState("Untitled project"); /* R10: the shell header is gone — this still feeds the export dialog */
   const [exportOpen, setExportOpen] = useState(false);
   const [showGrid, setShowGrid] = useState(readGrid); /* canvas alignment grid overlay (StageView) */

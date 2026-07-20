@@ -278,9 +278,9 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
           <span style={{ fontFamily: "'JetBrains Mono'", fontSize: 13, fontWeight: 600, color: C.amber, minWidth: 88, fontVariantNumeric: "tabular-nums" }}>{fmt(time)} <span style={{ color: C.faint }}>/ {fmt(ctxDur)}</span></span>
           <span style={{ color: C.faint, fontSize: 11, fontWeight: 600 }}>Dur</span>
           <input type="number" min={1} max={30} step={0.5} value={+(ctxDur / 1000).toFixed(1)} className="gd-dur-input" aria-label="Duration (seconds)"
-            onChange={(e) => setCtxDurMs((parseFloat(e.target.value) || 1) * 1000, stretchClips)}
+            onChange={(e) => { const ms = (parseFloat(e.target.value) || 1) * 1000; setCtxDurMs(ms, stretchClips && ms < ctxDur); /* EXTEND always pins (adds empty room); only a shrink with the box ticked rescales contents */ }}
             style={{ ...inputStyle, width: 56, padding: "4px 6px", fontFamily: "'JetBrains Mono'", fontSize: 12, fontVariantNumeric: "tabular-nums" }} />
-          <label title="When duration changes, keyframes rescale proportionally" style={{ display: "flex", alignItems: "center", gap: 5, color: C.dim, fontSize: 10.5, fontWeight: 600, cursor: "pointer" }}>
+          <label title="Off (default): duration edits keep all timings — extend just adds room. On: SHRINKING the duration rescales keyframes proportionally" style={{ display: "flex", alignItems: "center", gap: 5, color: C.dim, fontSize: 10.5, fontWeight: 600, cursor: "pointer" }}>
             <input type="checkbox" checked={stretchClips} onChange={(e) => setStretchClips(e.target.checked)} /> scale
           </label>
           <div style={{ width: 1, height: 20, background: C.line }} />

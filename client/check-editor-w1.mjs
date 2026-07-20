@@ -314,6 +314,29 @@ async function main() {
     const armKf = (prop) => (shape().tracks[prop] || []).find((k) => k.t >= 2400 && k.t <= 2600);
     check("RE-ARMED: the drag wrote ◆ at the new playhead (x AND y)", !!armKf("x") && !!armKf("y"), `x=${JSON.stringify(shape().tracks.x)}`);
 
+    /* ==================== duration edits PIN timings by default ============ */
+    console.log("\nduration extend/shrink — timings pinned by default; the scale checkbox opts into shrink-scaling");
+    p = await proj(page);
+    const pinOf = () => JSON.stringify({ inT: shape().props.inT, outT: shape().props.outT, tr: shape().tracks });
+    const pinSnap = pinOf();
+    const scaleBox = () => page.locator('label[title*="duration edits keep all timings"] input');
+    check("the scale-contents checkbox is OFF by default", (await scaleBox().count()) === 1 && !(await scaleBox().isChecked()));
+    await page.locator("input.gd-dur-input").fill("20");
+    await page.waitForTimeout(250);
+    p = await proj(page);
+    check("extend 6s → 20s keeps EVERY timing exactly (pinned, not stretched)", pinOf() === pinSnap);
+    /* the opt-in: tick scale → SHRINKING rescales the contents proportionally */
+    await scaleBox().click();
+    await page.waitForTimeout(120);
+    await page.locator("input.gd-dur-input").fill("6");
+    await page.waitForTimeout(250);
+    p = await proj(page);
+    const sxKf = (shape().tracks.x || [])[0];
+    check("shrink 20s → 6s WITH scale ticked rescales the keyframes ×0.3", !!sxKf && sxKf.t === 300, JSON.stringify(shape().tracks.x));
+    check("…and the outT rescales with it", shape().props.outT === 1800, `outT=${shape().props.outT}`);
+    await scaleBox().click(); /* untick — later sections run on the default (pinned) behavior */
+    await page.waitForTimeout(120);
+
     /* ==================== R9w1 scrub-follow ==================== */
     console.log("\nR9w1 scrub-follow — a long comp overflows; the playhead is chased into view");
     await page.locator("input.gd-dur-input").fill("30");
