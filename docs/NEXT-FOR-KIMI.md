@@ -104,41 +104,40 @@ optionally add a "select a shape to morph" hint. Likely **no code change**.
 3. Update the relevant guard + AGENTS.md contract in the SAME commit.
 4. One small, focused commit per item.
 
-## ⚠️ Review found: tracks commit (748c573) is NOT merge-safe — fix these first
-A Fable 5 verification pass confirmed fixes 1–6 + settings are sound, but the
-CapCut-tracks commit ships 4 real defects (all small, all guard-testable). **Note:
-if we adopt the simpler "main + nested folders" model instead of tracks (pending
-user decision), bugs 2–4 become moot — but BUG 1 must be fixed either way.**
+## ✅ RESOLVED — Option B chosen: folders, not tracks (tracks reverted)
+A Fable 5 verification pass found the CapCut multi-clip-track commit (748c573)
+shipped 4 real defects (BUG 1 z-order canvas↔export; BUG 2 duplicate no track;
+BUG 3 trims not clamped to mates; BUG 4 trackless-child fallback mismatch). Rather
+than harden a model we weren't committed to, the user chose the **simpler main +
+nested-folders model** (per their spec: only main timeline + groups, groups nest
+3 levels folder 1›2›3, Shift-select items to group).
 
-1. **BUG 1 (worst) — clip-children z-order disagrees canvas ↔ export.**
-   `StageObject.jsx:329` renders `obj.children` in ARRAY order, but in-clip
-   editing uses `zOrder(ctxLayers)`. Since drag/reorder now change only `track`
-   (not array position), a group's child stacking shown in the clip editor
-   differs from what exits/exports. **Fix: render `zOrder(obj.children)` at
-   `StageObject.jsx:329`** (back-compat safe — migrated tracks = array index) +
-   add a guard. *Matters regardless of tracks-vs-folders.*
-2. **BUG 2 — `duplicateSelected` (GDM:~935) assigns no new `track`** → duplicate
-   lands on the source's lane with an identical span (full overlap). Mirror the
-   `pasteClipboard` pattern: `c.track = nextTrack(...)`.
-3. **BUG 3 — trims not clamped to track mates.** The rule-(a) clamp is only in
-   `mode==="move"` (GDM:~1841); the `in`/`out` edge-drag branches (GDM:~1850)
-   clamp only to `[0,ctxDur]` → an edge drag can overlap a lane neighbour. Clamp
-   `ni`/`no` against `trackMates`.
-4. **BUG 4 — trackless children (fresh template inserts) use inconsistent
-   fallbacks** (`?? 0` in reorder/moveToTrack vs `?? i` in trackRows/zOrder) →
-   ▲/▼ on such a child moves it wrong. `normalizeTracks` children at insert
-   (GDM:~849) or unify the fallback.
+Done (this branch):
+- **Tracks reverted** (commit 2edda37) — `normalizeTracks`/`trackRows`/`zOrder`/
+  `moveToTrack` gone; z-order is array-order everywhere again. **BUG 1–4 are all
+  moot** (BUG 1 too: no `zOrder(children)` divergence when render + edit both use
+  array order).
+- **Timeline back to one-lane-per-object** (`rows = ctxLayers.map(o => [o])`).
+- **Shift-click multi-select** on canvas objects AND timeline lanes (commit 4b0f87e).
+- **3-level folder cap** — `groupSelection` blocks at `path.length ≥ 3`
+  (`GROUP_MAX_DEPTH`); group/ungroup glyph pair + depth crumb already in the timeline.
+- Full battery 29/29 green, lint 17.
 
-Log-and-defer (product decisions, don't block merge once 1–4 are fixed):
-- **Shared-track z is unreachable + ▲/▼ can silently retime** via `trackSnap`.
-- **Emoji Animated/Static toggle still shows but every insert is static**
-  (`EmojiPanel.jsx` `pick` drops the variant) — remove the toggle or note the loss.
+Still live (product decision, not blocking):
+- **Emoji Animated/Static toggle shows but every insert is static** — `EmojiPanel`
+  `pick` drops the variant; emoji insert as a plain `image` (that's the resize fix).
+  Either remove the toggle or wire the animated variant through the image path.
+
+If tracks are ever revisited: it's a proper rewrite with a persistent `track` field
+(NOT time-based auto-packing — that resurrects the row-jump regression), and BUG 1–4
+above are the checklist. But folders are the shipped direction.
 
 ## ✅ Fixes 1–6 — DONE
-All six near-term fixes are implemented + committed (remove Animate nudge; emoji
+Near-term fixes implemented + committed: remove Animate nudge; emoji
 insert-as-image + `DEFAULT_INSERT_SIZE`; pin duration-extend; inline group/ungroup
-glyphs + depth crumb; morph verify-only; real CapCut tracks). Next work is the
-feature backlog below.
+glyphs + depth crumb; morph verify-only. Item 6 (CapCut tracks) was built then
+**reverted in favour of the folder model** — see the RESOLVED section above. Next
+work is the feature backlog below.
 
 ## Feature backlog (build on ONE shared admin-content foundation)
 These four are the same shape — admin/user-managed content with sanitize +

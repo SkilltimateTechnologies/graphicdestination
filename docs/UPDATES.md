@@ -289,6 +289,15 @@ MIME allowlist, size caps, kind = image|audio). This is mostly a UI consolidatio
 
 ## 💡 Timeline: real tracks (multiple clips per track, CapCut-style)
 
+> **RESOLVED — NOT adopted. Folder model chosen instead (2026).** This CapCut
+> track model was fully built (748c573) but a review found 4 defects (z-order
+> canvas↔export, duplicate/trim/trackless-child bugs), and the user opted for the
+> simpler **main timeline + nested folders** model: one lane per object/group,
+> groups are folders nested ≤3 levels (folder 1›2›3), **Shift-select** items to
+> group. Tracks were reverted (2edda37); z-order is array-order everywhere. The
+> spec below is kept only as reference should tracks ever be revisited — it would
+> be a proper rewrite with a persistent `track` field. See docs/NEXT-FOR-KIMI.md.
+
 **The ask:** a lane shouldn't be limited to a single object. Like CapCut / any NLE,
 a **track** should hold **multiple components** (text, icon, image, clip…) placed
 at different times, **playing one after another** as the playhead passes. Adding
