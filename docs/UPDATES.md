@@ -280,6 +280,48 @@ MIME allowlist, size caps, kind = image|audio). This is mostly a UI consolidatio
 
 ---
 
+## 💡 Timeline: real tracks (multiple clips per track, CapCut-style)
+
+**The ask:** a lane shouldn't be limited to a single object. Like CapCut / any NLE,
+a **track** should hold **multiple components** (text, icon, image, clip…) placed
+at different times, **playing one after another** as the playhead passes. Adding
+something makes a new track by default, but the user can **move/resize it and drop
+it onto any track, anywhere in time**.
+
+**This evolves — and reconciles — the current model.** Today the timeline is
+strictly one-object-per-row (the AE model we shipped after the "two labels in one
+row was confusing" note). The confusion was really about the *label*, not about
+sharing a lane. The right synthesis:
+- A **TRACK = one lane with ONE name** (double-click to rename — already built).
+- The track's lane holds **many clips**, each its own block with a mini
+  label/thumbnail, laid out in time; they play sequentially.
+- So the clean single-label look stays, AND a lane can hold multiple items.
+
+### Shape of it
+- **Explicit, persistent track assignment.** Give each object a stable `track`
+  id/index (not auto-packed by time — that was the "jumping" bug). One lane per
+  track; every object assigned to that track renders as a block on it.
+- **Drag = 2 axes:** horizontal moves in time (already works); vertical **moves
+  the clip to another track** (reassigns `track`, persisted on drop — the
+  AE/CapCut reorder gesture the current build stubs out).
+- **Add-to-any-track:** new items land on a new track by default but can be
+  dropped onto an existing one; two clips on a track can't overlap in time
+  (they queue one after another, or the drop snaps/pushes — decide the rule).
+- **Overlap rule:** within a track, clips are sequential (no time overlap);
+  across tracks they can overlap (stacking = z-order by track order).
+
+### Notes / migration
+- The engine already stores time spans (`inT`/`outT`, clip `start`/`dur`), so a
+  track is a *lane assignment*, not a new data model — add a `track` field,
+  default each existing object to its own track (identical to today's view), then
+  let the user consolidate.
+- Keep it deterministic + export-clean (unchanged — it's still the same objects).
+- This supersedes the current `rows = ctxLayers.map(o => [o])`: rows become
+  `groupBy(track)`, ordered, each lane laying its clips out by time. Update the
+  timeline guards to the track model in the same change.
+
+---
+
 ## Backlog (smaller ideas)
 
 - **Always-visible scrub ruler polish** — the pinned overlay ships; revisit if any
