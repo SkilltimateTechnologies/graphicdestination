@@ -41,7 +41,7 @@ import {
 } from "./src/engine/shapes.js";
 import { posOf, valueAt } from "./src/engine/keyframes.js";
 import { ICONS, UI_ELEMENTS, ICON_CATS } from "./src/engine/kits.js";
-import { EMOJIS } from "./src/engine/emoji.js";
+import { EMOJIS, POPULAR_EMOJI } from "./src/engine/emoji.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tmpDir = path.join(here, ".r9w2-check-tmp");
@@ -317,7 +317,9 @@ async function main() {
        non-empty on every card */
     const lib = renderToStaticMarkup(h(EmojiPanel, { insertEmojiClip: () => {}, startBrowsing: true }));
     const cards = lib.split('data-emoji-card="').slice(1);
-    check("inline emoji library lists ALL Fluent emoji as cards", cards.length === EMOJIS.length, `got ${cards.length} of ${EMOJIS.length}`);
+    /* PERF: the library DEFAULTS to the popular set (not all 169 image-backed
+       thumbnails at once); search / a category reveals the rest, capped. */
+    check("inline emoji library defaults to the popular set (perf, not all 169)", cards.length === POPULAR_EMOJI.length && cards.length < EMOJIS.length, `got ${cards.length}, popular ${POPULAR_EMOJI.length}, total ${EMOJIS.length}`);
     check("the library is INLINE in the panel (no modal overlay)", !lib.includes("position:fixed") && !lib.includes('role="dialog"') && /Search emoji/i.test(lib));
     check("the inline library uses an auto-fill card grid", lib.includes("grid-template-columns"));
     check("every emoji card carries a non-empty still thumbnail", cards.length > 0 && cards.every((c) => c.includes("data-thumb-still")));

@@ -173,4 +173,19 @@ export const FEATURED_EMOJI = (() => {
   return picked.slice(0, 4);
 })();
 
+/* POPULAR set — the library's DEFAULT view (no search / "All") shows only
+   these ~28 instead of all 169, so opening the panel doesn't mount 169
+   image-backed thumbnails at once (slow + blank). Searching or picking a
+   category reveals the rest. Missing ids are dropped gracefully. */
+const POPULAR_IDS = [
+  "smiling-face-with-heart-eyes", "face-with-tears-of-joy", "rolling-on-the-floor-laughing", "grinning-face",
+  "grinning-face-with-big-eyes", "beaming-face-with-smiling-eyes", "grinning-squinting-face", "smiling-face-with-smiling-eyes",
+  "winking-face", "smiling-face-with-sunglasses", "star-struck", "partying-face",
+  "face-blowing-a-kiss", "kissing-face-with-closed-eyes", "thinking-face", "smirking-face",
+  "zany-face", "exploding-head", "face-with-rolling-eyes", "pleading-face",
+  "crying-face", "loudly-crying-face", "pouting-face", "melting-face",
+  "red-heart", "two-hearts", "sparkling-heart", "broken-heart",
+];
+export const POPULAR_EMOJI = POPULAR_IDS.map((id) => EMOJIS.find((e) => e.id === id)).filter(Boolean);
+
 export { FLUENT_EMOJI };

@@ -7,7 +7,7 @@
    Thumbnails are HOVER-PLAY: a representative HOLD frame (55% of the loop) with
    no timers; the shared 120 ms ticker plays the loop only while hovered. */
 import React, { useMemo, useState } from "react";
-import { FEATURED_EMOJI, EMOJIS, EMOJI_CATS } from "../../../engine/emoji.js";
+import { FEATURED_EMOJI, POPULAR_EMOJI, EMOJIS, EMOJI_CATS } from "../../../engine/emoji.js";
 import { frameOf } from "../../../engine/kits.js";
 import { StageObject } from "../../StageObject.jsx";
 import { C, sectionLabel, inputStyle, chipStyle } from "../model.js";
@@ -40,11 +40,17 @@ export default function EmojiPanel({ insertEmojiClip, startBrowsing = false }) {
   const [cat, setCat] = useState("All");
   const [variant, setVariant] = useState("animated");
 
-  const list = useMemo(() => {
+  const CAP = 60; /* never mount more than this many image thumbnails at once */
+  const { list, popular, truncated } = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return EMOJIS.filter((e) =>
+    /* DEFAULT view (no search, All): just the popular set — keeps the panel
+       fast instead of rendering all 169. Search / a category reveals the rest,
+       still capped so we never flood the DOM with image thumbnails. */
+    if (!s && cat === "All") return { list: POPULAR_EMOJI, popular: true, truncated: false };
+    const full = EMOJIS.filter((e) =>
       (cat === "All" || e.category === cat) &&
       (!s || e.name.toLowerCase().includes(s) || e.tags.some((t) => t.includes(s))));
+    return { list: full.slice(0, CAP), popular: false, truncated: full.length > CAP };
   }, [q, cat]);
 
   const pick = (e, v = variant) => insertEmojiClip?.(e, { variant: v });
@@ -114,6 +120,8 @@ export default function EmojiPanel({ insertEmojiClip, startBrowsing = false }) {
               </div>
             ))}
             {!list.length && <div style={{ gridColumn: "1 / -1", fontSize: 11, color: C.dim, textAlign: "center", padding: 20 }}>No emoji match “{q}”.</div>}
+            {popular && <div style={{ gridColumn: "1 / -1", fontSize: 9.5, color: C.faint, textAlign: "center", padding: "4px 0 2px" }}>Popular · search or pick a category for all {EMOJIS.length}</div>}
+            {truncated && <div style={{ gridColumn: "1 / -1", fontSize: 9.5, color: C.faint, textAlign: "center", padding: "4px 0 2px" }}>Showing first {CAP} — refine your search</div>}
           </div>
         </>
       )}
