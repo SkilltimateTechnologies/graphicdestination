@@ -31,7 +31,7 @@ import { fileURLToPath } from "node:url";
 
 import { valueAt } from "./src/engine/keyframes.js";
 import { cameraAt, cameraTransform, depthFactor, clampZoom, CAM_DEFAULTS } from "./src/engine/camera.js";
-import { layerOut } from "./src/components/editor/model.js";
+import { layerOut, DEFAULT_INSERT_SIZE } from "./src/components/editor/model.js";
 import { SHAPE_DEFS } from "./src/engine/shapes.js";
 import { backdropDefaults } from "./src/engine/backdrops.js";
 
@@ -78,7 +78,7 @@ const CAM_ACT_BEAT = grabConstNum(GDM, "CAM_ACT_BEAT");
 const CAM_FIT_FILL = grabConstNum(GDM, "CAM_FIT_FILL");
 
 const { withKeyframe, resizeDropPlan, cameraFocusXY, cameraFitZoom, cameraPushZoom, makeObject } = new Function(
-  "SHAPE_DEFS", "backdropDefaults", "depthFactor", "clampZoom", "CAM_FIT_FILL", "STAGE_W", "STAGE_H",
+  "SHAPE_DEFS", "backdropDefaults", "depthFactor", "clampZoom", "CAM_FIT_FILL", "STAGE_W", "STAGE_H", "DEFAULT_INSERT_SIZE",
   `const uid = (() => { let n = 0; return () => "ob" + (++n); })();
    ${boxDefaultsSrc}
    ${grabFn(GDM, "withKeyframe")}
@@ -88,7 +88,7 @@ const { withKeyframe, resizeDropPlan, cameraFocusXY, cameraFitZoom, cameraPushZo
    ${grabFn(GDM, "cameraPushZoom")}
    ${grabFn(GDM, "makeObject")}
    return { withKeyframe, resizeDropPlan, cameraFocusXY, cameraFitZoom, cameraPushZoom, makeObject };`
-)(SHAPE_DEFS, backdropDefaults, depthFactor, clampZoom, CAM_FIT_FILL, 1280, 720);
+)(SHAPE_DEFS, backdropDefaults, depthFactor, clampZoom, CAM_FIT_FILL, 1280, 720, DEFAULT_INSERT_SIZE);
 
 /* ---------- a mutable harness mirroring the app's setKeyframe semantics ---------- */
 const CTX_DUR = 5000;

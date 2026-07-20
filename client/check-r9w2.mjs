@@ -315,7 +315,7 @@ async function main() {
     /* the Emoji panel is a featured teaser + right arrow; the FULL library
        loads INLINE in the same panel (startBrowsing) — no modal, thumbs
        non-empty on every card */
-    const lib = renderToStaticMarkup(h(EmojiPanel, { insertEmojiClip: () => {}, startBrowsing: true }));
+    const lib = renderToStaticMarkup(h(EmojiPanel, { insertEmoji: () => {}, startBrowsing: true }));
     const cards = lib.split('data-emoji-card="').slice(1);
     /* PERF: the library DEFAULTS to the popular set (not all 169 image-backed
        thumbnails at once); search / a category reveals the rest, capped. */
@@ -323,7 +323,7 @@ async function main() {
     check("the library is INLINE in the panel (no modal overlay)", !lib.includes("position:fixed") && !lib.includes('role="dialog"') && /Search emoji/i.test(lib));
     check("the inline library uses an auto-fill card grid", lib.includes("grid-template-columns"));
     check("every emoji card carries a non-empty still thumbnail", cards.length > 0 && cards.every((c) => c.includes("data-thumb-still")));
-    const ep = renderToStaticMarkup(h(EmojiPanel, { insertEmojiClip: () => {} }));
+    const ep = renderToStaticMarkup(h(EmojiPanel, { insertEmoji: () => {} }));
     check("EmojiPanel shows 4 featured emoji as a teaser", (ep.split('data-emoji-featured="').length - 1) === 4);
     check("EmojiPanel has a right-arrow browse affordance (no big button)", ep.includes("data-emoji-browse") && ep.includes("→") && !/Browse all \d+ emoji →/.test(ep));
     check("EmojiPanel keeps the floating panel shell", ep.includes("gd-panel") && ep.includes("position:absolute"));

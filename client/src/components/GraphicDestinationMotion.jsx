@@ -10,7 +10,7 @@ import { cameraAt, cameraTransform, cameraFromJson, cameraToJson, clampZoom, dep
 import { normHi } from "../engine/maps.js";
 import { FONT_IMPORT } from "../engine/fx.js";
 import { kitRenderSpec } from "../engine/kits.js";
-import { C, KF_PROPS, STAGE_PRESETS, kfAt, layerOut, layerSpan, packRows, objSize, reframeClipToContent, objectsInRect } from "./editor/model";
+import { C, KF_PROPS, STAGE_PRESETS, kfAt, layerOut, layerSpan, packRows, objSize, reframeClipToContent, objectsInRect, DEFAULT_INSERT_SIZE } from "./editor/model";
 import { computeSnap, SNAP_THRESHOLD } from "./editor/snapping";
 import TopBar from "./editor/TopBar";
 import IconRail from "./editor/IconRail";
@@ -158,17 +158,19 @@ const BOX_DEFAULTS = { bg: "", pad: 16, borderC: "#FFB224", borderW: 0, radius: 
 function makeObject(type, over = {}) {
   const base = {
     id: uid(), type, name: type[0].toUpperCase() + type.slice(1), tracks: {}, locked: false, hidden: false,
-    props: { x: STAGE_W / 2, y: STAGE_H / 2, scale: 1, rotation: 0, opacity: 1, fill: "#F9F9F9", w: 200, h: 200, inT: 0, outT: null, path: null, prog: 0 },
+    props: { x: STAGE_W / 2, y: STAGE_H / 2, scale: 1, rotation: 0, opacity: 1, fill: "#F9F9F9", w: DEFAULT_INSERT_SIZE, h: DEFAULT_INSERT_SIZE, inT: 0, outT: null, path: null, prog: 0 },
   };
-  if (type === "shape") { base.props.shape = over.shape || "rect"; base.name = SHAPE_DEFS[base.props.shape].name; Object.assign(base.props, { w: 190, h: 190, fillMode: "fill", sC: "#FFB224", sW: 3, cornerR: 0 }); }
+  /* cap (w,h) so the LONGEST side is DEFAULT_INSERT_SIZE, aspect preserved */
+  const capToDefault = (w, h) => { const k = DEFAULT_INSERT_SIZE / Math.max(w, h, 1); return { w: Math.round(w * k), h: Math.round(h * k) }; };
+  if (type === "shape") { base.props.shape = over.shape || "rect"; base.name = SHAPE_DEFS[base.props.shape].name; Object.assign(base.props, { w: DEFAULT_INSERT_SIZE, h: DEFAULT_INSERT_SIZE, fillMode: "fill", sC: "#FFB224", sW: 3, cornerR: 0 }); }
   if (type === "text") { Object.assign(base.props, { text: "Headline", fontSize: 72, fontWeight: 700, w: 0, h: 0, textFx: null, fontFamily: "Space Grotesk", ls: 0.5, upper: false, pathMode: "flow", ...BOX_DEFAULTS }); }
-  if (type === "image") { Object.assign(base.props, { src: over.src || "", w: over.w || 320, h: over.h || 220 }); }
+  if (type === "image") { Object.assign(base.props, { src: over.src || "", ...capToDefault(320, 220) }); }
   if (type === "number") { base.name = "Number"; Object.assign(base.props, { from: 0, to: 100, start: 200, dur: 1600, style: "odometer", decimals: 0, prefix: "", suffix: "", fontSize: 96, fill: "#F9F9F9", numEase: "easeOutCubic", fontFamily: "JetBrains Mono", ring: "none", ringC: "#FFB224", ringW: 8, ...BOX_DEFAULTS }); }
   if (type === "map") { base.name = "Map"; Object.assign(base.props, { country: "IND", mapStyle: "comet", stroke: "#FFB224", fillC: "#FFB224", fillOp: 0.85, strokeW: 1.6, start: 200, dur: 1800, w: 420 }); }
   if (type === "continent") { base.name = "Continent"; Object.assign(base.props, { continent: "ASIA", mapStyle: "comet", stroke: "#FFB224", fillC: "#FFB224", fillOp: 0.7, strokeW: 1, start: 200, dur: 2200, w: 620, hi: [], reveal: "simple", revealDur: 600, hiFill: "#FFD984", hiStroke: "#ffffff", glow: true, autoZoom: true, zoomK: 2.2, zoomHoldMs: 1600, zoomTransMs: 550 }); }
   if (type === "confetti") { base.name = "Confetti"; Object.assign(base.props, { burst: 500, count: 70, power: 1, seed: 7, style: "burst" }); }
   if (type === "backdrop") { base.name = "Backdrop"; Object.assign(base.props, backdropDefaults()); }
-  if (type === "chart") { base.name = "Chart"; Object.assign(base.props, { chartType: "bar", dataStr: "Q1, 42\nQ2, 65\nQ3, 38\nQ4, 84", start: 200, dur: 1400, w: 560, h: 340, showVals: true, bg: "#171B24", bgOp: 1, radius: 18, borderC: "#2B3140", borderW: 1, pad: 20 }); }
+  if (type === "chart") { base.name = "Chart"; Object.assign(base.props, { chartType: "bar", dataStr: "Q1, 42\nQ2, 65\nQ3, 38\nQ4, 84", start: 200, dur: 1400, ...capToDefault(560, 340), showVals: true, bg: "#171B24", bgOp: 1, radius: 18, borderC: "#2B3140", borderW: 1, pad: 20 }); }
   if (type === "world") { base.name = "World map"; Object.assign(base.props, { hi: [{ cc: "IND", t: 0, zoom: true }], reveal: "simple", revealDur: 600, zoomK: 2.6, autoZoom: true, zoomHoldMs: 1600, zoomTransMs: 550, focus: 0, base: "#2A3350", baseOp: 1, hiFill: "#FFB224", hiStroke: "#FFD984", stroke: "#3D4A6E", strokeW: 0.7, glow: true, w: 780 }); }
   if (type === "kit") {
     /* locked kit object (R7a): ONE layer, no children — props.kit is the
@@ -176,7 +178,7 @@ function makeObject(type, over = {}) {
        color = icon primary (null → the icon's natural), accent = UI accent.
        w/h are the display box the art scales into. */
     base.name = over.name || "Kit";
-    Object.assign(base.props, { kit: "", variant: "animated", color: null, accent: "#FFB224", w: 320, h: 320 });
+    Object.assign(base.props, { kit: "", variant: "animated", color: null, accent: "#FFB224", ...capToDefault(320, 320) });
   }
   if (type === "clip") {
     base.name = over.name || "Clip";
@@ -858,8 +860,11 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   const insertKitClip = (kit, opts = {}) => {
     const spec = kitRenderSpec(kit.id, opts);
     if (!spec) return;
-    const w = Math.max(40, Math.round(spec.frame.w));
-    const h = Math.max(40, Math.round(spec.frame.h));
+    /* content-sized from the kit's frame, capped to the standard insert size
+       (longest side = DEFAULT_INSERT_SIZE, aspect preserved) */
+    const k = Math.min(1, DEFAULT_INSERT_SIZE / Math.max(spec.frame.w, spec.frame.h, 1));
+    const w = Math.max(40, Math.round(spec.frame.w * k));
+    const h = Math.max(40, Math.round(spec.frame.h * k));
     const o = makeObject("kit", {
       name: kit.name,
       props: {
@@ -877,22 +882,21 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     setIconsOpen(false);
     setUiOpen(false);
   };
-  /* insert a Fluent emoji as ONE movable clip (template-style): emoji.build()
-     returns a standard looping clip (image child + engine motion tracks), so
-     it reuses the tested template-insert path — reframe to content, drop at the
-     playhead. Built small (100px art) and the whole GROUP is normalized so the
-     content bbox (motion excursions included) is exactly 100px on its longest
-     side — the selection frame hugs a tight 100×100 box and the emoji moves /
-     scales / rotates as one grouped object. Closes the rail panel on insert. */
-  const insertEmojiClip = (emoji, opts = {}) => {
-    const built = cloneLayer(emoji.build({ ...opts, size: 100 }));
-    const { clip, box } = reframeClipToContent(built, stage);
-    clip.locked = false;
-    const k = 100 / Math.max(1, box.w, box.h);
-    if (Math.abs(k - 1) > 1e-3) clip.props = { ...clip.props, scale: +k.toFixed(4) };
-    clip.props.start = Math.max(0, Math.min(Math.max(0, ctxDur - 400), Math.round(timeRef.current / 10) * 10));
-    setLayers((ls) => [...ls, clip]);
-    setSelIds([clip.id]);
+  /* insert a Fluent emoji as a plain IMAGE object at the standard insert size:
+     it flows through onResizeDown (the 8-way w/h grips) and resizes exactly
+     like any image — no clip wrapper (a clip only gets corner clip-scale
+     grips on a breathing per-frame bbox, which is why emoji "couldn't be
+     resized"). The engine's looping emoji clip (emoji.build) stays for the
+     panel thumbs + back-compat of old projects. Closes the rail panel. */
+  const insertEmoji = (emoji) => {
+    const o = makeObject("image", {
+      name: emoji.name,
+      props: { src: emoji.file, w: DEFAULT_INSERT_SIZE, h: DEFAULT_INSERT_SIZE },
+    });
+    o.props.x = stage.w / 2; o.props.y = stage.h / 2;
+    o.props.outT = ctxDur;
+    setLayers((ls) => [...ls, o]);
+    setSelIds([o.id]);
     setIconsOpen(false);
   };
   const copySelection = () => { if (!selMany.length) return; clipboardRef.current = selMany.map((o) => JSON.parse(JSON.stringify(o))); setClipCount(clipboardRef.current.length); };
@@ -2022,8 +2026,8 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
         {/* templates drawer: search + categories, inserts as one editable clip at the playhead */}
         {templatesOpen && <TemplatesPanel tplQ={tplQ} setTplQ={setTplQ} tplCat={tplCat} setTplCat={setTplCat} insertTemplateClip={insertTemplateClip} />}
 
-        {/* emoji drawer: featured teaser + → arrow, full library inline (no modal); inserts as one movable 100×100 clip */}
-        {iconsOpen && <EmojiPanel insertEmojiClip={insertEmojiClip} />}
+        {/* emoji drawer: featured teaser + → arrow, full library inline (no modal); inserts as a plain 100×100 image */}
+        {iconsOpen && <EmojiPanel insertEmoji={insertEmoji} />}
 
         {/* UI elements drawer: 13 animated interface pieces, insert as looping clips */}
         {uiOpen && <UIElementsPanel uiQ={uiQ} setUiQ={setUiQ} uiCat={uiCat} setUiCat={setUiCat} insertKitClip={insertKitClip} />}

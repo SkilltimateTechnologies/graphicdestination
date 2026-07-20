@@ -10,6 +10,12 @@ import { MAPS, WORLD_H, CONTINENTS, WORLD_EXT, mapBox } from "../../engine/maps.
 
 export const STAGE_PAD = 120; /* workspace margin (screen px) around the canvas in manual zoom — bounds the scroll/pan area */
 
+/* standard insert size (stage px): every new object lands at ~this size on its
+   longest side instead of a per-type giant (was 190…780). makeObject consumes
+   it for the base + shape/image/kit/chart branches (aspect preserved); the
+   emoji insert uses it directly. */
+export const DEFAULT_INSERT_SIZE = 100;
+
 export const C = {
   bg0: "#0A0C10", bg1: "#10131A", bg2: "#171B24", bg3: "#1E2330",
   line: "#232936", lineStrong: "#2E3546", txt: "#E9ECF3", dim: "#939BAD", faint: "#5D667A",

@@ -2,7 +2,7 @@
    arrow (→) that swaps the panel IN PLACE to the full searchable library (no
    modal): search, sub-category chips, Animated/Static toggle and every emoji as
    a hover-play card. Clicking ANY emoji (featured or library card) inserts it
-   as one movable 100×100 clip (grouped — the selection frame hugs the art).
+   as a plain 100×100 IMAGE — it resizes like any image (8-way grips).
 
    Thumbnails are HOVER-PLAY: a representative HOLD frame (55% of the loop) with
    no timers; the shared 120 ms ticker plays the loop only while hovered. */
@@ -34,7 +34,7 @@ export const EmojiThumb = React.memo(function EmojiThumb({ emoji, variant = "ani
   );
 });
 
-export default function EmojiPanel({ insertEmojiClip, startBrowsing = false }) {
+export default function EmojiPanel({ insertEmoji, startBrowsing = false }) {
   const [browsing, setBrowsing] = useState(startBrowsing); /* teaser ⇆ full library, inline */
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("All");
@@ -53,7 +53,7 @@ export default function EmojiPanel({ insertEmojiClip, startBrowsing = false }) {
     return { list: full.slice(0, CAP), popular: false, truncated: full.length > CAP };
   }, [q, cat]);
 
-  const pick = (e, v = variant) => insertEmojiClip?.(e, { variant: v });
+  const pick = (e) => insertEmoji?.(e);
 
   return (
     <div className="gd-panel" data-emoji-panel style={{ position: "absolute", left: 84, top: 12, width: browsing ? 292 : 244, maxHeight: "calc(100% - 24px)", display: "flex", flexDirection: "column", background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 8, padding: 12, zIndex: 30, boxShadow: "0 12px 40px rgba(0,0,0,.5)", boxSizing: "border-box" }}>
@@ -76,8 +76,8 @@ export default function EmojiPanel({ insertEmojiClip, startBrowsing = false }) {
               {FEATURED_EMOJI.map((e) => (
                 <div key={e.id} role="button" tabIndex={0} className="gd-btn gd-emoji-card" data-emoji-featured={e.id}
                   title={`${e.name} — click to insert`}
-                  onClick={() => pick(e, "animated")}
-                  onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); pick(e, "animated"); } }}
+                  onClick={() => pick(e)}
+                  onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); pick(e); } }}
                   style={{ display: "flex", alignItems: "center", justifyContent: "center", background: C.bg1, border: `1px solid ${C.line}`, borderRadius: 7, padding: 4, cursor: "pointer", aspectRatio: "1", overflow: "hidden" }}>
                   <EmojiThumb emoji={e} art={40} />
                 </div>
@@ -87,7 +87,7 @@ export default function EmojiPanel({ insertEmojiClip, startBrowsing = false }) {
               style={{ width: 26, borderRadius: 7, border: `1px solid ${C.line}`, background: C.bg1, color: C.amber, cursor: "pointer", fontSize: 14, fontWeight: 700, padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>→</button>
           </div>
           <div style={{ fontSize: 9.5, color: C.faint, marginTop: 9, lineHeight: 1.5 }}>
-            Microsoft Fluent Emoji (3D), animated by the engine (pop · signature motion · whip). Inserts as one movable 100×100 group.
+            Microsoft Fluent Emoji (3D). Inserts as a plain 100×100 image — move, resize and rotate it like anything else.
           </div>
         </>
       ) : (

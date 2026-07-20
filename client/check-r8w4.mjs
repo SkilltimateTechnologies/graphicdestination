@@ -312,6 +312,18 @@ async function main() {
       await page.waitForTimeout(340);
       const after = await laneCount();
       check(`insert emoji → new lane (${before} → ${after})`, after === before + 1, (await laneNames()).join(" · "));
+      /* emoji is a plain IMAGE now: the standard 8-way resize grips (NOT the
+         clip's 4 corner clip-scale grips) — a grip drag resizes it like any
+         image and writes a scale ◆ (R8w3 contract) */
+      check("selected emoji shows the STANDARD resize grips (image, not clip)",
+        (await page.locator('div[title="Drag to resize · Shift = keep aspect"]').count()) >= 4
+        && (await page.locator('div[title="Drag to scale the whole clip uniformly"]').count()) === 0);
+      kf = await kfCount();
+      grip = page.locator('div[title="Drag to resize · Shift = keep aspect"]').first();
+      gb = await grip.boundingBox();
+      await drag({ x: gb.x + gb.width / 2, y: gb.y + gb.height / 2 }, 30, 22);
+      kf2 = await kfCount();
+      check("emoji canvas RESIZE wrote a ◆ diamond (scale track)", kf2 > kf, `${kf} → ${kf2}`);
     }
     await insert("UI element", "UI", 'button[title$="as a locked, movable kit object"]');
     await insert("chart", "Charts", 'button[title$="Click to insert."]');
@@ -359,7 +371,7 @@ async function main() {
     const saved = gr.ok ? (await gr.json()).data : null;
     const types = saved ? saved.objects.map((o) => o.type) : [];
     check("server-side GET returns the saved project", !!saved && Array.isArray(saved.objects), gr.status);
-    for (const t of ["shape", "text", "kit", "chart", "number", "confetti", "map", "clip"]) {
+    for (const t of ["shape", "text", "image", "kit", "chart", "number", "confetti", "map", "clip"]) {
       check(`saved project contains a ${t}`, types.includes(t), types.join(","));
     }
     const savedShape = saved && saved.objects.find((o) => o.type === "shape");
