@@ -9,6 +9,52 @@ Status legend: 💡 idea · 🔬 spike/prototype · 🛠️ in progress · ✅ s
 
 ---
 
+## 🛠️ Fixes & polish (near-term, actionable)
+
+These are concrete bugs/regressions and standardizations to do soon (each ships
+independently, each needs its guard updated in the same change).
+
+1. **Drop the "re-arm Animate" nudge.** The R10 disarm-nudge banner
+   (`.gd-disarm-nudge` + raise sites in `onBarDown`/rotate/clip-scale) is not
+   wanted — the user just toggles Animate on/off themselves. Remove the banner,
+   the `gdNudgeIn` animation, and the raise/settle logic; keep the arm toggle.
+   Update the `check-r10` disarm-nudge assertions accordingly.
+
+2. **Emojis on canvas behave erratically + can't resize.** Dig into the insert
+   path: emoji currently insert as a **100×100 grouped clip** (`f813ee2`), and a
+   clip resizes differently from a normal object (it scales children / the frame
+   math differs), which is likely why the grips feel out of control and the
+   resize doesn't take. **Fix for all cases:** make an emoji behave like every
+   other object on resize — strongest option is to insert it as a **plain image
+   object** (direct `w`/`h` resize) at a standard default size, not a grouped
+   clip; if it must stay a clip, make clip resize map to a uniform scale that the
+   grips drive predictably. Verify with a browser resize test.
+
+3. **Standard default placement size.** Everything dropped on the canvas should
+   start at a consistent size — **100×100** (or 150×150; pick one and make it the
+   standard). Applies to shapes (currently ~190×190), emoji, etc. Centralize the
+   default so every insert path uses it.
+
+4. **Duration changes must NOT stretch existing timings.** If a comp starts at 5s
+   and is later extended to 20s, every object keeps the exact `inT`/`outT` it was
+   designed with (no time-stretch). Same for **scenes/clips**: a clip set to 8s
+   stays 8s even when the parent/main timeline grows to 20s — its length is its
+   own, independent of the main duration. Audit `setCtxDurMs` / the
+   `stretchClips` path and the clip-duration logic; extending duration should
+   only add empty room, never rescale keyframes/spans. (There's a `stretchClips`
+   toggle — default it OFF for duration *extend*, and make sure nested clip
+   lengths are pinned.)
+
+5. **Shape morph regression — bring it back.** Shape-to-shape morphing
+   (`tracks.shape` + `morphPtsAt`, the Inspector morph card + A→B indicators) is
+   a FROZEN feature (`check-r9w2`, 340 assertions) but the user reports the UI to
+   trigger it disappeared. Investigate whether a refactor dropped the Inspector
+   morph card / target picker; restore the visible morph controls so a shape can
+   again morph into another shape. (Engine likely intact — this is probably a UI
+   regression, exactly the class AGENTS warns about.)
+
+---
+
 ## 💡 AI Asset Studio — "upload a photo → get an animated asset"
 
 **The ask (refined):**
@@ -176,6 +222,49 @@ save it back. No new renderer, no new format.
 - **Determinism:** a saved template is a normal project, so it inherits the same
   deterministic-render guarantees; add a check that every stored template renders
   non-empty + exports clean.
+
+---
+
+## 💡 Uploads — one unified, organized assets hub
+
+**The ask:** stop scattering media across separate rail panels. Have **one
+"Uploads" section** where the user uploads images, audio (and later video), all
+**categorized inside it** — and remove the standalone Image / Audio panels.
+Assets should be **project-scoped by default**, with the option to **search
+across other projects' folders** when needed. Goal: less clutter, more organized.
+
+**Verdict: feasible** — the asset API already exists (`/api/assets`, owner-scoped,
+MIME allowlist, size caps, kind = image|audio). This is mostly a UI consolidation
++ a scoping/organization layer.
+
+### Shape of it (brainstorm)
+- **One rail entry "Uploads"** replacing "Image" and "Audio". Inside: tabs/filter
+  chips by kind — **Images · Audio · Video** (video later) — plus an upload
+  dropzone that routes by MIME to the right kind.
+- **Project-scoped view by default.** Tag each asset with the project(s) it's
+  used in (or a folder/project id). The Uploads hub shows **this project's
+  assets** first.
+- **Cross-project search.** A search box + a "search all my projects" toggle that
+  queries the full owner library (the API is already owner-scoped, so this is a
+  filter/endpoint param, not new auth). Results show which project each came from.
+- **Folders / collections (optional):** let users group assets into named folders
+  independent of projects.
+- **Reuse, don't re-upload:** picking an existing asset inserts it by reference
+  (`/api/assets/:id`) — no duplicate bytes.
+
+### Server (additive)
+- Extend the asset row with a `project_id?` (or a join table for many-to-many
+  usage) so "this project's assets" and "used in project X" are queryable.
+- `GET /api/assets?scope=project|all&kind=image|audio&q=…` — one endpoint, the
+  Uploads hub drives it.
+
+### Risks / notes
+- **Back-compat:** existing assets (no project tag) still list under "all"; don't
+  orphan them.
+- **Don't break the share path** — token-scoped public asset serving must keep
+  working (it references assets by id).
+- Keep the size caps + MIME allowlist; video will need its own caps + the
+  deterministic-export story (bake/seek) before it's real.
 
 ---
 
