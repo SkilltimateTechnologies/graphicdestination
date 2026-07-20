@@ -11,8 +11,9 @@
  *   3.  EDITOR loads the built-in demo project at /editor (Scenes + Stats
  *       clip lanes render).
  *   4.  WIDGET SWEEP on a fresh cloud project — inserts one of each: shape,
- *       text, emoji, UI element, chart, counter, confetti, map,
- *       template-as-group; every insert adds a timeline lane.
+ *       text, UI element, chart, counter, confetti, map, template-as-group;
+ *       every insert adds a timeline lane. (Fluent emoji retired — the admin
+ *       SVG Icons library is the icon picker, exercised at 8b.)
  *   5.  CANVAS TRANSFORMS (autokey always-on): move + resize + rotate a text
  *       and a shape → timeline ◆ diamonds appear on the x/y, scale and
  *       rotation lanes.
@@ -303,30 +304,8 @@ async function main() {
       const names = await laneNames();
       check(`insert ${label} → new lane (${before} → ${after})`, after === before + 1 && (!expectName || names.some((n) => n.toLowerCase().includes(expectName.toLowerCase()))), names.join(" · "));
     };
-    /* emoji: rail → compact teaser → right arrow (browse inline) → click a card */
-    {
-      const before = await laneCount();
-      await page.locator('button:has(span:text-is("Emoji"))').first().click();
-      await page.waitForTimeout(260);
-      await page.locator('[data-emoji-browse]').first().click();
-      await page.waitForTimeout(320);
-      await page.locator('[data-emoji-card]').first().click();
-      await page.waitForTimeout(340);
-      const after = await laneCount();
-      check(`insert emoji → new lane (${before} → ${after})`, after === before + 1, (await laneNames()).join(" · "));
-      /* emoji is a plain IMAGE now: the standard 8-way resize grips (NOT the
-         clip's 4 corner clip-scale grips) — a grip drag resizes it like any
-         image and writes a scale ◆ (R8w3 contract) */
-      check("selected emoji shows the STANDARD resize grips (image, not clip)",
-        (await page.locator('div[title="Drag to resize · Shift = keep aspect"]').count()) >= 4
-        && (await page.locator('div[title="Drag to scale the whole clip uniformly"]').count()) === 0);
-      kf = await kfCount();
-      grip = page.locator('div[title="Drag to resize · Shift = keep aspect"]').first();
-      gb = await grip.boundingBox();
-      await drag({ x: gb.x + gb.width / 2, y: gb.y + gb.height / 2 }, 30, 22);
-      kf2 = await kfCount();
-      check("emoji canvas RESIZE wrote a ◆ diamond (scale track)", kf2 > kf, `${kf} → ${kf2}`);
-    }
+    /* the Fluent emoji picker is RETIRED (B phase 4): the rail offers the
+       admin SVG Icons library instead — the insert sweep starts with it */
     await insert("UI element", "UI", 'button[title$="as a locked, movable kit object"]');
     await insert("chart", "Charts", 'button[title$="Click to insert."]');
     await insert("counter", "Number", '.gd-panel button:has-text("Count Up")', "Count Up");
@@ -360,7 +339,7 @@ async function main() {
       await page.waitForTimeout(320);
       check(`insert template-as-group → new lane (${before} → ${before + 1})`, (await laneCount()) === before + 1, (await laneNames()).join(" · "));
     }
-    check("all 9 widgets inserted → 9 lanes", (await laneCount()) === 9, `${await laneCount()} lanes: ${(await laneNames()).join(" · ")}`);
+    check("all 8 widgets inserted → 8 lanes", (await laneCount()) === 8, `${await laneCount()} lanes: ${(await laneNames()).join(" · ")}`);
 
     /* ==================== 8b. SVG icon library — admin store → panel → insert ==== */
     console.log("\n#8b svg icons — admin-seeded icon inserts from the Icons panel (8-way resize)");

@@ -41,7 +41,6 @@ import {
 } from "./src/engine/shapes.js";
 import { posOf, valueAt } from "./src/engine/keyframes.js";
 import { ICONS, UI_ELEMENTS, ICON_CATS } from "./src/engine/kits.js";
-import { EMOJIS, POPULAR_EMOJI } from "./src/engine/emoji.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tmpDir = path.join(here, ".r9w2-check-tmp");
@@ -180,7 +179,6 @@ async function main() {
     `export { StageObject } from ${JSON.stringify(path.join(here, "src", "components", "StageObject.jsx"))};`,
     `export { default as Inspector } from ${JSON.stringify(path.join(here, "src", "components", "editor", "Inspector.jsx"))};`,
     `export { default as ShapesPanel } from ${JSON.stringify(path.join(here, "src", "components", "editor", "panels", "ShapesPanel.jsx"))};`,
-    `export { default as EmojiPanel } from ${JSON.stringify(path.join(here, "src", "components", "editor", "panels", "EmojiPanel.jsx"))};`,
     `export { createElement } from "react";`,
     `export { renderToStaticMarkup } from "react-dom/server";`,
     "",
@@ -192,7 +190,7 @@ async function main() {
     build: { outDir: tmpDir, lib: { entry, formats: ["es"], fileName: () => "engine.mjs" } },
   });
   const M = await import(pathToFileURL(path.join(tmpDir, "engine.mjs")).href);
-  const { StageObject, Inspector, ShapesPanel, EmojiPanel, createElement: h, renderToStaticMarkup } = M;
+  const { StageObject, Inspector, ShapesPanel, createElement: h, renderToStaticMarkup } = M;
   const stage = { w: 1280, h: 720 };
   const ssr = (obj, time, extra = {}) => renderToStaticMarkup(h(StageObject, { obj, time, stage, selected: false, interactive: false, ...extra }));
   const inkOf = (markup) => (markup.match(/fill[:="]/g) || []).length + (markup.match(/<(rect|circle|ellipse|path|polygon|text)[ >]/g) || []).length;
@@ -312,22 +310,10 @@ async function main() {
       check(`ui:${k.id} hold frame (40%) is non-empty`, ms.length > 500 && inkOf(ms) >= 2, `len=${ms.length} ink=${inkOf(ms)}`);
       check(`ui:${k.id} hold frame is NaN-free`, !ms.includes("NaN"));
     }
-    /* the Emoji panel is a featured teaser + right arrow; the FULL library
-       loads INLINE in the same panel (startBrowsing) — no modal, thumbs
-       non-empty on every card */
-    const lib = renderToStaticMarkup(h(EmojiPanel, { insertEmoji: () => {}, startBrowsing: true }));
-    const cards = lib.split('data-emoji-card="').slice(1);
-    /* PERF: the library DEFAULTS to the popular set (not all 169 image-backed
-       thumbnails at once); search / a category reveals the rest, capped. */
-    check("inline emoji library defaults to the popular set (perf, not all 169)", cards.length === POPULAR_EMOJI.length && cards.length < EMOJIS.length, `got ${cards.length}, popular ${POPULAR_EMOJI.length}, total ${EMOJIS.length}`);
-    check("the library is INLINE in the panel (no modal overlay)", !lib.includes("position:fixed") && !lib.includes('role="dialog"') && /Search emoji/i.test(lib));
-    check("the inline library uses an auto-fill card grid", lib.includes("grid-template-columns"));
-    check("every emoji card carries a non-empty still thumbnail", cards.length > 0 && cards.every((c) => c.includes("data-thumb-still")));
-    check("no Animated/Static toggle — every insert is a still image (thumbs preview the loop only)", !lib.includes(">Anim<") && !lib.includes(">Still<") && !lib.includes("Animated"));
-    const ep = renderToStaticMarkup(h(EmojiPanel, { insertEmoji: () => {} }));
-    check("EmojiPanel shows 4 featured emoji as a teaser", (ep.split('data-emoji-featured="').length - 1) === 4);
-    check("EmojiPanel has a right-arrow browse affordance (no big button)", ep.includes("data-emoji-browse") && ep.includes("→") && !/Browse all \d+ emoji →/.test(ep));
-    check("EmojiPanel keeps the floating panel shell", ep.includes("gd-panel") && ep.includes("position:absolute"));
+    /* B phase 4: the Fluent emoji picker is RETIRED (EmojiPanel.jsx deleted) —
+       engine/emoji.js + the PNGs stay engine-side for back-compat of old
+       projects; the SVG Icons library is the picker now */
+    check("EmojiPanel.jsx is gone (Fluent picker retired)", !fs.existsSync(path.join(here, "src", "components", "editor", "panels", "EmojiPanel.jsx")));
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);

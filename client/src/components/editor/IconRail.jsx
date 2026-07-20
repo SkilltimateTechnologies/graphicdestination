@@ -7,11 +7,13 @@ import { RailBtn, NoteIcon } from "./ui";
 import { ptsToStr, SHAPE_DEFS } from "../../engine/shapes.js";
 import { ringsToPath, MAPS } from "../../engine/maps.js";
 
-export default function IconRail({ shapesOpen, setShapesOpen, textOpen, setTextOpen, imagesOpen, setImagesOpen, audioOpen, setAudioOpen, mapsOpen, setMapsOpen, templatesOpen, setTemplatesOpen, chartsOpen, setChartsOpen, confettiOpen, setConfettiOpen, numbersOpen, setNumbersOpen, iconsOpen, setIconsOpen, uiOpen, setUiOpen, svgIconsOpen, setSvgIconsOpen, audioTrack, addObject }) {
+export default function IconRail({ shapesOpen, setShapesOpen, textOpen, setTextOpen, imagesOpen, setImagesOpen, audioOpen, setAudioOpen, mapsOpen, setMapsOpen, templatesOpen, setTemplatesOpen, chartsOpen, setChartsOpen, confettiOpen, setConfettiOpen, numbersOpen, setNumbersOpen, uiOpen, setUiOpen, svgIconsOpen, setSvgIconsOpen, audioTrack, addObject }) {
   return (
         <div style={{ width: 76, background: C.bg1, borderRight: `1px solid ${C.line}`, display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 12, gap: 9, flexShrink: 0, zIndex: 20, overflowY: "auto" }}>
           <RailBtn label="Templates" active={templatesOpen} onClick={() => setTemplatesOpen(!templatesOpen)} glyph={<svg width="17" height="17" viewBox="0 0 18 18"><rect x="1" y="1" width="7" height="7" rx="1.5" fill={C.dim} /><rect x="10" y="1" width="7" height="7" rx="1.5" fill={C.dim} /><rect x="1" y="10" width="7" height="7" rx="1.5" fill={C.dim} /><rect x="10" y="10" width="7" height="7" rx="1.5" fill={C.dim} /></svg>} />
-          <RailBtn label="Emoji" active={iconsOpen} onClick={() => setIconsOpen(!iconsOpen)} glyph={<svg width="17" height="17" viewBox="0 0 18 18" fill="none" stroke={C.dim} strokeWidth="1.5"><circle cx="9" cy="9" r="7.2" /><path d="M5.8 10.4a3.4 3.4 0 0 0 6.4 0" strokeLinecap="round" /><circle cx="6.6" cy="7.1" r="0.6" fill={C.dim} stroke="none" /><circle cx="11.4" cy="7.1" r="0.6" fill={C.dim} stroke="none" /></svg>} />
+          {/* Fluent emoji rail retired (B phase 4) — replaced by the admin SVG
+              Icons library. engine/emoji.js + the PNGs stay for BACK-COMPAT of
+              old projects (same retirement pattern as the bezier icons). */}
           <RailBtn label="Icons" active={svgIconsOpen} onClick={() => setSvgIconsOpen(!svgIconsOpen)} glyph={<svg width="17" height="17" viewBox="0 0 18 18" fill="none" stroke={C.dim} strokeWidth="1.5"><path d="M9 1.8 11 6.2l4.7.5-3.5 3.2.9 4.6L9 12.1 4.9 14.5l.9-4.6-3.5-3.2L7 6.2Z" strokeLinejoin="round" /></svg>} />
           <RailBtn label="UI" active={uiOpen} onClick={() => setUiOpen(!uiOpen)} glyph={<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke={C.dim} strokeWidth="1.5"><rect x="1.5" y="4.5" width="15" height="9" rx="4.5" /><circle cx="10.6" cy="9" r="2.7" fill={C.dim} stroke="none" /></svg>} />
           <RailBtn label="Shapes" active={shapesOpen} onClick={() => setShapesOpen(!shapesOpen)} glyph={<svg width="19" height="19" viewBox="0 0 100 100"><polygon points={ptsToStr(SHAPE_DEFS.star.pts)} fill={C.dim} /></svg>} />

@@ -21,7 +21,6 @@ import MapsPanel from "./editor/panels/MapsPanel";
 import ImagePanel from "./editor/panels/ImagePanel";
 import AudioPanel from "./editor/panels/AudioPanel";
 import TemplatesPanel from "./editor/panels/TemplatesPanel";
-import EmojiPanel from "./editor/panels/EmojiPanel";
 import IconsPanel from "./editor/panels/IconsPanel";
 import UIElementsPanel from "./editor/panels/UIElementsPanel";
 import ConfettiPanel from "./editor/panels/ConfettiPanel";
@@ -357,7 +356,6 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   const [bgOpen, setBgOpenRaw] = useState(false);
   const [tplQ, setTplQ] = useState(""); /* templates panel search (persists across open/close, like shapeQ) */
   const [tplCat, setTplCat] = useState("All");
-  const [iconsOpen, setIconsOpenRaw] = useState(false); /* icons drawer (engine/kits.js) */
   const [uiOpen, setUiOpenRaw] = useState(false); /* UI elements drawer (engine/kits.js) */
   const [svgIconsOpen, setSvgIconsOpenRaw] = useState(false); /* SVG icon library drawer (admin store) */
   /* rail panels are MUTUALLY EXCLUSIVE: every panel anchors at the same
@@ -367,7 +365,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
      unclickable). Opening one rail panel closes the rest; closing any panel
      keeps working (it just closes the others too — a no-op when they are
      already shut). */
-  const RAIL_PANEL_SETTERS = [setShapesOpenRaw, setTextOpenRaw, setNumbersOpenRaw, setMapsOpenRaw, setImagesOpenRaw, setTemplatesOpenRaw, setChartsOpenRaw, setConfettiOpenRaw, setBgOpenRaw, setIconsOpenRaw, setUiOpenRaw, setSvgIconsOpenRaw];
+  const RAIL_PANEL_SETTERS = [setShapesOpenRaw, setTextOpenRaw, setNumbersOpenRaw, setMapsOpenRaw, setImagesOpenRaw, setTemplatesOpenRaw, setChartsOpenRaw, setConfettiOpenRaw, setBgOpenRaw, setUiOpenRaw, setSvgIconsOpenRaw];
   const openOnly = (setter) => (v) => {
     RAIL_PANEL_SETTERS.forEach((s) => { if (s !== setter) s(false); });
     setter(v);
@@ -381,7 +379,6 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   const setChartsOpen = openOnly(setChartsOpenRaw);
   const setConfettiOpen = openOnly(setConfettiOpenRaw);
   const setBgOpen = openOnly(setBgOpenRaw);
-  const setIconsOpen = openOnly(setIconsOpenRaw);
   const setUiOpen = openOnly(setUiOpenRaw);
   const setSvgIconsOpen = openOnly(setSvgIconsOpenRaw);
   const [uiQ, setUiQ] = useState("");
@@ -883,25 +880,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     o.props.outT = ctxDur;
     setLayers((ls) => [...ls, o]);
     setSelIds([o.id]);
-    setIconsOpen(false);
     setUiOpen(false);
-  };
-  /* insert a Fluent emoji as a plain IMAGE object at the standard insert size:
-     it flows through onResizeDown (the 8-way w/h grips) and resizes exactly
-     like any image — no clip wrapper (a clip only gets corner clip-scale
-     grips on a breathing per-frame bbox, which is why emoji "couldn't be
-     resized"). The engine's looping emoji clip (emoji.build) stays for the
-     panel thumbs + back-compat of old projects. Closes the rail panel. */
-  const insertEmoji = (emoji) => {
-    const o = makeObject("image", {
-      name: emoji.name,
-      props: { src: emoji.file, w: DEFAULT_INSERT_SIZE, h: DEFAULT_INSERT_SIZE },
-    });
-    o.props.x = stage.w / 2; o.props.y = stage.h / 2;
-    o.props.outT = ctxDur;
-    setLayers((ls) => [...ls, o]);
-    setSelIds([o.id]);
-    setIconsOpen(false);
   };
   /* insert a sanitized SVG icon (admin library) as a plain IMAGE layer: the
      src is an inline-SVG DATA-URI (never a blob URL — blob SVGs taint the
@@ -2044,15 +2023,12 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
           confettiOpen={confettiOpen} setConfettiOpen={setConfettiOpen}
           numbersOpen={numbersOpen} setNumbersOpen={setNumbersOpen}
           bgOpen={bgOpen} setBgOpen={setBgOpen}
-          iconsOpen={iconsOpen} setIconsOpen={setIconsOpen} uiOpen={uiOpen} setUiOpen={setUiOpen}
+          uiOpen={uiOpen} setUiOpen={setUiOpen}
           svgIconsOpen={svgIconsOpen} setSvgIconsOpen={setSvgIconsOpen}
           audioTrack={audioTrack} addObject={addObject} />
 
         {/* templates drawer: search + categories, inserts as one editable clip at the playhead */}
         {templatesOpen && <TemplatesPanel tplQ={tplQ} setTplQ={setTplQ} tplCat={tplCat} setTplCat={setTplCat} insertTemplateClip={insertTemplateClip} />}
-
-        {/* emoji drawer: featured teaser + → arrow, full library inline (no modal); inserts as a plain 100×100 image */}
-        {iconsOpen && <EmojiPanel insertEmoji={insertEmoji} />}
 
         {/* SVG icons drawer: the admin-managed library (sanitized server-side); inserts as a plain image */}
         {svgIconsOpen && <IconsPanel insertSvgIcon={insertSvgIcon} />}
