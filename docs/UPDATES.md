@@ -329,6 +329,62 @@ sharing a lane. The right synthesis:
 
 ---
 
+## 💡 Custom SVG animated icons (replace the Fluent emoji)
+
+**The ask:** the Microsoft Fluent (3D PNG) emoji keep causing issues — **retire
+them** and instead ship **our own animated SVG icons**, which the **admin adds
+manually from the backend**.
+
+**Why this is the right call:** SVG is *vector* — it resizes crisply through the
+normal 8-way grips with none of the raster/bbox trouble the PNG emoji had, it
+recolors, and it's tiny. This fixes the emoji pain at the root rather than
+patching it.
+
+### Two things to nail (both matter)
+1. **How "animated" SVG stays export-deterministic.** An animated SVG drawn via
+   `<img>` will NOT animate when rasterized to canvas (export) — so pick one:
+   - **A (recommended): static SVG layer + the engine motion grammar.** Store a
+     clean static SVG; animate it with the same deterministic in→hold→out grammar
+     the kits/emoji use (pop/bob/spin/pulse…). Fully deterministic, exports clean,
+     and the admin only has to supply artwork, not animation.
+   - **B: self-animated SVG via inline `setCurrentTime(t)`.** Render the SVG
+     inline (not `<img>`) and drive its SMIL/CSS timeline with
+     `svg.setCurrentTime(localTime)` — deterministic because it's a pure function
+     of `t`. More power (the admin authors the motion) but the export path must
+     seek every frame; verify against the frame-math/roundtrip checks.
+   - **C: Lottie** — richest, but a new renderer dependency; defer.
+   Default to **A** unless the admin wants to hand-author motion (then B).
+2. **SVG is untrusted input → sanitize hard.** Uploaded SVGs can carry
+   `<script>`, event handlers, `foreignObject`, and external refs (XSS/SSRF).
+   Sanitize on upload (strip scripts/handlers/external refs, allowlist tags/attrs
+   — DOMPurify SVG profile or equivalent). Never inline raw admin SVG without it.
+
+### Shape of it
+- **Retire the Fluent emoji from the picker** (like the earlier icon/backdrop
+  retirements): the Emoji rail becomes an **Icons rail** backed by the SVG
+  library. Keep old projects rendering — emoji already insert as plain `image`
+  objects, so existing docs are unaffected; the PNG assets can stay for
+  back-compat or be dropped once no project references them.
+- **Backend-managed icon library (admin).** Server store for SVG icons —
+  `icons` table (or files) with `{ id, name, category, tags, svg (sanitized),
+  animation: "engine"|"self", motion?, updated_at }`. Admin CRUD (role-gated,
+  like Editable Templates). This is the **same admin-content pattern** as
+  Editable Templates + the Uploads hub — build them on one shared foundation.
+- **Icons panel** lists the library (search + categories), thumbnails via the
+  usual SSR hold-frame, click inserts an SVG-icon object at `DEFAULT_INSERT_SIZE`.
+- **New object/layer type** (or reuse `image` with an `svg` payload): a vector
+  layer `StageObject` renders (inline SVG), sized by `w/h`, recolorable.
+
+### Risks / notes
+- **Determinism + export** — the whole point of picking approach A/B above; must
+  pass the export roundtrip checks.
+- **Security** — SVG sanitization is non-negotiable (see above).
+- **Back-compat** — don't break old projects; emoji-image layers keep rendering.
+- **Guard suite** — a `check-svg-icons.mjs`: sanitizer strips scripts, icon
+  renders non-empty + NaN-free, seamless loop (approach A), deterministic at `t`.
+
+---
+
 ## Backlog (smaller ideas)
 
 - **Always-visible scrub ruler polish** — the pinned overlay ships; revisit if any

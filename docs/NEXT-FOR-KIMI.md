@@ -104,8 +104,28 @@ optionally add a "select a shape to morph" hint. Likely **no code change**.
 3. Update the relevant guard + AGENTS.md contract in the SAME commit.
 4. One small, focused commit per item.
 
-## Feature backlog (separate track, not blocking the fixes)
-See [UPDATES.md](UPDATES.md): **AI Asset Studio** (Route A, reference-driven,
-`/studio` page, Kimi 3 API, save to Templates), **Editable Templates** (admin
-global + user personal overlays), **Uploads hub** (unified images/audio/video,
-project-scoped + cross-project search). Each is speced there with phases.
+## ✅ Fixes 1–6 — DONE
+All six near-term fixes are implemented + committed (remove Animate nudge; emoji
+insert-as-image + `DEFAULT_INSERT_SIZE`; pin duration-extend; inline group/ungroup
+glyphs + depth crumb; morph verify-only; real CapCut tracks). Next work is the
+feature backlog below.
+
+## Feature backlog (build on ONE shared admin-content foundation)
+These four are the same shape — admin/user-managed content with sanitize +
+role-gating + a merged panel — so design the store/routes once and reuse:
+
+1. **Custom SVG animated icons — replace the Fluent emoji** (see
+   [UPDATES.md](UPDATES.md)). Retire the Fluent PNG emoji from the picker; admin
+   adds our own **SVG** icons from the backend. Two must-dos: keep it
+   export-deterministic (default = static SVG + engine motion grammar; option =
+   inline SVG driven by `setCurrentTime(t)`), and **sanitize uploaded SVG hard**
+   (strip scripts/handlers/external refs — SVG is an XSS vector). New vector
+   layer type (or `image` + `svg` payload) resizes via the normal grips. Guard:
+   `check-svg-icons.mjs`.
+2. **Editable Templates** — admin global + user personal overlays on `templates.js`.
+3. **Uploads hub** — unified images/audio/video, project-scoped + cross-project search.
+4. **AI Asset Studio** — Route A, reference-driven, `/studio` page, Kimi 3 API,
+   save to Templates.
+
+Each is speced with phases in [UPDATES.md](UPDATES.md). Icons (#1) is the user's
+current priority.
