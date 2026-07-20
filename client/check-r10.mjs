@@ -15,22 +15,21 @@
  *        still lists every layer (eye toggle un-hides).
  *     5. No hide/lock controls in the Inspector (passive status text only);
  *        the timeline lane keeps the eye + padlock toggles.
- *     6. Disarm-nudge: .gd-disarm-nudge banner (+ gdNudgeIn animation), raise
- *        sites on disarmed move/rotate/clip-scale, re-arm + dismiss paths,
- *        re-arm settles the nudge, arm persists in localStorage.
- *     7. Old top chrome gone: no 44px TopBar / Editor shell header; ONE slim
+ *     6. Old top chrome gone: no 44px TopBar / Editor shell header; ONE slim
  *        40px .gd-topbar with BrandMark/"Zwoosh" + BrandSwitcher + avatar
  *        menu (Dashboard/Profile/Settings/Logout — real logout via the shell).
- *     8. The "drag bar = move · edges = trim · right-click = easing" hint is
+ *     7. The "drag bar = move · edges = trim · right-click = easing" hint is
  *        gone from the timeline.
- *     9. The "Main" crumb lives in the timeline transport bar beside the
+ *     8. The "Main" crumb lives in the timeline transport bar beside the
  *        Animate toggle (root marker + in-clip link), not in the top bar.
- *    10. MapsPanel is a standard LEFT .gd-panel drawer (left:84 · width 268 ·
+ *     9. MapsPanel is a standard LEFT .gd-panel drawer (left:84 · width 268 ·
  *        zIndex 30) + the .gd-main > .gd-panel width-normalization CSS.
- *    11. Text effects are gone from the TextPanel (the 4 style presets stay);
+ *    10. Text effects are gone from the TextPanel (the 2 style presets stay);
  *        textFx chips stay available in the Inspector's Text card.
- *    12. The country ChipRow is gone from the Inspector's map card (picking
+ *    11. The country ChipRow is gone from the Inspector's map card (picking
  *        happens in the Maps panel at insert); trace style/timing stay.
+ *    (the disarm-nudge banner from the original R10 wave was REMOVED —
+ *     users toggle Animate themselves; the arm toggle + its persistence stay)
  *
  *   PART B — full-stack browser run (ONE server boot: real Express serving
  *   the BUILT client + headless Chromium):
@@ -43,11 +42,9 @@
  *     3. HIDE INVISIBILITY: the eye toggle removes the layer's canvas node
  *        entirely (no ghost opacity) while the lane stays listed.
  *     4. TEXT LIVE EDIT: typing in the Inspector text box updates the canvas.
- *     5. DISARM-NUDGE: disarm Animate → canvas drag writes no ◆ and raises
- *        the banner → one click re-arms (banner settles, pref persisted).
- *     6. AUDIO PROBE: hidden audio input carries the exact accept attr; an
+ *     5. AUDIO PROBE: hidden audio input carries the exact accept attr; an
  *        empty-lane click opens no panel; the rail button does.
- *     7. ZERO page errors / app console errors across the whole run.
+ *     6. ZERO page errors / app console errors across the whole run.
  *
  * Run:  npm run build && node check-r10.mjs        (from client/)
  * Requires: client deps + server deps + a Chromium (Playwright's or
@@ -202,22 +199,6 @@ console.log("\n#A5 Inspector has no hide/lock controls; timeline lane toggles ex
   check("GDM no longer passes toggleHide/toggleLock into the Inspector", !ins.includes("toggleHide") && !ins.includes("toggleLock"));
   check("timeline lane eye toggle: gd-tl-hide → toggleHide(o.id) with aria-pressed", TL.includes('className="gd-tl-hide"') && TL.includes("toggleHide(o.id)") && /gd-tl-hide[\s\S]{0,220}aria-pressed/.test(TL));
   check("timeline lane padlock toggle: gd-tl-lock → toggleLock(o.id) with aria-pressed", TL.includes('className="gd-tl-lock"') && TL.includes("toggleLock(o.id)") && /gd-tl-lock[\s\S]{0,220}aria-pressed/.test(TL));
-}
-
-/* ---------- 6. Disarm-nudge banner ---------- */
-console.log("\n#A6 disarm-nudge banner classes + re-arm paths");
-{
-  check("the .gd-disarm-nudge class + gdNudgeIn animation are defined", GDM.includes(".gd-disarm-nudge{animation:gdNudgeIn") && GDM.includes("@keyframes gdNudgeIn"));
-  check("the banner renders only while disarmed (armNudge && !animateArm), role=status",
-    GDM.includes("{armNudge && !animateArm && (") && GDM.includes('className="gd-disarm-nudge" role="status"'));
-  check("the banner explains the miss (Animate is Off · no ◆ written)", GDM.includes("Animate is Off") && GDM.includes("no ◆ keyframes were written"));
-  check("the gd-nudge-rearm button re-arms via setAnimateArmPersist(true)", /gd-nudge-rearm"[\s\S]{0,160}setAnimateArmPersist\(true\)/.test(GDM));
-  check("the gd-nudge-dismiss button dismisses via setArmNudge(false)", /gd-nudge-dismiss"[\s\S]{0,160}setArmNudge\(false\)/.test(GDM));
-  const arm = fnBody(GDM, "setAnimateArmPersist");
-  check("re-arming (any path) settles the nudge", arm.includes("if (v) setArmNudge(false)"));
-  check("the arm persists across sessions (localStorage ARM_KEY)", arm.includes('localStorage.setItem(ARM_KEY, v ? "1" : "0")'));
-  const raises = GDM.match(/if \(!autokey\) setArmNudge\(true\)/g) || [];
-  check("THREE raise sites: disarmed move + rotate + clip-scale all nudge", raises.length === 3, `${raises.length} sites`);
 }
 
 /* ---------- 7. Slim 40px top bar replaces the 44px chrome ---------- */
@@ -590,24 +571,6 @@ async function main() {
     await page.locator('button[aria-label="Show Normal text"]').click();
     await page.waitForTimeout(250);
     check("un-hide brings the canvas node back", (await stageText()).includes("R10 Livetype"));
-
-    /* ==================== B9. disarm-nudge ================================ */
-    console.log("\n#B9 disarm-nudge — banner raises on a disarmed canvas edit, re-arm settles it");
-    const dia0 = await diaCount();
-    await page.locator("button.gd-animate-toggle").click();
-    await page.waitForTimeout(180);
-    check("disarm flips the toggle OFF", (await page.locator("button.gd-animate-toggle").getAttribute("aria-pressed")) === "false");
-    const r9 = await stageRect();
-    await drag(toScreen(r9, 150, 120), 40, 30); /* the clip's full-canvas body is topmost */
-    check("DISARMED canvas drag writes NO x/y ◆", (await diaCount()) === dia0, `${dia0} → ${await diaCount()}`);
-    check("the disarm-nudge banner appears (Animate is Off + re-arm button)",
-      (await page.locator(".gd-disarm-nudge").count()) === 1 && (await page.locator(".gd-disarm-nudge .gd-nudge-rearm").count()) === 1);
-    check("the banner explains the miss", (await page.locator(".gd-disarm-nudge").textContent()).includes("Animate is Off"));
-    await page.locator(".gd-nudge-rearm").click();
-    await page.waitForTimeout(200);
-    check("clicking re-arm re-arms the toggle + settles the banner",
-      (await page.locator("button.gd-animate-toggle").getAttribute("aria-pressed")) === "true" && (await page.locator(".gd-disarm-nudge").count()) === 0);
-    check("the re-arm persists (gd:animateArm=1)", (await page.evaluate(() => localStorage.getItem("gd:animateArm"))) === "1");
 
     /* ==================== B10. audio probe ================================ */
     console.log("\n#B10 audio — accept attr + empty lane never auto-opens the panel");

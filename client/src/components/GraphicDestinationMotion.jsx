@@ -330,14 +330,8 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
      edit (R8 behavior), disarmed = patch the base layer without keyframes. */
   const [animateArm, setAnimateArm] = useState(readArm);
   const autokey = animateArm;
-  /* R10 disarm-nudge: the arm PERSISTS across sessions (localStorage), so one
-     forgotten disarm click used to make every later canvas transform silently
-     skip keyframes. Now the first move/rotate/clip-scale that lands while
-     disarmed raises a banner with a one-click re-arm. */
-  const [armNudge, setArmNudge] = useState(false);
   const setAnimateArmPersist = useCallback((v) => {
     setAnimateArm(v);
-    if (v) setArmNudge(false); /* re-arming (any path) settles the nudge */
     try { localStorage.setItem(ARM_KEY, v ? "1" : "0"); } catch { /* storage unavailable — the arm just won't persist */ }
   }, []);
   /* R9w3 default stage background: a brand-new project starts on the user's
@@ -1369,7 +1363,6 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
          base x/y only (R9w1). Path-dragged members shift their path points
          instead, position comes from the path. */
       d.members.forEach((m) => { const lv = d.live[m.id]; if (lv && !m.hasPath) { canvasEditProp(m.id, "x", lv.x); canvasEditProp(m.id, "y", lv.y); } });
-      if (!autokey) setArmNudge(true); /* R10: a move landed with no ◆ written — nudge the re-arm */
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -1588,7 +1581,6 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     const prevCursor = document.body.style.cursor;
     document.body.style.cursor = "grabbing";
     const move = (ev) => {
-      if (!autokey) setArmNudge(true); /* R10: rotate landed disarmed — no ◆ is being written, nudge the re-arm */
       const a = Math.atan2(ev.clientY - cy, ev.clientX - cx);
       let nr = Math.round(r0 + ((a - a0) * 180) / Math.PI);
       if (ev.shiftKey) nr = Math.round(nr / 15) * 15;
@@ -1641,7 +1633,6 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     const prevCursor = document.body.style.cursor;
     if (cursor) document.body.style.cursor = cursor;
     const move = (ev) => {
-      if (!autokey) setArmNudge(true); /* R10: clip-scale landed disarmed — no ◆ is being written, nudge the re-arm */
       const dx = (ev.clientX - sx) / (stageScale * cs), dy = (ev.clientY - sy) / (stageScale * cs);
       const ns = Math.max(0.05, Math.min(10, Math.round(s0 * (Math.hypot(ax + dx, ay + dy) / r0) * 100) / 100));
       if (autokey) setKeyframe(obj.id, "scale", timeRef.current, ns); /* R8w3: always ◆ at the playhead (fresh props start their track) */
@@ -2002,8 +1993,6 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
         /* R10: ALL left-rail drawers share one width (inline panel styles vary,
            this wins) so the rail reads as one consistent column */
         .gd-main > .gd-panel{width:268px !important}
-        @keyframes gdNudgeIn{from{opacity:0;transform:translate(-50%,6px)}to{opacity:1;transform:translate(-50%,0)}}
-        .gd-disarm-nudge{animation:gdNudgeIn 180ms ease-out}
       `}</style>
       <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onPickImage} />
       <input ref={assetFileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" style={{ display: "none" }} onChange={onPickAsset} />
@@ -2099,24 +2088,6 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
           removeKeyframe={removeKeyframe} setKeyframe={setKeyframe} setSelKf={setSelKf} flowText={flowText} brand={brand} SW={SW}
           addPathTo={addPathTo} patchPath={patchPath} animateAlongPath={animateAlongPath} kfNav={kfNav} selectedKfData={selectedKfData}
           setSegmentEase={setSegmentEase} applyPreset={applyPreset} fileRef={fileRef} applyCameraAction={applyCameraAction} />
-
-        {/* R10 disarm-nudge: the Animate arm persists across sessions — one
-            forgotten disarm click used to make every later canvas transform
-            silently skip keyframes. The first move/rotate/clip-scale that
-            lands disarmed raises this banner; one click re-arms. */}
-        {armNudge && !animateArm && (
-          <div className="gd-disarm-nudge" role="status"
-            style={{ position: "absolute", left: "50%", bottom: 14, transform: "translateX(-50%)", zIndex: 80, display: "flex", alignItems: "center", gap: 10, background: C.bg2, border: `1px solid ${C.amber}`, borderRadius: 8, padding: "8px 12px", boxShadow: "0 12px 32px rgba(0,0,0,.55)", maxWidth: "min(620px, 86%)" }}>
-            <span style={{ color: C.dim, fontSize: 12, lineHeight: 1.5 }}>
-              <b style={{ color: C.amber }}>Animate is Off</b> — that canvas edit changed the base layer only; no ◆ keyframes were written.
-            </span>
-            <button className="gd-btn-accent gd-nudge-rearm" onClick={() => setAnimateArmPersist(true)}
-              title="Re-arm Animate — canvas edits record ◆ keyframes again (the arm persists across sessions)"
-              style={{ background: C.amber, color: "#1A1405", border: "none", borderRadius: 6, padding: "5px 10px", cursor: "pointer", fontWeight: 800, fontSize: 12, fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0 }}>◆ Re-arm Animate</button>
-            <button className="gd-btn gd-nudge-dismiss" aria-label="Dismiss" onClick={() => setArmNudge(false)}
-              style={{ background: "transparent", border: "none", color: C.faint, cursor: "pointer", fontSize: 13, padding: "2px 4px", lineHeight: 1, flexShrink: 0 }}>✕</button>
-          </div>
-        )}
       </div>
 
       {/* ============ TIMELINE ============ */}
