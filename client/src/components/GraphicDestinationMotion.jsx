@@ -856,6 +856,24 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     setSelIds([clip.id]);
     setTemplatesOpen(false);
   };
+  /* save-as-template: the CURRENT project becomes a store row — admin writes
+     to the GLOBAL library (visible to everyone; a slug matching a built-in id
+     overrides it), everyone else to their personal one. projectJson() is the
+     same serialization the cloud save uses, so a saved template round-trips
+     exactly. tplStoreKey bumps the panel into refetching. */
+  const [tplStoreKey, setTplStoreKey] = useState(0);
+  const saveCurrentAsTemplate = async (name) => {
+    const scope = user?.role === "admin" ? "global" : "user";
+    const r = await fetch("/api/templates", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope, name, category: "Custom", data: JSON.parse(projectJson()) }),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+    setTplStoreKey((k) => k + 1);
+    return body;
+  };
   /* insert an icon / UI-element kit as ONE LOCKED kit object (R7a): a single
      movable/resizable/rotatable layer — NO editable children, no clip to
      enter. The document stores only { kit, variant, color, accent } + the
@@ -2032,7 +2050,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
           audioTrack={audioTrack} addObject={addObject} />
 
         {/* templates drawer: search + categories, inserts as one editable clip at the playhead */}
-        {templatesOpen && <TemplatesPanel tplQ={tplQ} setTplQ={setTplQ} tplCat={tplCat} setTplCat={setTplCat} insertTemplateClip={insertTemplateClip} />}
+        {templatesOpen && <TemplatesPanel tplQ={tplQ} setTplQ={setTplQ} tplCat={tplCat} setTplCat={setTplCat} insertTemplateClip={insertTemplateClip} storeReloadKey={tplStoreKey} saveCurrentAsTemplate={saveCurrentAsTemplate} isAdmin={user?.role === "admin"} />}
 
         {/* SVG icons drawer: the admin-managed library (sanitized server-side); inserts as a plain image */}
         {svgIconsOpen && <IconsPanel insertSvgIcon={insertSvgIcon} />}

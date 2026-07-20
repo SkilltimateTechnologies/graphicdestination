@@ -341,12 +341,13 @@ async function main() {
     }
     check("all 8 widgets inserted → 8 lanes", (await laneCount()) === 8, `${await laneCount()} lanes: ${(await laneNames()).join(" · ")}`);
 
+    /* minted admin session for the admin-gated store routes (the route's
+       requireAdmin reads the role off the session, no DB user needed) */
+    const adminCookie = `gd_session=${jwt.sign({ sub: 1, username: "admin", role: "admin" }, "r8w4-smoke-secret", { expiresIn: "1h" })}`;
+
     /* ==================== 8b. SVG icon library — admin store → panel → insert ==== */
     console.log("\n#8b svg icons — admin-seeded icon inserts from the Icons panel (8-way resize)");
     {
-      /* seed one icon through the ADMIN route (minted admin JWT — the route's
-         requireAdmin reads the role off the session, no DB user needed) */
-      const adminCookie = `gd_session=${jwt.sign({ sub: 1, username: "admin", role: "admin" }, "r8w4-smoke-secret", { expiresIn: "1h" })}`;
       const ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 16 0 8 8 0 0 0-16 0" fill="none" stroke="#F5A524" stroke-width="2"/></svg>';
       const iconName = `Pulse ${Date.now().toString(36)}`; /* unique per run — the dev DB keeps earlier seeds */
       const seed = await apiFetch("/api/svg-icons", { method: "POST", body: JSON.stringify({ name: iconName, category: "Indicators", tags: ["pulse"], svg: ICON_SVG }) }, adminCookie);
@@ -371,13 +372,61 @@ async function main() {
       check("svg icon canvas RESIZE wrote a ◆ diamond (scale track)", kf2 > kf, `${kf} → ${kf2}`);
     }
 
+    /* ==================== 8c. editable templates — global override + insert ==== */
+    console.log("\n#8c editable templates — admin-seeded global rows merge into the panel");
+    {
+      const TPL_DATA = { app: "graphic-destination-motion", v: 5, stage: { w: 1280, h: 720, dur: 5000, bg: "#101218" }, objects: [{ id: "a", type: "shape", name: "Blob", tracks: {}, locked: false, hidden: false, props: { x: 640, y: 360, w: 140, h: 140, inT: 0, outT: null, scale: 1, rotation: 0, opacity: 1, shape: "ellipse", fill: "#FFB224" } }] };
+      const seedCustom = await apiFetch("/api/templates", { method: "POST", body: JSON.stringify({ scope: "global", name: `Agency Card ${Date.now().toString(36)}`, category: "Custom", data: TPL_DATA }) }, adminCookie);
+      check("admin seeds a global template → 201", seedCustom.status === 201, `got ${seedCustom.status}`);
+      const customName = (await seedCustom.json()).name;
+      const seedOverride = await apiFetch("/api/templates", { method: "POST", body: JSON.stringify({ scope: "global", slug: "lower-third", name: "Lower Third (agency cut)", category: "Business", data: TPL_DATA }) }, adminCookie);
+      check("admin seeds a built-in OVERRIDE (slug lower-third) → 201/200", [200, 201].includes(seedOverride.status), `got ${seedOverride.status}`);
+      await page.locator('button:has(span:text-is("Templates"))').first().click();
+      await page.waitForTimeout(700); /* panel fetches /api/templates + merges */
+      check("the panel shows the Global badge on store-backed cards", (await page.locator('[data-tpl-badge="Global"]').count()) >= 2, `${await page.locator('[data-tpl-badge="Global"]').count()} badges`);
+      check("the built-in lower-third card now shows the OVERRIDE name", await page.evaluate(() => document.body.textContent.includes("Lower Third (agency cut)")));
+      await page.locator('.gd-panel input[placeholder="Search templates…"]').fill(customName);
+      await page.waitForTimeout(300);
+      const before = await laneCount();
+      await page.locator('.gd-panel button', { hasText: customName }).first().click();
+      await page.waitForTimeout(350);
+      check(`insert global template → new lane (${before} → ${before + 1})`, (await laneCount()) === before + 1, (await laneNames()).join(" · "));
+      check("the inserted lane is the agency template (a clip)", (await laneNames()).some((n) => n.includes("Agency Card")), (await laneNames()).join(" · "));
+    }
+
+    /* ==================== 8d. save-as-template flow (personal scope) ====== */
+    console.log("\n#8d save-as-template — the current project saves to the personal library");
+    {
+      /* the insert in 8c closed the panel — reopen it */
+      await page.locator('button:has(span:text-is("Templates"))').first().click();
+      await page.waitForTimeout(600);
+      await page.locator('.gd-panel input[placeholder="Search templates…"]').fill("");
+      await page.waitForTimeout(200);
+      const tplName = `My Sweep ${Date.now().toString(36)}`;
+      await page.locator('.gd-panel input[placeholder="Template name…"]').fill(tplName);
+      await page.locator("button[data-save-template]").click();
+      await page.waitForTimeout(700);
+      check("save-as-template confirms in the panel", (await page.locator("[data-save-template-msg]").count()) === 1 && (await page.locator("[data-save-template-msg]").textContent()).includes("personal"));
+      check("the new personal card shows the Mine badge", (await page.locator('[data-tpl-badge="Mine"]').count()) >= 1);
+      check("the Mine card carries the saved name", await page.evaluate((n) => document.body.textContent.includes(n), tplName));
+      const stored = await (await apiFetch("/api/templates", {}, cookieHdr)).json();
+      check("server-side: the row landed in the user's personal scope", stored.some((t) => t.name === tplName && t.scope === "user") , stored.map((t) => `${t.scope}:${t.name}`).join(" · "));
+      check("the stored template round-trips a real project (objects + stage)", (() => { const t = stored.find((x) => x.name === tplName); return !!t && Array.isArray(t.data.objects) && t.data.objects.length >= 5 && !!t.data.stage; })());
+    }
+
     /* ==================== 9. save control → server persistence ============ */
     console.log("\n#9 timeline save control → server persistence");
     const saveBtn = page.locator("button.gd-tl-save");
-    check("save control is dirty after all the edits", (await saveBtn.getAttribute("data-state")) === "dirty", await saveBtn.textContent());
-    await saveBtn.click();
-    await page.waitForTimeout(900);
-    check("save control settles to saved", (await saveBtn.getAttribute("data-state")) === "saved", await saveBtn.textContent());
+    /* the editor ALSO autosaves on a 2s debounce — after the 8b–8d inserts the
+       control may legitimately read "saved" already, so the contract is the
+       tracked state (dirty ⇄ saved), then the persistence below */
+    const state0 = await saveBtn.getAttribute("data-state");
+    check("the save control tracks the edit state (dirty, or already autosaved)", ["dirty", "saved"].includes(state0), state0);
+    if (state0 === "dirty") {
+      await saveBtn.click();
+      await page.waitForTimeout(900);
+      check("save control settles to saved", (await saveBtn.getAttribute("data-state")) === "saved", await saveBtn.textContent());
+    }
     const gr = await apiFetch(`/api/projects/${projId}`, {}, cookieHdr);
     const saved = gr.ok ? (await gr.json()).data : null;
     const types = saved ? saved.objects.map((o) => o.type) : [];
