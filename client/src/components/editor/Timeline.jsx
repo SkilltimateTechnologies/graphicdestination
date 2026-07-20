@@ -419,7 +419,7 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
                     : C.dim;
                   return (
                     <div key={o.id}
-                      onClick={(e) => { if (e.ctrlKey || e.metaKey) setSelIds(isSel ? selIds.filter((i) => i !== o.id) : [...selIds, o.id]); else setSelIds([o.id]); setSelKf(null); }}
+                      onClick={(e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) setSelIds(isSel ? selIds.filter((i) => i !== o.id) : [...selIds, o.id]); else setSelIds([o.id]); setSelKf(null); }}
                       onDoubleClick={() => o.type === "clip" && enterClip(o.id)}
                       onContextMenu={(e) => onLayerContext(e, o)}
                       onMouseEnter={() => setHoverLane(o.id)}

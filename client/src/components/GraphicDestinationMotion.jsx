@@ -1001,8 +1001,13 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     setSelGap(null);
   }, [selGap, ctxLayers, ctxDur, setLayers]);
 
+  /* groups are FOLDERS, nested up to 3 levels (folder 1 › folder 2 › folder 3):
+     path.length is how many folders deep we already are, so grouping while
+     already 3 deep would open a 4th level — block it. */
+  const GROUP_MAX_DEPTH = 3;
+  const canGroup = path.length < GROUP_MAX_DEPTH;
   const groupSelection = () => {
-    if (!selIds.length) return;
+    if (!selIds.length || !canGroup) return;
     const members = ctxLayers.filter((o) => selIds.includes(o.id));
     if (!members.length) return;
     const clip = makeObject("clip", { name: "Clip " + (_uid % 100), children: members, props: { start: 0, dur: ctxDur, x: stage.w / 2, y: stage.h / 2 } });
@@ -1292,7 +1297,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     e.stopPropagation();
     setSelKf(null); setShapesOpen(false); setMenu(null);
     let ids;
-    if (e.ctrlKey || e.metaKey) { ids = selIds.includes(obj.id) ? selIds.filter((i) => i !== obj.id) : [...selIds, obj.id]; setSelIds(ids); if (!ids.includes(obj.id)) return; }
+    if (e.ctrlKey || e.metaKey || e.shiftKey) { ids = selIds.includes(obj.id) ? selIds.filter((i) => i !== obj.id) : [...selIds, obj.id]; setSelIds(ids); if (!ids.includes(obj.id)) return; }
     else if (selIds.includes(obj.id)) ids = selIds;
     else { ids = [obj.id]; setSelIds(ids); }
     const t = timeRef.current;
