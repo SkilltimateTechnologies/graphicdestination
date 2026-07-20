@@ -101,5 +101,10 @@ export async function initSchema() {
   if (!cols.rows.some((c) => c.name === "share_token")) {
     await db.execute(`ALTER TABLE projects ADD COLUMN share_token TEXT`);
   }
+  /* Uploads hub: optional project scope on assets (NULL = unscoped). */
+  const aCols = await db.execute(`PRAGMA table_info(assets)`);
+  if (!aCols.rows.some((c) => c.name === "project_id")) {
+    await db.execute(`ALTER TABLE assets ADD COLUMN project_id INTEGER REFERENCES projects(id)`);
+  }
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_projects_share_token ON projects(share_token)`);
 }

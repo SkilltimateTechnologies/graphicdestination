@@ -185,9 +185,11 @@ try {
   // - 4 MB image is still rejected with the image message
   // - 5 MB+1 audio is rejected with the audio message. The ~7 MB JSON body
   //   also proves the raised 12mb express.json limit lets it reach the handler.
+  // (hardening: the BYTES are now magic-byte verified, so the 4 MB payload
+  // carries a real ftyp header instead of dummy fill.)
   const { status: suCStatus, auth: authC } = await signup("audio_carol");
   check("f1 signup C returns 201", suCStatus === 201, `got ${suCStatus}`);
-  const audio4mb = Buffer.alloc(4 * 1024 * 1024, 3).toString("base64");
+  const audio4mb = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypM4A "), Buffer.alloc(4 * 1024 * 1024 - 12, 3)]).toString("base64");
   const up4mb = await post("/api/assets", { name: "long", mime: "audio/mp4", dataUrl: `data:audio/mp4;base64,${audio4mb}` }, authC);
   const up4mbBody = await up4mb.json();
   check("f2 4MB audio (over the 3MB image cap) returns 201", up4mb.status === 201, `got ${up4mb.status}: ${JSON.stringify(up4mbBody)}`);

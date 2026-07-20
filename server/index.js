@@ -11,6 +11,7 @@ import { db, initSchema, usingTurso } from "./db.js";
 import { hashPassword, verifyPassword, signSession, requireAuth, COOKIE_NAME, COOKIE_OPTS } from "./auth.js";
 import { sanitizeSvg } from "./svgSanitize.js";
 import { validateTemplateData } from "./templateValidate.js";
+import { sniffAssetMime, mimeFamily } from "./assetSniff.js";
 import { authLimiter, shareLimiter, createRateLimiter } from "./ratelimit.js";
 import { logger } from "./logger.js";
 import { initErrorTracking, captureError } from "./errorTracking.js";
@@ -332,6 +333,7 @@ app.get("/api/share/:token/assets/:assetId", shareLimiter, async (req, res) => {
   if (!a) return res.status(404).json({ error: "Not found" });
   const buf = Buffer.from(a.data, "base64");
   res.setHeader("Content-Type", a.mime);
+  res.setHeader("X-Content-Type-Options", "nosniff"); /* shared bytes can never be re-interpreted as active content */
   res.setHeader("Content-Length", buf.length);
   res.setHeader("Cache-Control", "private, max-age=3600");
   res.send(buf);
@@ -363,12 +365,13 @@ const assetMeta = (row) => ({
   mime: row.mime,
   kind: assetKind(row.mime),
   size: row.size,
+  projectId: row.project_id ?? null,
   url: `/api/assets/${row.id}`,
   createdAt: row.created_at,
 });
 
 app.post("/api/assets", requireAuth, async (req, res) => {
-  const { name, mime, dataUrl } = req.body || {};
+  const { name, mime, dataUrl, projectId } = req.body || {};
   if (typeof name !== "string" || name.length < 1 || name.length > 120) {
     return res.status(400).json({ error: "name must be 1-120 characters" });
   }
@@ -388,23 +391,40 @@ app.post("/api/assets", requireAuth, async (req, res) => {
   if (buf.length > (kind === "audio" ? MAX_AUDIO_BYTES : MAX_IMAGE_BYTES)) {
     return res.status(413).json({ error: kind === "audio" ? "Audio too large (max 5 MB)" : "Image too large (max 3 MB)" });
   }
+  /* magic-byte verification (assetSniff.js): the declared mime is only a
+     hint — the BYTES must carry a known signature of the same family; the
+     stored mime is the sniffed canonical one */
+  const sniffed = sniffAssetMime(buf);
+  if (!sniffed) {
+    return res.status(415).json({ error: "Could not verify the file type from its bytes (unsupported or corrupt content)" });
+  }
+  if (mimeFamily(sniffed) !== kind) {
+    return res.status(415).json({ error: `Content does not match the declared type (${kind} declared, ${mimeFamily(sniffed)} detected)` });
+  }
+  /* optional project scope: the project must belong to this user */
+  let projectRef = null;
+  if (projectId != null) {
+    const own = await db.execute({ sql: "SELECT id FROM projects WHERE id = ? AND owner_id = ?", args: [projectId, req.user.sub] });
+    if (!own.rows.length) return res.status(403).json({ error: "Not your project" });
+    projectRef = own.rows[0].id;
+  }
   const count = await db.execute({ sql: "SELECT COUNT(*) AS n FROM assets WHERE owner_id = ?", args: [req.user.sub] });
   if (Number(count.rows[0].n) >= ASSET_QUOTA) {
     return res.status(409).json({ error: `Asset limit reached (${ASSET_QUOTA})` });
   }
   const result = await db.execute({
-    sql: "INSERT INTO assets (owner_id, name, mime, data, size) VALUES (?, ?, ?, ?, ?)",
-    args: [req.user.sub, name, mime, m[2], buf.length],
+    sql: "INSERT INTO assets (owner_id, name, mime, data, size, project_id) VALUES (?, ?, ?, ?, ?, ?)",
+    args: [req.user.sub, name, sniffed, m[2], buf.length, projectRef],
   });
   const created = await db.execute({ sql: "SELECT * FROM assets WHERE id = ?", args: [result.lastInsertRowid] });
   res.status(201).json(assetMeta(created.rows[0]));
 });
 
 app.get("/api/assets", requireAuth, async (req, res) => {
-  const result = await db.execute({
-    sql: "SELECT id, name, mime, size, created_at FROM assets WHERE owner_id = ? ORDER BY id DESC",
-    args: [req.user.sub],
-  });
+  const project = req.query.project;
+  const result = project != null
+    ? await db.execute({ sql: "SELECT id, name, mime, size, project_id, created_at FROM assets WHERE owner_id = ? AND project_id = ? ORDER BY id DESC", args: [req.user.sub, project] })
+    : await db.execute({ sql: "SELECT id, name, mime, size, project_id, created_at FROM assets WHERE owner_id = ? ORDER BY id DESC", args: [req.user.sub] });
   res.json(result.rows.map(assetMeta));
 });
 
@@ -417,6 +437,7 @@ app.get("/api/assets/:id", requireAuth, async (req, res) => {
   if (!row) return res.status(404).json({ error: "Not found" });
   const buf = Buffer.from(row.data, "base64");
   res.setHeader("Content-Type", row.mime);
+  res.setHeader("X-Content-Type-Options", "nosniff"); /* served bytes can never be re-interpreted as active content */
   res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
   res.setHeader("Content-Length", String(buf.length));
   res.end(buf);
