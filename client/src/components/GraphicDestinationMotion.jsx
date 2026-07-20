@@ -974,6 +974,8 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     if (!next) { const rest = { ...o }; delete rest.tag; return rest; }
     return { ...o, tag: next };
   });
+  /* rename a layer (timeline double-click on the name) */
+  const renameLayer = (id, name) => patchObject(id, (o) => ({ ...o, name: String(name || "").slice(0, 80) || o.name }));
 
   /* ---------- empty-gap pills (R8w1) ----------
      A gap pill selects the empty stretch between two clips of ONE packed
@@ -2130,7 +2132,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
         saveCtl={saveCtl} showGrid={showGrid} onToggleGrid={() => setShowGridPersist(!showGrid)}
         animateArm={animateArm} onToggleAnimate={() => setAnimateArmPersist(!animateArm)}
         exportCtl={{ onExport: () => setExportOpen(true) }}
-        duplicateLayer={duplicateLayer} removeLayer={removeLayer} cycleTag={cycleTag}
+        duplicateLayer={duplicateLayer} removeLayer={removeLayer} cycleTag={cycleTag} renameLayer={renameLayer}
         rulerRef={rulerRef} onRulerDown={onRulerDown} onBarDown={onBarDown} onKfDown={onKfDown} selKf={selKf} onWorldKfDown={onWorldKfDown} />
 
       {/* ============ CONTEXT MENU ============ */}

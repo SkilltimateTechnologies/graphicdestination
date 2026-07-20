@@ -80,7 +80,10 @@ check("GDM pins the row on bar move-drags via rowJumpTarget + rowsRef (stickier 
   return gdm.includes("rowJumpTarget(ev.clientY - rr.top, TL_ROW_H, b.row, 44, 0.85)") && gdm.includes("barDragRef.current = { id: obj.id, row: startRow, rowCount: startRows.length }");
 })());
 check("the pin releases on pointer-up (packing resumes)", read("src/components/GraphicDestinationMotion.jsx").includes("setBarDrag(null); /* release the row pin"));
-check("Timeline re-pins the dragged bar into its pinned row (display-only)", TL.includes("if (barDrag && byId.has(barDrag.id))"));
+/* Timeline is now ONE LAYER PER ROW (After-Effects/CapCut model): no packing,
+   so there is no mid-drag re-pack to fight and the display re-pin was removed.
+   A clip's row is simply its layer-order index. */
+check("Timeline uses one row per layer (no packing / no re-pin)", TL.includes("const rows = ctxLayers.map((o) => [o]);") && !TL.includes("byId.has(barDrag.id)"));
 
 /* ================= 2. gap pills ================= */
 console.log("gap pills — detection + ripple-close math");

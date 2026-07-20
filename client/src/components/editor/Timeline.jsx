@@ -17,7 +17,7 @@
    column gained a color tag, per-type icons and hover duplicate/delete.
    ============================================================ */
 import { Fragment, useEffect, useRef, useState } from "react";
-import { C, PROP_LABEL, KF_PROPS, TYPE_BAR, layerSpan, packRows, transportBtn, chipStyle, inputStyle } from "./model";
+import { C, PROP_LABEL, KF_PROPS, TYPE_BAR, layerSpan, transportBtn, chipStyle, inputStyle } from "./model";
 import { NoteIcon, MiniBtn, CamIcon } from "./ui";
 import { EASE_LABEL } from "../../engine/easing.js";
 import { colorAt } from "../../engine/keyframes.js";
@@ -215,11 +215,12 @@ const SAVE_BTN_STATE = {
   error: { background: C.danger, color: "#FFFFFF" },
 };
 
-export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, setPlaying, setTime, playing, time, fmt, ctxDur, setCtxDurMs, stretchClips, setStretchClips, loop, setLoop, selMany, groupSelection, ctxLayers, selIds, setSelIds, setSelKf, enterClip, exitToDepth, crumbs, onLayerContext, onLaneContext, toggleHide, toggleLock, reorder, inClip, onAudioLaneDown, audioTrack, audioLaneSel, audioBarMs, onAudioBarDown, camera, cameraLaneSel, onCameraLaneDown, onCameraKfDown, selCamKf, rulerRef, onRulerDown, onBarDown, onKfDown, selKf, onWorldKfDown, rowsRef, barDrag, selGap, onGapDown, onCloseGap, saveCtl, showGrid, onToggleGrid, animateArm, onToggleAnimate, exportCtl, duplicateLayer, removeLayer, cycleTag }) {
+export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, setPlaying, setTime, playing, time, fmt, ctxDur, setCtxDurMs, stretchClips, setStretchClips, loop, setLoop, selMany, groupSelection, ctxLayers, selIds, setSelIds, setSelKf, enterClip, exitToDepth, crumbs, onLayerContext, onLaneContext, toggleHide, toggleLock, reorder, inClip, onAudioLaneDown, audioTrack, audioLaneSel, audioBarMs, onAudioBarDown, camera, cameraLaneSel, onCameraLaneDown, onCameraKfDown, selCamKf, rulerRef, onRulerDown, onBarDown, onKfDown, selKf, onWorldKfDown, rowsRef, barDrag, selGap, onGapDown, onCloseGap, saveCtl, showGrid, onToggleGrid, animateArm, onToggleAnimate, exportCtl, duplicateLayer, removeLayer, cycleTag, renameLayer }) {
   /* horizontal lane scroller (scrub-follow) + hovered lane label (quick actions) */
   const tlScrollRef = useRef(null);
   const overlayStripRef = useRef(null); /* pinned always-visible ruler copy — synced to tlScrollRef.scrollLeft */
   const [hoverLane, setHoverLane] = useState(null);
+  const [renaming, setRenaming] = useState(null); /* object id whose name is being edited inline */
   /* SCRUB-FOLLOW (R9w1): the lanes content carries a duration-based min
      width, so long comps overflow the lane viewport horizontally; whenever
      the playhead (scrubbing or playing) nears an edge, chase it so it is
@@ -235,28 +236,14 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
   }, [time, ctxDur]);
   /* duration-based min width: long comps get room instead of cramping */
   const contentMinW = Math.max(0, Math.round((ctxDur / 1000) * TL_MIN_PX_PER_SEC));
-  /* ---------- auto-packed rows (visual only) ----------
-     spanById holds each object's [start, end] exactly as its bar renders it;
-     packRows groups non-overlapping objects (touching boundaries can share). */
+  /* ---------- ONE LAYER PER ROW ----------
+     Every object gets its OWN row, in layer (z) order — the After-Effects /
+     CapCut model. No packing: two objects never share a row, so a lane never
+     shows two labels, and moving a clip in time never reshuffles anything.
+     spanById holds each object's [start, end] exactly as its bar renders it. */
   const spans = ctxLayers.map((o) => { const [start, end] = layerSpan(o, ctxDur); return { id: o.id, start, end }; });
   const spanById = new Map(spans.map((s) => [s.id, [s.start, s.end]]));
-  const byId = new Map(ctxLayers.map((o) => [o.id, o]));
-  let rows = packRows(spans, { stable: true }).map((ids) => ids.map((id) => byId.get(id)).filter(Boolean));
-  /* ROW-JUMP DEADZONE (display pin): while a bar body-drag is live, the
-     dragged bar stays in its pinned row (chosen by rowJumpTarget's deadzone
-     in GraphicDestinationMotion.onBarDown) instead of re-packing mid-drag
-     when it starts overlapping a neighbour. The pin is display-only and
-     ends on pointer-up, when normal packing resumes. The bar is appended
-     LAST in its row so it paints above row-mates it now overlaps; a pin at
-     index rows.length opens a fresh lane at the bottom. Rows the pin
-     vacated keep their slot for the gesture (indices stay stable). */
-  if (barDrag && byId.has(barDrag.id)) {
-    const dragObj = byId.get(barDrag.id);
-    rows = rows.map((r) => r.filter((o) => o.id !== barDrag.id));
-    const ri = Math.max(0, Math.min(barDrag.row, rows.length));
-    if (ri === rows.length) rows.push([dragObj]);
-    else rows[ri] = [...rows[ri], dragObj];
-  }
+  const rows = ctxLayers.map((o) => [o]);
   /* cursor time within the lanes (same math the ruler scrub uses) */
   const laneT = (e) => {
     const r = rulerRef.current.getBoundingClientRect();
@@ -444,9 +431,21 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
                       {o.type === "clip"
                         ? <span style={{ width: 11, height: 10, flexShrink: 0, position: "relative" }}><span style={{ position: "absolute", inset: "0 2px 2px 0", border: `1.5px solid ${C.amber}`, borderRadius: 2 }} /><span style={{ position: "absolute", inset: "2px 0 0 2px", border: `1.5px solid ${C.amber}`, borderRadius: 2, background: C.bg1 }} /></span>
                         : <LaneTypeIcon type={o.type} size={11} color={laneColor} />}
-                      <span style={{ fontSize: 12, fontWeight: 600, color: isSel ? C.txt : C.dim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1, minWidth: 0 }}>
-                        {o.name}{o.type === "clip" && <span style={{ color: C.faint, fontWeight: 500 }}> ·{o.children.length}</span>}
-                      </span>
+                      {renaming === o.id ? (
+                        <input autoFocus defaultValue={o.name}
+                          onClick={(e) => e.stopPropagation()}
+                          onDoubleClick={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => { if (e.key === "Enter") { renameLayer?.(o.id, e.currentTarget.value.trim() || o.name); setRenaming(null); } else if (e.key === "Escape") setRenaming(null); }}
+                          onBlur={(e) => { renameLayer?.(o.id, e.currentTarget.value.trim() || o.name); setRenaming(null); }}
+                          style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 600, background: C.bg0, color: C.txt, border: `1px solid ${C.amber}`, borderRadius: 4, padding: "1px 5px", outline: "none", fontFamily: "inherit" }} />
+                      ) : (
+                        <span onDoubleClick={(e) => { e.stopPropagation(); if (!o.locked) setRenaming(o.id); }}
+                          title="Double-click to rename"
+                          style={{ fontSize: 12, fontWeight: 600, color: isSel ? C.txt : C.dim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1, minWidth: 0, cursor: "text" }}>
+                          {o.name}{o.type === "clip" && <span style={{ color: C.faint, fontWeight: 500 }}> ·{o.children.length}</span>}
+                        </span>
+                      )}
                       {/* quick actions (R9w1): duplicate/delete on hover for ANY
                           lane (they act on THIS object); front/back reorder
                           joins for the single selected full row, as before. */}
