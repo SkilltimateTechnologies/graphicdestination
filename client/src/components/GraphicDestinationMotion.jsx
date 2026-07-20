@@ -2098,7 +2098,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
       <Timeline tlH={tlH} tlDragging={tlDragging} onTlHandleDown={onTlHandleDown} resetTlH={resetTlH}
         setPlaying={setPlaying} setTime={setTime} playing={playing} time={time} fmt={fmt} ctxDur={ctxDur} setCtxDurMs={setCtxDurMs}
         stretchClips={stretchClips} setStretchClips={setStretchClips} loop={loop} setLoop={setLoop}
-        selMany={selMany} groupSelection={groupSelection} ctxLayers={ctxLayers} selIds={selIds} setSelIds={setSelIds} setSelKf={setSelKf}
+        selMany={selMany} groupSelection={groupSelection} ungroupClip={ungroupClip} ctxLayers={ctxLayers} selIds={selIds} setSelIds={setSelIds} setSelKf={setSelKf}
         enterClip={enterClip} exitToDepth={exitToDepth} crumbs={ctx.names} onLayerContext={onLayerContext} onLaneContext={onLaneContext} toggleHide={toggleHide} toggleLock={toggleLock}
         reorder={reorder}
         inClip={inClip} onAudioLaneDown={onAudioLaneDown} audioTrack={audioTrack} audioLaneSel={audioLaneSel} audioBarMs={audioBarMs} onAudioBarDown={onAudioBarDown}

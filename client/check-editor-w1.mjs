@@ -452,7 +452,7 @@ async function main() {
 main().catch((e) => { console.error(e); process.exit(1); });
 
 /* ==================== part 2: clips / lock icons / empty states ==================== */
-async function runPart2(page, { check, proj, stageRect, toScreen, drag }) {
+async function runPart2(page, { check, proj, stageRect, toScreen, drag, scrubTo }) {
   const stats = (p) => p.objects.find((o) => o.type === "clip" && o.name.includes("Stats"));
 
   /* ==================== #7 clips move + scale on canvas ==================== */
@@ -568,4 +568,71 @@ async function runPart2(page, { check, proj, stageRect, toScreen, drag }) {
     return !!lane && lane.textContent.includes("◆ add a keyframe or pick a preset in the inspector") && lane.querySelectorAll(".gd-kf").length === 0;
   }));
   check("empty project → Inspector still shows no keyframe controls", await page.evaluate(() => document.querySelectorAll('button[title="Add keyframe at playhead"]').length) === 0);
+
+  /* ==================== #A group/ungroup — 3 nesting levels ================ */
+  console.log("\ngroup/ungroup — always-visible glyph pair, per-lane glyph, 3 nesting levels + depth crumb");
+  const mkShape = (id, x, y, fill) => ({ id, type: "shape", name: id.toUpperCase(), tracks: {}, locked: false, hidden: false, props: { x, y, scale: 1, rotation: 0, opacity: 1, fill, w: 90, h: 90, inT: 0, outT: null, path: null, prog: 0, shape: "rect", fillMode: "fill", sC: "#FFB224", sW: 3, cornerR: 0 } });
+  await page.evaluate((objs) => window.__loadProject(JSON.stringify({ objects: objs })),
+    [mkShape("a", 380, 300, "#FF6B6B"), mkShape("b", 540, 300, "#6EE7B7"), mkShape("c", 700, 300, "#5B8CFF"), mkShape("d", 860, 300, "#FFD984")]);
+  await page.waitForTimeout(400);
+  const clipAtRoot = (p) => p.objects.find((o) => o.type === "clip");
+  const laneDiv = (name) => page.locator(`div[title="${name}"]`).first();
+  /* dbl-click the LANE ROW (not the name span — that one renames) */
+  const dblLane = (name) => page.evaluate((n) => { const el = [...document.querySelectorAll("div[title]")].find((d) => d.title === n); el.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); }, name);
+  const ctrlClick = async (name) => { await page.keyboard.down("Control"); await laneDiv(name).click(); await page.keyboard.up("Control"); await page.waitForTimeout(120); };
+  /* the glyph pair is ALWAYS visible — disabled until the context allows */
+  check("transport group + ungroup glyphs always render", (await page.locator("button.gd-tl-group").count()) === 1 && (await page.locator("button.gd-tl-ungroup").count()) === 1);
+  check("both glyphs DISABLED with nothing selected", await page.locator("button.gd-tl-group").isDisabled() && await page.locator("button.gd-tl-ungroup").isDisabled());
+  /* level 1: group A+B → G1 */
+  await laneDiv("A").click(); await page.waitForTimeout(120);
+  await ctrlClick("B");
+  check("group glyph arms at 2+ selected (ungroup still off)", !(await page.locator("button.gd-tl-group").isDisabled()) && await page.locator("button.gd-tl-ungroup").isDisabled());
+  await page.locator("button.gd-tl-group").click();
+  await page.waitForTimeout(250);
+  p = await proj(page);
+  check("L1: A+B wrapped into ONE clip, auto-selected", p.objects.length === 3 && clipAtRoot(p).children.length === 2, `${p.objects.length} lanes`);
+  check("ungroup glyph arms with the new clip selected", !(await page.locator("button.gd-tl-ungroup").isDisabled()));
+  const g1name = clipAtRoot(p).name;
+  /* level 2: group G1+C → G2 (a selected CLIP nests) */
+  await ctrlClick("C");
+  await page.locator("button.gd-tl-group").click();
+  await page.waitForTimeout(250);
+  p = await proj(page);
+  check("L2: G1+C grouped again — the clip nested inside the new clip", p.objects.length === 2 && clipAtRoot(p).children.some((k) => k.type === "clip"), JSON.stringify(p.objects.map((o) => o.type)));
+  const g2name = clipAtRoot(p).name;
+  /* level 3: group G2+D → G3 */
+  await ctrlClick("D");
+  await page.locator("button.gd-tl-group").click();
+  await page.waitForTimeout(250);
+  p = await proj(page);
+  const g3 = clipAtRoot(p);
+  check("L3: three nesting levels (G3 > G2 > G1)", p.objects.length === 1 && g3.children.some((k) => k.type === "clip" && k.children.some((kk) => kk.type === "clip")), JSON.stringify(p.objects.map((o) => o.type)));
+  /* depth crumb: enter G3 → L1, G2 → L2, G1 → L3 */
+  await dblLane(g3.name); await page.waitForTimeout(250);
+  check("depth crumb shows L1 inside the first clip", (await page.locator(".gd-tl-depth").textContent()) === "L1");
+  await dblLane(g2name); await page.waitForTimeout(250);
+  check("depth crumb shows L2 at the second nesting level", (await page.locator(".gd-tl-depth").textContent()) === "L2");
+  await dblLane(g1name); await page.waitForTimeout(250);
+  check("depth crumb shows L3 at the third nesting level", (await page.locator(".gd-tl-depth").textContent()) === "L3");
+  for (let i = 0; i < 3; i++) { await page.keyboard.press("Escape"); await page.waitForTimeout(180); }
+  check("three Escapes step back to the root (no crumb)", (await page.locator(".gd-tl-depth").count()) === 0 && !(await page.evaluate(() => document.body.textContent.includes("Editing clip"))));
+  /* ungroup ONE LEVEL at a time — transport glyph, then the per-lane glyph */
+  await laneDiv(g3.name).click(); await page.waitForTimeout(150);
+  await page.locator("button.gd-tl-ungroup").click();
+  await page.waitForTimeout(250);
+  p = await proj(page);
+  check("ungroup #1 peels exactly one level (G3 → G2 + D)", p.objects.length === 2 && p.objects.some((o) => o.type === "clip") && p.objects.some((o) => o.name === "D"), JSON.stringify(p.objects.map((o) => `${o.type}:${o.name}`)));
+  const g2root = clipAtRoot(p);
+  await laneDiv(g2root.name).hover(); await page.waitForTimeout(150);
+  check("clip lane shows the per-lane ungroup glyph on hover", (await page.locator(`button[title^="Ungroup ${g2root.name}"]`).count()) === 1);
+  await page.locator(`button[title^="Ungroup ${g2root.name}"]`).first().click();
+  await page.waitForTimeout(250);
+  p = await proj(page);
+  check("ungroup #2 peels the next level (G2 → G1 + C)", p.objects.length === 3 && p.objects.filter((o) => o.type === "clip").length === 1 && p.objects.some((o) => o.name === "C"), JSON.stringify(p.objects.map((o) => `${o.type}:${o.name}`)));
+  const g1root = clipAtRoot(p);
+  await laneDiv(g1root.name).click(); await page.waitForTimeout(150);
+  await page.locator("button.gd-tl-ungroup").click();
+  await page.waitForTimeout(250);
+  p = await proj(page);
+  check("ungroup #3 restores the four flat shapes (no clips left)", p.objects.length === 4 && p.objects.every((o) => o.type === "shape"), JSON.stringify(p.objects.map((o) => `${o.type}:${o.name}`)));
 }

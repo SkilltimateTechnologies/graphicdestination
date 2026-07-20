@@ -215,7 +215,7 @@ const SAVE_BTN_STATE = {
   error: { background: C.danger, color: "#FFFFFF" },
 };
 
-export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, setPlaying, setTime, playing, time, fmt, ctxDur, setCtxDurMs, stretchClips, setStretchClips, loop, setLoop, selMany, groupSelection, ctxLayers, selIds, setSelIds, setSelKf, enterClip, exitToDepth, crumbs, onLayerContext, onLaneContext, toggleHide, toggleLock, reorder, inClip, onAudioLaneDown, audioTrack, audioLaneSel, audioBarMs, onAudioBarDown, camera, cameraLaneSel, onCameraLaneDown, onCameraKfDown, selCamKf, rulerRef, onRulerDown, onBarDown, onKfDown, selKf, onWorldKfDown, rowsRef, barDrag, selGap, onGapDown, onCloseGap, saveCtl, showGrid, onToggleGrid, animateArm, onToggleAnimate, exportCtl, duplicateLayer, removeLayer, cycleTag, renameLayer }) {
+export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, setPlaying, setTime, playing, time, fmt, ctxDur, setCtxDurMs, stretchClips, setStretchClips, loop, setLoop, selMany, groupSelection, ungroupClip, ctxLayers, selIds, setSelIds, setSelKf, enterClip, exitToDepth, crumbs, onLayerContext, onLaneContext, toggleHide, toggleLock, reorder, inClip, onAudioLaneDown, audioTrack, audioLaneSel, audioBarMs, onAudioBarDown, camera, cameraLaneSel, onCameraLaneDown, onCameraKfDown, selCamKf, rulerRef, onRulerDown, onBarDown, onKfDown, selKf, onWorldKfDown, rowsRef, barDrag, selGap, onGapDown, onCloseGap, saveCtl, showGrid, onToggleGrid, animateArm, onToggleAnimate, exportCtl, duplicateLayer, removeLayer, cycleTag, renameLayer }) {
   /* horizontal lane scroller (scrub-follow) + hovered lane label (quick actions) */
   const tlScrollRef = useRef(null);
   const overlayStripRef = useRef(null); /* pinned always-visible ruler copy — synced to tlScrollRef.scrollLeft */
@@ -328,6 +328,10 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
               </span>
             ))}
             {inClip && (
+              <span className="gd-tl-depth" title={`Nesting depth ${crumbs.length} — clips nest to any depth; Esc steps out one level`}
+                style={{ fontFamily: "'JetBrains Mono'", fontSize: 9.5, fontWeight: 700, color: "#1A1405", background: C.amber, borderRadius: 4, padding: "1px 5px", marginLeft: 6, flexShrink: 0 }}>L{crumbs.length}</span>
+            )}
+            {inClip && (
               <span style={{ color: C.faint, fontSize: 10.5, fontWeight: 600, whiteSpace: "nowrap", paddingLeft: 8 }}>Editing clip — Esc to go back</span>
             )}
           </span>
@@ -339,7 +343,23 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
               ✕ Close gap · {fmt(selGap.end - selGap.start)}
             </button>
           )}
-          {selMany.length > 1 && <button className="gd-btn" onClick={groupSelection} style={{ ...chipStyle, cursor: "pointer", borderColor: C.amber, color: C.amber }}>⌘G Group {selMany.length} → Clip</button>}
+          {/* group/ungroup glyph pair — ALWAYS visible, enabled by context
+              (group needs 2+ selected; ungroup needs one selected clip).
+              The model nests to any depth: grouping a selected clip nests it. */}
+          {(() => { const selClip = selIds.length === 1 ? ctxLayers.find((o) => o.id === selIds[0] && o.type === "clip") : null; return (<>
+            <button className="gd-btn gd-tl-group" disabled={selMany.length < 2} onClick={groupSelection}
+              title={selMany.length > 1 ? `Group ${selMany.length} layers into a clip (⌘G) — groups nest to any depth` : "Group — select 2+ layers to wrap them in a clip"}
+              style={{ ...chipStyle, display: "flex", alignItems: "center", gap: 5, cursor: selMany.length > 1 ? "pointer" : "default", borderColor: selMany.length > 1 ? C.amber : C.line, color: selMany.length > 1 ? C.amber : C.faint, opacity: selMany.length > 1 ? 1 : 0.55 }}>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4"><rect x="1" y="1" width="7" height="7" rx="1.5" /><rect x="4" y="4" width="7" height="7" rx="1.5" fill={C.bg2} /></svg>
+              Group{selMany.length > 1 ? ` ${selMany.length}` : ""}
+            </button>
+            <button className="gd-btn gd-tl-ungroup" disabled={!selClip} onClick={() => selClip && ungroupClip?.(selClip.id)}
+              title={selClip ? `Ungroup ${selClip.name} — release its ${selClip.children.length} layers one level` : "Ungroup — select a clip to release its layers one level"}
+              style={{ ...chipStyle, display: "flex", alignItems: "center", gap: 5, cursor: selClip ? "pointer" : "default", borderColor: selClip ? C.amber : C.line, color: selClip ? C.amber : C.faint, opacity: selClip ? 1 : 0.55 }}>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4"><rect x="1" y="1" width="6" height="6" rx="1.5" /><path d="M7.5 8.5h3v3h-3z" fill="currentColor" stroke="none" /></svg>
+              Ungroup
+            </button>
+          </>); })()}
           {/* R10: the old bar-gestures hint text is removed from the
               transport bar (the same guidance lives on the bar hover
               tooltips). */}
@@ -455,6 +475,7 @@ export default function Timeline({ tlH, tlDragging, onTlHandleDown, resetTlH, se
                             <MiniBtn title="Front" onClick={(e) => { e.stopPropagation(); reorder(o.id, +1); }}>▲</MiniBtn>
                             <MiniBtn title="Back" onClick={(e) => { e.stopPropagation(); reorder(o.id, -1); }}>▼</MiniBtn>
                           </>)}
+                          {o.type === "clip" && <MiniBtn title={`Ungroup ${o.name} — release its ${o.children.length} layers one level`} onClick={(e) => { e.stopPropagation(); ungroupClip?.(o.id); }}>⊟</MiniBtn>}
                           <MiniBtn title={`Duplicate ${o.name}`} onClick={(e) => { e.stopPropagation(); duplicateLayer(o.id); }}>⧉</MiniBtn>
                           <MiniBtn title={`Delete ${o.name}`} danger onClick={(e) => { e.stopPropagation(); removeLayer(o.id); }}>✕</MiniBtn>
                         </span>
