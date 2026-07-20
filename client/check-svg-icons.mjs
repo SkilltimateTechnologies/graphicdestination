@@ -91,6 +91,11 @@ console.log("\nGDM wiring");
   check("insertSvgIcon inserts through makeObject(\"image\")", fn.includes('makeObject("image"'));
   check("insertSvgIcon uses svgDataUri (inline data-URI src, never blob:)", fn.includes("svgDataUri(icon.svg)") && !fn.includes("blob:"));
   check("insertSvgIcon sizes via iconInsertSize at DEFAULT_INSERT_SIZE", fn.includes("iconInsertSize(icon.svg, DEFAULT_INSERT_SIZE)"));
+  /* hardening: NO surface renders admin SVG inline — thumbs and layers both
+     go through the inert data-URI <img> path, so nothing leans on the
+     sanitizer alone */
+  const PANEL = fs.readFileSync(path.join(here, "src", "components", "editor", "panels", "IconsPanel.jsx"), "utf8");
+  check("IconsPanel thumb renders via data-URI <img> (no dangerouslySetInnerHTML)", !PANEL.includes("dangerouslySetInnerHTML") && PANEL.includes("svgDataUri(icon.svg)"));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

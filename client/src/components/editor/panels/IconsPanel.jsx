@@ -1,24 +1,25 @@
 /* Icons drawer — the admin-managed SVG icon library (GET /api/svg-icons,
    sanitized server-side before store). Search + category chips + a grid of
-   inline-SVG cards; a click inserts the icon as a plain image layer at the
-   standard insert size (8-way resize, export-safe data-URI — see
-   engine/svgIcon.js). The list loads when the panel opens; failures render
-   as a quiet empty state (demo shell without a session → sign-in hint). */
+   cards; thumbs render as data-URI <img> (structurally inert — no inline-DOM
+   surface). A click inserts the icon as a plain image layer at the standard
+   insert size (8-way resize, export-safe — see engine/svgIcon.js). The list
+   loads when the panel opens; failures render as a quiet empty state (demo
+   shell without a session → sign-in hint). */
 import React, { useEffect, useMemo, useState } from "react";
 import { C, sectionLabel, inputStyle, chipStyle } from "../model.js";
+import { svgDataUri } from "../../../engine/svgIcon.js";
 
 const ART = 30;
 
 function IconThumb({ icon }) {
-  /* sanitized server-side; style forces the vector to fill its thumb box */
-  const html = useMemo(() => {
-    const sized = icon.svg.replace(/<svg\b([^>]*)>/i, (whole, attrs) =>
-      attrs.includes("style=") ? whole : `<svg${attrs} style="width:100%;height:100%;display:block">`);
-    return { __html: sized };
-  }, [icon.svg]);
+  /* rendered as a data-URI <img> — structurally inert (no inline-DOM surface,
+     so the thumb never depends on the sanitizer alone), same path the insert
+     and the canvas/export rasterizer use */
+  const src = useMemo(() => svgDataUri(icon.svg), [icon.svg]);
   return (
-    <div style={{ width: ART, height: ART, margin: "0 auto", borderRadius: 7, background: C.bg0, border: `1px solid ${C.line}`, overflow: "hidden", padding: 5, boxSizing: "border-box", pointerEvents: "none" }}
-      dangerouslySetInnerHTML={html} />
+    <div style={{ width: ART, height: ART, margin: "0 auto", borderRadius: 7, background: C.bg0, border: `1px solid ${C.line}`, overflow: "hidden", padding: 5, boxSizing: "border-box", pointerEvents: "none" }}>
+      <img src={src} alt={icon.name} style={{ width: "100%", height: "100%", display: "block" }} />
+    </div>
   );
 }
 
