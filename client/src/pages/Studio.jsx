@@ -27,6 +27,9 @@ export default function Studio() {
   const [chatLog, setChatLog] = useState([]); /* [{ who, text }] */
   const [instruction, setInstruction] = useState("");
   const [refining, setRefining] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [saveMsg, setSaveMsg] = useState("");
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(true);
   const fileRef = useRef(null);
@@ -36,6 +39,7 @@ export default function Studio() {
   const applySpec = (raw, undo = true) => {
     const v = validateAiSpec(raw);
     if (!v.ok) return;
+    if (spec && JSON.stringify(v.spec) === JSON.stringify(spec)) return; /* identical — no history entry, nothing to undo */
     if (undo && spec) setHistory((h) => [...h.slice(-19), spec]);
     setSpec(v.spec);
   };
@@ -91,6 +95,27 @@ export default function Studio() {
       setTime(0);
     } catch (err) { setGenErr(err.message); }
     finally { setBusy(false); }
+  };
+
+  /* save the finished spec as a PERSONAL template (validated templates store):
+     the wrapper clip's children carry the motion grammar, so inserting it
+     through clipFromProject reproduces exactly this preview */
+  const saveToTemplates = async () => {
+    const name = saveName.trim();
+    if (!name || !clip || saveBusy) return;
+    setSaveBusy(true); setSaveMsg("");
+    try {
+      const data = { app: "graphic-destination-motion", v: 5, stage: { w: 1280, h: 720, dur: clip.props.dur, bg: "#101218" }, objects: clip.children };
+      const r = await fetch("/api/templates", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: "user", name, category: "AI Studio", description: `AI-generated motion (${spec.hold.type}) from a reference`, data }),
+      });
+      const body = await r.json();
+      if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+      setSaveMsg(`Saved — find it in the editor's Templates panel under “Mine”.`);
+    } catch (err) { setSaveMsg(`Couldn't save — ${err.message}`); }
+    finally { setSaveBusy(false); }
   };
 
   const refine = async () => {
@@ -220,6 +245,18 @@ export default function Studio() {
           <div style={{ color: C.faint, fontSize: 11, lineHeight: 1.6, marginTop: 12 }}>
             The preview is the app's own renderer — what you see is exactly what a saved template + an export will render. Everything is keyframes: deterministic, export-identical.
           </div>
+          {clip && (
+            <div style={{ display: "flex", gap: 8, marginTop: 14, alignItems: "center" }}>
+              <input value={saveName} onChange={(e) => setSaveName(e.target.value)} placeholder="Name it — save as a template…"
+                onKeyDown={(e) => { if (e.key === "Enter") saveToTemplates(); }}
+                style={{ ...inputDark, flex: 1, padding: "8px 10px", fontSize: 12.5 }} />
+              <button onClick={saveToTemplates} disabled={saveBusy || !saveName.trim()} data-studio-save
+                style={{ background: C.amber, color: "#1A1405", border: "none", borderRadius: 7, padding: "9px 18px", fontSize: 12.5, fontWeight: 800, cursor: saveName.trim() ? "pointer" : "default", fontFamily: "inherit", opacity: saveName.trim() ? 1 : 0.6, whiteSpace: "nowrap" }}>
+                {saveBusy ? "Saving…" : "Save to Templates"}
+              </button>
+            </div>
+          )}
+          {saveMsg && <div data-studio-save-msg style={{ fontSize: 11, marginTop: 8, color: saveMsg.startsWith("Couldn't") ? C.danger : "#6EE7B7" }}>{saveMsg}</div>}
         </div>
       </div>
     </div>
