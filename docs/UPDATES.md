@@ -329,6 +329,41 @@ sharing a lane. The right synthesis:
 
 ---
 
+## 💡 Grouping model — main + nested groups (folders), Shift-select
+
+**The ask (clarified):** keep it simple — there are only **two things**: the
+**main timeline** and **groups**. A group is a **folder** you can nest **up to 3
+levels** (folder 1 › folder 2 › folder 3). To make a group, **Shift-click** the
+items you want and group them.
+
+**How this relates to the "real tracks" entry — RESOLVE THIS FIRST.** This reads
+as a *simpler* model than full CapCut multi-clip tracks: the user wants
+**main + nested groups**, not arbitrary track lanes. Likely direction: a group is
+exactly the existing `clip` (a folder/precomp you enter/exit), nesting to 3
+levels, and the "timeline" is either the main comp or the group you're inside.
+Confirm with the user whether groups **replace** the tracks work or sit alongside
+it before building further on tracks.
+
+### Concrete pieces
+- **Shift-click multi-select.** Today multi-select is Ctrl/Cmd-click (canvas +
+  timeline lanes). Add **Shift-click** to add/extend the selection (canvas + lane
+  labels), so the user can pick several items then group them. Ctrl/Cmd-click can
+  stay as toggle; Shift = add/range.
+- **Group = folder, 3 levels.** `groupSelection` already wraps a selection into a
+  `clip`; nesting a clip inside a group nests automatically (verified — no depth
+  cap). Cap/guard at **3 levels** if the user wants a hard limit, and label the
+  levels like folders in the breadcrumb (folder 1 › 2 › 3).
+- **Only two contexts.** The editor is either on the **main** timeline or **inside
+  a group**; `path`/`enterClip`/`exitToDepth` already model exactly this. Make the
+  breadcrumb read as a folder path.
+- **Ungroup** peels one folder level (already works via `ungroupClip`).
+
+**Notes:** mostly UI + the Shift-select gesture; the engine already nests. Add a
+guard for Shift multi-select + a 3-level group depth. **Blocks/redirects the
+"real tracks" item — decide the model first.**
+
+---
+
 ## 💡 Apply brand colors everywhere by default
 
 **Context:** Settings is now just **brand kits** (colors + fonts) + default bg —
