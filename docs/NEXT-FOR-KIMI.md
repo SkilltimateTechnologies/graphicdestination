@@ -8,12 +8,74 @@ risk. Full context/rationale for each is in [UPDATES.md](UPDATES.md).
 - **Determinism is load-bearing.** No `Date.now()` / unseeded `Math.random()` on
   any render path. Exports re-render `StageObject` frame-by-frame.
 - **Run the whole battery before delivering:** `node scripts/run-checks.mjs`
-  (client checks + browser suites + server). It must be fully green.
+  (client checks + browser suites + server). It must be green **except** the 5
+  export-**inspection** suites (`test-mp4/ratio/camera/backdrop/filters-export`),
+  which shell out to `ffprobe` — if `ffprobe`/`ffmpeg` isn't installed they print
+  `ffprobe failed: ENOENT` / `got: 0 stream(s)` even though the export itself
+  wrote a valid file (`{"ok":true,...}`). That's an environment gap, not a
+  regression. Install ffmpeg to get a true 45/45, or eyeball the `ok:true` lines.
 - **If you change a FROZEN behavior, update its guard in the SAME change** — never
   delete a failing assertion to go green.
 - **Lint budget:** ≤19 warnings, build must pass.
 - **Line numbers below are approximate** (the review anchored to an older commit;
   the editor file has since moved). **Locate by symbol/grep, not by line.**
+
+---
+
+## ▶ START HERE — current work (2026-07, supersedes items 1–6 below)
+
+Items 1–6 and the CapCut-tracks experiment are **DONE/RESOLVED** (see the ✅ and
+RESOLVED sections lower down). Editor state as of `fd9d212` on `main`: folder
+grouping (Shift-select, ≤3 levels), emoji-as-image, pinned duration, settings
+auto-save. Do the two below **in order**.
+
+### A. Quick win — kill the emoji Animated/Static toggle lie (~30 min)
+The Emoji panel still shows an **Animated / Static** toggle, but `pick` in
+`EmojiPanel.jsx` drops the variant and **every insert is static** (emoji now
+insert as a plain `image` so they resize via the 8-way grips — that's the
+intended behaviour, don't undo it). The toggle promises motion it never delivers.
+**Do:** remove the toggle + its state from `EmojiPanel.jsx` (simplest honest fix),
+so the panel just inserts a still emoji image. **Do NOT** re-introduce the looping
+clip to "make Animated work" — that brings back the resize bug we just fixed.
+**Guard:** update `check-emoji` / the r8w4 emoji assertion to expect no toggle;
+full battery green.
+
+### B. Custom SVG animated icons — the big feature, replaces Fluent emoji
+Goal (user's words): "get rid of the Microsoft emoji, add our own SVG animated
+icons, admin adds them from the backend." Full spec in [UPDATES.md](UPDATES.md)
+under "Custom SVG animated icons". Build it in phases, one commit
+each, battery green after every phase. **Two constraints are load-bearing — get
+them wrong and it's unshippable:**
+
+1. **Sanitize every uploaded SVG HARD (server-side, before store).** SVG is an XSS
+   vector. Strip `<script>`, all `on*` handlers, `<foreignObject>`, external
+   `href`/`xlink:href`/`url()` refs, `<use>` to remote docs, DOCTYPE/entities,
+   `<style>` with `@import`. Allow-list elements/attrs, don't block-list. Guard
+   with a `server/test-svg-sanitize.mjs` that feeds known payloads and asserts
+   they're neutralised.
+2. **Keep export DETERMINISTIC.** Default path = static SVG rendered as an image +
+   the existing engine motion grammar (in→hold→out) so it exports frame-by-frame
+   exactly like emoji do today. Any "inline animated SVG" option must be driven by
+   `setCurrentTime(t)` off the timeline clock — **never** CSS/SMIL animation or
+   `requestAnimationFrame`, which the export re-render can't sample.
+
+Suggested phases:
+- **Phase 1 (server):** an admin-gated store for SVG icons (reuse the `assets`
+  table with a `kind:"svg_icon"` + role check, or a new `svg_icons` table) +
+  `POST /api/svg-icons` (admin only) running the sanitizer, + `GET` list. Guards:
+  `server/test-svg-icons.mjs` + the sanitize test above.
+- **Phase 2 (client layer):** render sanitized SVG as a resizable layer — cleanest
+  is `image` type carrying an inline-SVG data-URI `src`, so it flows through the
+  same 8-way `onResize` as emoji/images and needs no new StageObject branch. Verify
+  it exports (roundtrip + a browser insert/resize check).
+- **Phase 3 (panel):** a new Icons rail panel fed by the store (thumbs = hold
+  frame, hover plays — same pattern as every other panel).
+- **Phase 4 (retire Fluent):** remove the Fluent emoji from the picker but keep
+  `engine/emoji.js` + the PNGs engine-side for BACK-COMPAT of old projects (same
+  way the bezier icons were retired). Update AGENTS.md Emoji/Icons contract.
+
+When A + B land, the next backlog items are: **apply brand colors by default**,
+then Editable Templates → Uploads hub → AI Asset Studio (all in UPDATES.md).
 
 ---
 
