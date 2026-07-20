@@ -9,6 +9,7 @@ import { fileURLToPath } from "url";
 import { enforceConfig } from "./config.js";
 import { db, initSchema, usingTurso } from "./db.js";
 import { hashPassword, verifyPassword, signSession, requireAuth, COOKIE_NAME, COOKIE_OPTS } from "./auth.js";
+import { sanitizeSvg } from "./svgSanitize.js";
 import { authLimiter, shareLimiter, createRateLimiter } from "./ratelimit.js";
 import { logger } from "./logger.js";
 import { initErrorTracking, captureError } from "./errorTracking.js";
@@ -422,6 +423,91 @@ app.get("/api/assets/:id", requireAuth, async (req, res) => {
 
 app.delete("/api/assets/:id", requireAuth, async (req, res) => {
   const result = await db.execute({ sql: "DELETE FROM assets WHERE id = ? AND owner_id = ?", args: [req.params.id, req.user.sub] });
+  if (result.rowsAffected === 0) return res.status(404).json({ error: "Not found" });
+  res.json({ ok: true });
+});
+
+/* ---------------- SVG icon library (admin-managed) ----------------
+ * Global icon store for the editor's Icons rail. Writes are ADMIN-only and
+ * every SVG passes the allowlist sanitizer (svgSanitize.js) BEFORE it is
+ * stored — untrusted markup never reaches the DB. Reads are open to any
+ * signed-in user (the editor inlines the sanitized markup as data-URIs).
+ */
+
+const MAX_SVG_CHARS = 200 * 1024; // 200 KB of markup is generous for an icon
+
+function requireAdmin(req, res, next) {
+  if (req.user?.role !== "admin") return res.status(403).json({ error: "Admin only" });
+  next();
+}
+
+const iconMeta = (row, withSvg = true) => ({
+  id: row.id,
+  name: row.name,
+  category: row.category,
+  tags: JSON.parse(row.tags || "[]"),
+  motion: row.motion,
+  updatedAt: row.updated_at,
+  ...(withSvg ? { svg: row.svg } : {}),
+});
+
+const validIconBody = (body) => {
+  const { name, category, tags, svg, motion } = body || {};
+  if (typeof name !== "string" || !name.trim() || name.length > 80) return { error: "name must be 1-80 characters" };
+  if (typeof svg !== "string" || !svg.trim()) return { error: "svg markup required" };
+  if (svg.length > MAX_SVG_CHARS) return { error: `SVG too large (max ${MAX_SVG_CHARS / 1024} KB)` };
+  if (category != null && (typeof category !== "string" || category.length > 40)) return { error: "category must be ≤40 characters" };
+  if (tags != null && (!Array.isArray(tags) || tags.length > 20 || tags.some((t) => typeof t !== "string" || t.length > 30))) return { error: "tags must be ≤20 short strings" };
+  if (motion != null && !["engine", "self"].includes(motion)) return { error: 'motion must be "engine" or "self"' };
+  return { name: name.trim(), category: (category || "Icons").trim() || "Icons", tags: tags || [], svg, motion: motion || "engine" };
+};
+
+app.post("/api/svg-icons", requireAuth, requireAdmin, async (req, res) => {
+  const v = validIconBody(req.body);
+  if (v.error) return res.status(400).json({ error: v.error });
+  const clean = sanitizeSvg(v.svg);
+  if (!clean.ok) return res.status(422).json({ error: "SVG rejected by the sanitizer (no renderable content)", dropped: clean.dropped });
+  const result = await db.execute({
+    sql: "INSERT INTO svg_icons (name, category, tags, svg, motion) VALUES (?, ?, ?, ?, ?)",
+    args: [v.name, v.category, JSON.stringify(v.tags), clean.svg, v.motion],
+  });
+  const created = await db.execute({ sql: "SELECT * FROM svg_icons WHERE id = ?", args: [result.lastInsertRowid] });
+  res.status(201).json({ ...iconMeta(created.rows[0]), sanitized: clean.dropped });
+});
+
+app.get("/api/svg-icons", requireAuth, async (req, res) => {
+  const result = await db.execute({ sql: "SELECT * FROM svg_icons ORDER BY category, name, id", args: [] });
+  res.json(result.rows.map((r) => iconMeta(r)));
+});
+
+app.put("/api/svg-icons/:id", requireAuth, requireAdmin, async (req, res) => {
+  const found = await db.execute({ sql: "SELECT * FROM svg_icons WHERE id = ?", args: [req.params.id] });
+  const row = found.rows[0];
+  if (!row) return res.status(404).json({ error: "Not found" });
+  const { name, category, tags, svg, motion } = req.body || {};
+  if (name != null && (typeof name !== "string" || !name.trim() || name.length > 80)) return res.status(400).json({ error: "name must be 1-80 characters" });
+  if (category != null && (typeof category !== "string" || !category.trim() || category.length > 40)) return res.status(400).json({ error: "category must be 1-40 characters" });
+  if (tags != null && (!Array.isArray(tags) || tags.length > 20 || tags.some((t) => typeof t !== "string" || t.length > 30))) return res.status(400).json({ error: "tags must be ≤20 short strings" });
+  if (motion != null && !["engine", "self"].includes(motion)) return res.status(400).json({ error: 'motion must be "engine" or "self"' });
+  let cleanSvg = row.svg, dropped = [];
+  if (svg != null) {
+    if (typeof svg !== "string" || !svg.trim()) return res.status(400).json({ error: "svg markup required" });
+    if (svg.length > MAX_SVG_CHARS) return res.status(413).json({ error: `SVG too large (max ${MAX_SVG_CHARS / 1024} KB)` });
+    const clean = sanitizeSvg(svg);
+    if (!clean.ok) return res.status(422).json({ error: "SVG rejected by the sanitizer (no renderable content)", dropped: clean.dropped });
+    cleanSvg = clean.svg;
+    dropped = clean.dropped;
+  }
+  await db.execute({
+    sql: "UPDATE svg_icons SET name = ?, category = ?, tags = ?, svg = ?, motion = ?, updated_at = datetime('now') WHERE id = ?",
+    args: [name != null ? name.trim() : row.name, category != null ? category.trim() : row.category, tags != null ? JSON.stringify(tags) : row.tags, cleanSvg, motion || row.motion, req.params.id],
+  });
+  const updated = await db.execute({ sql: "SELECT * FROM svg_icons WHERE id = ?", args: [req.params.id] });
+  res.json({ ...iconMeta(updated.rows[0]), sanitized: dropped });
+});
+
+app.delete("/api/svg-icons/:id", requireAuth, requireAdmin, async (req, res) => {
+  const result = await db.execute({ sql: "DELETE FROM svg_icons WHERE id = ?", args: [req.params.id] });
   if (result.rowsAffected === 0) return res.status(404).json({ error: "Not found" });
   res.json({ ok: true });
 });

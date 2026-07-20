@@ -62,6 +62,18 @@ export async function initSchema() {
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       )`,
       `CREATE INDEX IF NOT EXISTS idx_assets_owner ON assets(owner_id)`,
+      // Admin-managed SVG icon library (global, not per-user): sanitized at
+      // upload (svgSanitize) and served read-only to every signed-in user.
+      `CREATE TABLE IF NOT EXISTS svg_icons (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'Icons',
+        tags TEXT NOT NULL DEFAULT '[]',
+        svg TEXT NOT NULL,
+        motion TEXT NOT NULL DEFAULT 'engine',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
     ],
     "write"
   );
