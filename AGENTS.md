@@ -14,7 +14,7 @@ This file exists because features that were **100% working have been accidentall
 |---|---|---|
 | Export (WebCodecs MP4 + WebM fallback) | deterministic µs timestamps; data-URI asset inlining (canvas-taint); ts-ebml WebM duration repair | `src/export/test-stage-roundtrip.mjs` (11), frame-math (80) |
 | Canvas transforms | move/resize/rotate on canvas ALWAYS write timeline keyframes when Animate armed (base edit when disarmed); resize = scale ◆ + base compensation | `check-r8w3` (174), `check-r9w1` (85) |
-| Shape morph | `tracks.shape` + `morphPtsAt`; A→B indicators in Inspector/panel/canvas badge | `check-r9w2` (340) |
+| Shape morph | `tracks.shape` + `morphPtsAt`; A→B indicators in Inspector/panel/canvas badge | `check-r9w2` (340), `check-editor-w1` (browser: cards appear for a selected shape, chip flip star>bolt) |
 | Path motion | `props.path.pts` + `prog` ◆; path wins over x/y; `progKeyPlan` never collapses keys at layer end | `check-r9w2` |
 | Confetti | clamped to stage bounds (90px fade margin); fraction-of-life fades; `props.dur` explicit duration; 17 styles | `check-confetti` (428), `check-r8w2` (213) |
 | Charts | lifecycle maps to object's timeline span: play-once entrance (≤1400ms), static hold, animated exit (≤1100ms); NO start/dur in Inspector | `check-charts` (240) |

@@ -635,4 +635,22 @@ async function runPart2(page, { check, proj, stageRect, toScreen, drag, scrubTo 
   await page.waitForTimeout(250);
   p = await proj(page);
   check("ungroup #3 restores the four flat shapes (no clips left)", p.objects.length === 4 && p.objects.every((o) => o.type === "shape"), JSON.stringify(p.objects.map((o) => `${o.type}:${o.name}`)));
+
+  /* ==================== #B shape morph UI — visible for a selected shape == */
+  console.log("\nshape morph — Inspector cards appear for a selected shape (verify-only)");
+  await laneDiv("A").click(); await page.waitForTimeout(250);
+  await scrubTo(page, 0); /* pin the playhead so the first target ◆ lands at t=0 */
+  check("the Shape card renders with the target search", await page.evaluate(() => document.body.textContent.includes("Shape") && !!document.querySelector('input[placeholder="Search shapes…"]')));
+  check("the Morph card renders with the target picker + static hint chip",
+    (await page.locator("[data-morph-picker]").count()) === 1 && (await page.locator('[data-morph-chip="none"]').count()) === 1);
+  await page.locator('[data-morph-picker] button[title^="Star"]').first().click();
+  await page.waitForTimeout(200);
+  check("picking ONE target writes a shape ◆ (single ◆ = still constant, chip stays static)",
+    (await page.locator('[data-morph-chip="none"]').count()) === 1 && (await proj(page)).objects.find((o) => o.name === "A").tracks.shape?.length === 1);
+  await scrubTo(page, 0.5);
+  await page.locator('[data-morph-picker] button[title^="Bolt"]').first().click();
+  await page.waitForTimeout(200);
+  const chip = await page.locator("[data-morph-chip]").first().getAttribute("data-morph-chip");
+  check("a second, DIFFERENT target ◆ switches the chip to the A→B morphing state", chip === "star>bolt", chip);
+  check("the animated A→B preview plays in the Morph card", (await page.locator("[data-morph-preview]").count()) === 1);
 }
