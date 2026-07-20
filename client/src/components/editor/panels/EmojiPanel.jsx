@@ -1,6 +1,6 @@
 /* Emoji drawer — featured Microsoft Fluent Emoji (3D) teaser with a right-side
    arrow (→) that swaps the panel IN PLACE to the full searchable library (no
-   modal): search, sub-category chips, Animated/Static toggle and every emoji as
+   modal): search, sub-category chips and every emoji as
    a hover-play card. Clicking ANY emoji (featured or library card) inserts it
    as a plain 100×100 IMAGE — it resizes like any image (8-way grips).
 
@@ -38,7 +38,8 @@ export default function EmojiPanel({ insertEmoji, startBrowsing = false }) {
   const [browsing, setBrowsing] = useState(startBrowsing); /* teaser ⇆ full library, inline */
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("All");
-  const [variant, setVariant] = useState("animated");
+  /* no Animated/Static toggle: every insert is a plain static image (thumbs
+     still hover-play the engine loop as a preview — insertion is still-only) */
 
   const CAP = 60; /* never mount more than this many image thumbnails at once */
   const { list, popular, truncated } = useMemo(() => {
@@ -95,12 +96,6 @@ export default function EmojiPanel({ insertEmoji, startBrowsing = false }) {
           {/* full library — inline in this same panel (no modal) */}
           <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
             <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search emoji…" style={{ ...inputStyle, flex: 1, marginBottom: 0, padding: "5px 8px", fontSize: 11.5 }} />
-            <div style={{ display: "flex", background: C.bg1, border: `1px solid ${C.line}`, borderRadius: 7, padding: 2, gap: 2 }}>
-              {[["animated", "Anim"], ["static", "Still"]].map(([v, label]) => (
-                <button key={v} onClick={() => setVariant(v)}
-                  style={{ padding: "0 9px", height: 24, borderRadius: 5, border: "none", cursor: "pointer", fontSize: 10, fontWeight: variant === v ? 700 : 500, background: variant === v ? C.amber : "transparent", color: variant === v ? "#1A1405" : C.dim }}>{label}</button>
-              ))}
-            </div>
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 9 }}>
             {["All", ...EMOJI_CATS].map((c) => (
@@ -115,7 +110,7 @@ export default function EmojiPanel({ insertEmoji, startBrowsing = false }) {
                 onClick={() => pick(e)}
                 onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); pick(e); } }}
                 style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, background: C.bg1, border: `1px solid ${C.line}`, borderRadius: 8, padding: "7px 3px 5px", cursor: "pointer", overflow: "hidden" }}>
-                <EmojiThumb emoji={e} variant={variant} art={38} />
+                <EmojiThumb emoji={e} art={38} />
                 <span style={{ fontSize: 8, color: C.dim, textAlign: "center", lineHeight: 1.15, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: "100%" }}>{e.name}</span>
               </div>
             ))}

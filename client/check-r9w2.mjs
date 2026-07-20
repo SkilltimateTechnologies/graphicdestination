@@ -323,6 +323,7 @@ async function main() {
     check("the library is INLINE in the panel (no modal overlay)", !lib.includes("position:fixed") && !lib.includes('role="dialog"') && /Search emoji/i.test(lib));
     check("the inline library uses an auto-fill card grid", lib.includes("grid-template-columns"));
     check("every emoji card carries a non-empty still thumbnail", cards.length > 0 && cards.every((c) => c.includes("data-thumb-still")));
+    check("no Animated/Static toggle — every insert is a still image (thumbs preview the loop only)", !lib.includes(">Anim<") && !lib.includes(">Still<") && !lib.includes("Animated"));
     const ep = renderToStaticMarkup(h(EmojiPanel, { insertEmoji: () => {} }));
     check("EmojiPanel shows 4 featured emoji as a teaser", (ep.split('data-emoji-featured="').length - 1) === 4);
     check("EmojiPanel has a right-arrow browse affordance (no big button)", ep.includes("data-emoji-browse") && ep.includes("→") && !/Browse all \d+ emoji →/.test(ep));
