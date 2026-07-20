@@ -11,14 +11,14 @@
  *   3.  EDITOR loads the built-in demo project at /editor (Scenes + Stats
  *       clip lanes render).
  *   4.  WIDGET SWEEP on a fresh cloud project — inserts one of each: shape,
- *       text, icon kit, UI element, chart, counter, confetti, map, backdrop,
+ *       text, emoji, UI element, chart, counter, confetti, map,
  *       template-as-group; every insert adds a timeline lane.
  *   5.  CANVAS TRANSFORMS (autokey always-on): move + resize + rotate a text
  *       and a shape → timeline ◆ diamonds appear on the x/y, scale and
  *       rotation lanes.
- *   6.  CLIP ROW PINNING: a clip bar dragged horizontally with a big vertical
- *       component stays in its own row (R8w1 deadzone), then the opened gap
- *       shows a gap pill whose Close-gap ripple pulls the clip back.
+ *   6.  CLIP LANE STABILITY (one layer per row — AE/CapCut model): a clip bar
+ *       dragged horizontally with a vertical wobble retimes but keeps its own
+ *       lane; two clips never share a lane, so rows never reshuffle.
  *   7.  GRID toggle mounts/unmounts the export-safe canvas overlay.
  *   8.  CAMERA card "Focus here" on a selected object writes eased camera ◆.
  *   9.  SAVE control (timeline bar) persists the project; a server-side GET
@@ -180,39 +180,24 @@ async function main() {
     check("top bar shows Main breadcrumb + Export", await page.locator('button:has-text("Main")').count() >= 1 && await page.locator('button:has-text("Export")').count() >= 1);
     check("stage renders at 1280×720", (await stageRect()) !== null);
 
-    /* ==================== 6. clip row pinning + gap pill (demo project) ==== */
-    console.log("\n#6 demo clip — row-pinned drag, then gap-pill ripple close");
+    /* ==================== 6. clip lane stability + retime (demo project) ==== */
+    console.log("\n#6 demo clip — bar drag retimes; lanes never reshuffle (one layer per row, AE/CapCut)");
     const statsBar = page.locator('div[title="Scene 2 · Stats · drag to retime · dbl-click to open"]');
     const introBar = page.locator('div[title="Scene 1 · Intro · drag to retime · dbl-click to open"]');
     check("both demo clip bars render in the timeline", await statsBar.count() === 1 && await introBar.count() === 1);
     const ib0 = await introBar.boundingBox();
-    const mapBar = page.locator('div[title="Drag to move (keyframes travel with the bar) · drag edges to trim"]').first();
-    const mb0 = await mapBar.boundingBox();
+    const sb0 = await statsBar.boundingBox();
+    /* one layer per row: two clips NEVER share a lane, so a lane shows one
+       label and a time move can never reshuffle rows (the old packRows
+       packing is gone — pure gap/ripple math stays guarded in check-timeline) */
+    check("one layer per row: Intro and Stats get their OWN lanes (no packing)", Math.abs(ib0.y - sb0.y) > 10, `intro y ${Math.round(ib0.y)} · stats y ${Math.round(sb0.y)}`);
     /* drag the INTRO bar left ~−30px with an incidental −20px vertical wobble
-       ACROSS the row boundary (5px past the edge < the 20px deadzone, <60%
-       into the next row) — the R8w1 row pin must hold: the bar retimes but
-       stays packed with the Stats clip, never dumped into the map's lane.
-       (A bigger left drag would cross t=0 and legitimately re-SORT the
-       ascending-by-start rows — not a row jump.) */
+       across the row boundary — the bar retimes but its lane is stable */
     await drag({ x: ib0.x + ib0.width / 2, y: ib0.y + ib0.height / 2 }, -30, -20);
     const ib1 = await introBar.boundingBox();
     const sb1 = await statsBar.boundingBox();
-    check("cross-row drag: the clip STAYS in its packed lane (still with Stats, not the map's)", Math.abs(ib1.y - sb1.y) <= 2 && Math.abs(ib1.y - mb0.y) > 10, `intro y ${Math.round(ib0.y)} → ${Math.round(ib1.y)} · stats y ${Math.round(sb1.y)} · map y ${Math.round(mb0.y)}`);
-    check("cross-row drag: the clip retimed left", ib1.x < ib0.x - 10, `x ${Math.round(ib0.x)} → ${Math.round(ib1.x)}`);
-    /* the retime widened the gap before the Stats clip → gap pill; select it
-       and ripple-close with the transport ✕ */
-    const pill = page.locator(".gd-gap-pill").first();
-    check("gap pill renders in the clips' row", await pill.count() >= 1, `${await page.locator(".gd-gap-pill").count()} pills`);
-    await pill.click();
-    await page.waitForTimeout(150);
-    const closeBtn = page.locator("button.gd-gap-delete");
-    check("selected pill arms the ✕ Close gap transport button", await closeBtn.count() === 1);
-    await closeBtn.click();
-    await page.waitForTimeout(250);
-    const sb2 = await statsBar.boundingBox();
-    const ib2 = await introBar.boundingBox();
-    check("close-gap rippled the Stats clip left, ADJACENT to the Intro bar", Math.abs(sb2.x - (ib2.x + ib2.width)) <= 4, `statsLeft=${Math.round(sb2.x)} introRight=${Math.round(ib2.x + ib2.width)}`);
-    check("the gap pill is gone after the ripple", await page.locator(".gd-gap-pill").count() === 0);
+    check("cross-row wobble: the clip retimed left", ib1.x < ib0.x - 10, `x ${Math.round(ib0.x)} → ${Math.round(ib1.x)}`);
+    check("cross-row wobble: BOTH bars kept their lanes (no reshuffle)", Math.abs(ib1.y - ib0.y) <= 2 && Math.abs(sb1.y - sb0.y) <= 2, `intro y ${Math.round(ib0.y)} → ${Math.round(ib1.y)} · stats y ${Math.round(sb0.y)} → ${Math.round(sb1.y)}`);
 
     /* ==================== 7. grid toggle (demo project) ==================== */
     console.log("\n#7 grid toggle — export-safe canvas overlay");
@@ -344,22 +329,24 @@ async function main() {
       const after = await laneCount();
       check(`insert map → new lane (${before} → ${after})`, after === before + 1 && (await laneNames()).some((n) => n.includes("map")), (await laneNames()).join(" · "));
     }
-    await insert("backdrop", "Backdrop", 'button[title$="Click to insert (Amber Dusk)."]');
-    /* R8w4 fix: rail panels are mutually exclusive — the Backdrop panel is
-       still open after its insert (multi-insert by design); opening the
-       Templates rail panel must REPLACE it, not stack under it */
-    check("backdrop panel stays open after its insert (multi-insert by design)", (await page.locator('.gd-panel button[title*="Amber Dusk"]').count()) >= 1);
+    /* the Backdrop rail button was retired (engine/backdrops.js stays for
+       back-compat) — the widget insert sweep ends at the map */
+    /* R8w4 fix: rail panels are mutually exclusive — open the Confetti panel,
+       then the Templates rail panel must REPLACE it, not stack under it */
+    await page.locator('button:has(span:text-is("Confetti"))').first().click();
+    await page.waitForTimeout(260);
+    check("confetti panel opens from the rail", (await page.locator('.gd-panel button[title$="Click to add at the playhead."]').count()) >= 1);
     {
       const before = await laneCount();
       await page.locator('button:has(span:text-is("Templates"))').first().click();
       await page.waitForTimeout(300);
-      check("R8w4: opening Templates REPLACED the Backdrop panel (mutual exclusion)", (await page.locator('.gd-panel button[title*="Amber Dusk"]').count()) === 0 && (await page.locator(".gd-panel").count()) === 1, `${await page.locator(".gd-panel").count()} panels`);
+      check("R8w4: opening Templates REPLACED the Confetti panel (mutual exclusion)", (await page.locator('.gd-panel button[title$="Click to add at the playhead."]').count()) === 0 && (await page.locator(".gd-panel").count()) === 1, `${await page.locator(".gd-panel").count()} panels`);
       check("the one open panel is the Templates panel", (await page.locator('button[title$="as a movable group at the playhead"]').count()) >= 1);
       await page.locator('button[title$="as a movable group at the playhead"]').first().click();
       await page.waitForTimeout(320);
       check(`insert template-as-group → new lane (${before} → ${before + 1})`, (await laneCount()) === before + 1, (await laneNames()).join(" · "));
     }
-    check("all 10 widgets inserted → 10 lanes", (await laneCount()) === 10, `${await laneCount()} lanes: ${(await laneNames()).join(" · ")}`);
+    check("all 9 widgets inserted → 9 lanes", (await laneCount()) === 9, `${await laneCount()} lanes: ${(await laneNames()).join(" · ")}`);
 
     /* ==================== 9. save control → server persistence ============ */
     console.log("\n#9 timeline save control → server persistence");
@@ -372,7 +359,7 @@ async function main() {
     const saved = gr.ok ? (await gr.json()).data : null;
     const types = saved ? saved.objects.map((o) => o.type) : [];
     check("server-side GET returns the saved project", !!saved && Array.isArray(saved.objects), gr.status);
-    for (const t of ["shape", "text", "kit", "chart", "number", "confetti", "map", "backdrop", "clip"]) {
+    for (const t of ["shape", "text", "kit", "chart", "number", "confetti", "map", "clip"]) {
       check(`saved project contains a ${t}`, types.includes(t), types.join(","));
     }
     const savedShape = saved && saved.objects.find((o) => o.type === "shape");
