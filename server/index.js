@@ -12,6 +12,8 @@ import { hashPassword, verifyPassword, signSession, requireAuth, COOKIE_NAME, CO
 import { sanitizeSvg } from "./svgSanitize.js";
 import { validateTemplateData } from "./templateValidate.js";
 import { sniffAssetMime, mimeFamily } from "./assetSniff.js";
+import { kimiConfigured, aiUsageGate, kimiAnalyzeMotion, kimiRefineSpec } from "./kimi.js";
+import { validateAiSpec, AI_FALLBACK_SPEC } from "./aiValidate.js";
 import { authLimiter, shareLimiter, createRateLimiter } from "./ratelimit.js";
 import { logger } from "./logger.js";
 import { initErrorTracking, captureError } from "./errorTracking.js";
@@ -649,6 +651,65 @@ app.delete("/api/templates/:id", requireAuth, async (req, res) => {
   }
   await db.execute({ sql: "DELETE FROM templates WHERE id = ?", args: [req.params.id] });
   res.json({ ok: true });
+});
+
+/* ---------------- AI Asset Studio (Kimi 3 proxy) ----------------
+ * The API key NEVER leaves the server (kimi.js is the only outbound caller).
+ * Guardrails: per-user hourly window + app-wide daily budget (aiUsageGate),
+ * 20s outbound timeout, and every spec the model returns passes the same
+ * validation gate as a user upload (aiValidate.js) — model output is
+ * untrusted input. Without a key the routes degrade to a deterministic
+ * fallback spec (provider "fallback") so dev/CI keep working.
+ */
+
+app.post("/api/ai/analyze-motion", requireAuth, async (req, res) => {
+  const gate = aiUsageGate(req.user.sub);
+  if (gate) { if (gate.retryAfter) res.setHeader("Retry-After", String(gate.retryAfter)); return res.status(gate.status).json({ error: gate.error }); }
+  const { assetId, note } = req.body || {};
+  if (note != null && (typeof note !== "string" || note.length > 500)) return res.status(400).json({ error: "note must be ≤500 characters" });
+  let imageDataUrl = null;
+  if (assetId != null) {
+    const found = await db.execute({ sql: "SELECT * FROM assets WHERE id = ? AND owner_id = ?", args: [assetId, req.user.sub] });
+    const row = found.rows[0];
+    if (!row) return res.status(404).json({ error: "Asset not found" });
+    if (!String(row.mime).startsWith("image/")) return res.status(415).json({ error: "Only image assets can be analyzed" });
+    imageDataUrl = `data:${row.mime};base64,${row.data}`;
+  }
+  try {
+    const out = await kimiAnalyzeMotion({ imageDataUrl, note: note || "" });
+    if (out.provider === "fallback") {
+      return res.json({ spec: AI_FALLBACK_SPEC, provider: "fallback", clamped: [], configured: kimiConfigured() });
+    }
+    if (out.error && !out.spec) return res.status(502).json({ error: `Kimi analysis failed — ${out.error}`, provider: "kimi" });
+    const v = validateAiSpec(out.spec);
+    if (!v.ok) return res.status(502).json({ error: `Kimi returned an unusable spec (${v.error})`, provider: "kimi" });
+    res.json({ spec: v.spec, provider: "kimi", clamped: v.clamped, configured: true });
+  } catch (e) {
+    console.error("POST /api/ai/analyze-motion failed:", e.message);
+    res.status(500).json({ error: "Analysis failed" });
+  }
+});
+
+app.post("/api/ai/refine", requireAuth, async (req, res) => {
+  const gate = aiUsageGate(req.user.sub);
+  if (gate) { if (gate.retryAfter) res.setHeader("Retry-After", String(gate.retryAfter)); return res.status(gate.status).json({ error: gate.error }); }
+  const { spec, instruction } = req.body || {};
+  if (typeof instruction !== "string" || !instruction.trim() || instruction.length > 500) return res.status(400).json({ error: "instruction must be 1-500 characters" });
+  const cur = validateAiSpec(spec);
+  if (!cur.ok) return res.status(400).json({ error: `current spec is invalid: ${cur.error}` });
+  try {
+    const out = await kimiRefineSpec({ spec: cur.spec, instruction: instruction.trim() });
+    if (out.provider === "fallback") {
+      return res.json({ spec: cur.spec, provider: "fallback", clamped: [], configured: kimiConfigured(), note: "Kimi key not configured — spec unchanged" });
+    }
+    if (out.error && !out.spec) return res.status(502).json({ error: `Kimi refine failed — ${out.error}`, provider: "kimi" });
+    const v = validateAiSpec(out.spec);
+    if (!v.ok) return res.status(502).json({ error: `Kimi returned an unusable spec (${v.error})`, provider: "kimi" });
+    res.json({ spec: v.spec, provider: "kimi", clamped: v.clamped, configured: true });
+  } catch (e) {
+    console.error("POST /api/ai/refine failed:", e.message);
+    res.status(500).json({ error: "Refine failed" });
+  }
 });
 
 /* ---------------- user settings (R9w3) ----------------

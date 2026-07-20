@@ -6,6 +6,7 @@ import Editor from "./pages/Editor";
 import Dashboard from "./pages/Dashboard";
 import Settings from "./pages/Settings";
 import Templates from "./pages/Templates";
+import Studio from "./pages/Studio";
 import PublicPlayer from "./pages/PublicPlayer";
 
 function ProtectedRoute({ children }) {
@@ -45,6 +46,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <Templates />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/studio"
+            element={
+              <ProtectedRoute>
+                <Studio />
               </ProtectedRoute>
             }
           />
