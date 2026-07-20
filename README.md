@@ -115,3 +115,4 @@ Operational endpoints:
 | [SECURITY.md](SECURITY.md) | Security posture, known gaps, vulnerability reporting |
 | [docs/backup-restore.md](docs/backup-restore.md) | Backup/restore runbook — RPO/RTO, drills |
 | [CHANGELOG.md](CHANGELOG.md) | Notable changes per release |
+| [docs/UPDATES.md](docs/UPDATES.md) | "Life of updates" — planned features & ideas backlog |
