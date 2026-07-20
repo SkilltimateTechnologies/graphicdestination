@@ -653,4 +653,42 @@ async function runPart2(page, { check, proj, stageRect, toScreen, drag, scrubTo 
   const chip = await page.locator("[data-morph-chip]").first().getAttribute("data-morph-chip");
   check("a second, DIFFERENT target ◆ switches the chip to the A→B morphing state", chip === "star>bolt", chip);
   check("the animated A→B preview plays in the Morph card", (await page.locator("[data-morph-preview]").count()) === 1);
+
+  /* ==================== brand colors by default ================= */
+  console.log("\nbrand colors — inserts pick up the active brand's palette");
+  const BRAND5 = ["#112233", "#445566", "#778899", "#AABBCC", "#DDEEFF"];
+  await page.evaluate((colors) => window.__loadProject(JSON.stringify({
+    objects: [],
+    brands: [{ id: "bX", name: "TestBrand", colors, headFont: "Inter", bodyFont: "Inter" }],
+    brandId: "bX",
+  })), BRAND5);
+  await page.waitForTimeout(400);
+  await page.locator('button:has(span:text-is("Shapes"))').first().click();
+  await page.waitForTimeout(260);
+  await page.locator('.gd-panel button[title="Rectangle"]').first().click();
+  await page.waitForTimeout(300);
+  p = await proj(page);
+  const brandShape = p.objects.find((o) => o.type === "shape");
+  check("shape insert fills with the brand primary + strokes the accent", brandShape.props.fill === "#112233" && brandShape.props.sC === "#445566", JSON.stringify({ fill: brandShape.props.fill, sC: brandShape.props.sC }));
+  await page.locator('button:has(span:text-is("Charts"))').first().click();
+  await page.waitForTimeout(260);
+  await page.locator('.gd-panel button[title$="Click to insert."]').first().click();
+  await page.waitForTimeout(300);
+  p = await proj(page);
+  const brandChart = p.objects.find((o) => o.type === "chart");
+  check("chart insert seeds the series palette from the brand", JSON.stringify(brandChart.props.colors) === JSON.stringify(BRAND5), JSON.stringify(brandChart.props.colors));
+  await page.locator('button:has(span:text-is("Number"))').first().click();
+  await page.waitForTimeout(260);
+  await page.locator('.gd-panel button:has-text("Count Up")').first().click();
+  await page.waitForTimeout(300);
+  p = await proj(page);
+  const brandNum = p.objects.find((o) => o.type === "number");
+  check("counter insert rings in the brand accent", brandNum.props.ringC === "#445566", brandNum.props.ringC);
+  await page.locator('button:has(span:text-is("Confetti"))').first().click();
+  await page.waitForTimeout(260);
+  await page.locator('.gd-panel button[title$="Click to add at the playhead."]').first().click();
+  await page.waitForTimeout(300);
+  p = await proj(page);
+  const brandConf = p.objects.find((o) => o.type === "confetti");
+  check("confetti insert takes the brand particle palette", JSON.stringify(brandConf.props.colors) === JSON.stringify(BRAND5), JSON.stringify(brandConf.props.colors));
 }

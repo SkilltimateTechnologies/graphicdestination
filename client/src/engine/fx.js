@@ -539,13 +539,19 @@ export function confettiParticles(obj) {
   const style = confettiRawStyleOf(P); /* raw id — family styles generate their OWN fields */
   const rng = mulberry32(P.seed);
   const power = P.power || 1;
+  /* particle palette: an explicit colors[] prop (e.g. seeded from the active
+     brand at insert) recolors the generic SWATCHES picks; absent → the fixed
+     swatches, byte-identical for every old project. Themed styles (fire /
+     usa / snow) keep their own palette either way. */
+  const PAL = Array.isArray(P.colors) && P.colors.length ? P.colors : null;
+  const pick = (n) => (PAL ? PAL[Math.floor(rng() * PAL.length)] : SWATCHES[Math.floor(rng() * n)]);
   const out = [];
   if (style === "burst") {
     /* original upward fountain — unchanged field set + rng consumption order */
     for (let i = 0; i < P.count; i++) {
       const ang = -Math.PI / 2 + (rng() - 0.5) * Math.PI * 1.1;
       const speed = (0.55 + rng() * 0.9) * power;
-      out.push({ vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, size: 5 + rng() * 9, color: SWATCHES[Math.floor(rng() * 5)], spin: (rng() - 0.5) * 1400, round: rng() > 0.6, drift: (rng() - 0.5) * 60, wob: rng() * Math.PI * 2 });
+      out.push({ vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, size: 5 + rng() * 9, color: pick(5), spin: (rng() - 0.5) * 1400, round: rng() > 0.6, drift: (rng() - 0.5) * 60, wob: rng() * Math.PI * 2 });
     }
     return out;
   }
@@ -554,7 +560,7 @@ export function confettiParticles(obj) {
     for (let i = 0; i < P.count; i++) {
       out.push({
         ox: (rng() - 0.5) * 620, vy: (0.3 + rng() * 0.45) * power,
-        size: 5 + rng() * 8, color: SWATCHES[Math.floor(rng() * 5)],
+        size: 5 + rng() * 8, color: pick(5),
         spin: (rng() - 0.5) * 700, round: rng() > 0.55,
         swayA: 12 + rng() * 26, swayF: 2.2 + rng() * 2.6, wob: rng() * Math.PI * 2,
       });
@@ -567,7 +573,7 @@ export function confettiParticles(obj) {
     for (let i = 0; i < P.count; i++) {
       const vx = dir * (0.5 + rng() * 0.8) * power;
       const vy = -(0.95 + rng() * 0.8) * power;
-      out.push({ vx, vy, size: 5 + rng() * 8, color: SWATCHES[Math.floor(rng() * 5)], spin: (rng() - 0.5) * 1200, round: rng() > 0.6, drift: (rng() - 0.5) * 46, wob: rng() * Math.PI * 2 });
+      out.push({ vx, vy, size: 5 + rng() * 8, color: pick(5), spin: (rng() - 0.5) * 1200, round: rng() > 0.6, drift: (rng() - 0.5) * 46, wob: rng() * Math.PI * 2 });
     }
     return out;
   }
@@ -576,7 +582,7 @@ export function confettiParticles(obj) {
     for (let i = 0; i < P.count; i++) {
       const ang = rng() * Math.PI * 2;
       const speed = (0.35 + rng() * 0.85) * power;
-      out.push({ vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, size: 3.5 + rng() * 4.5, color: SWATCHES[Math.floor(rng() * 5)], spin: (rng() - 0.5) * 500, round: true, drift: (rng() - 0.5) * 26, wob: rng() * Math.PI * 2, twk: 6 + rng() * 9 });
+      out.push({ vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, size: 3.5 + rng() * 4.5, color: pick(5), spin: (rng() - 0.5) * 500, round: true, drift: (rng() - 0.5) * 26, wob: rng() * Math.PI * 2, twk: 6 + rng() * 9 });
     }
     return out;
   }
@@ -586,7 +592,7 @@ export function confettiParticles(obj) {
       out.push({
         th0: rng() * Math.PI * 2, om: (2.2 + rng() * 2.8) * (rng() > 0.85 ? -1 : 1),
         r0: 6 + rng() * 26, vr: (90 + rng() * 170) * power,
-        size: 4 + rng() * 7, color: SWATCHES[Math.floor(rng() * 5)],
+        size: 4 + rng() * 7, color: pick(5),
         spin: (rng() - 0.5) * 900, round: rng() > 0.5, wob: rng() * Math.PI * 2,
       });
     }
@@ -612,7 +618,7 @@ export function confettiParticles(obj) {
       const side = i % 2 === 0 ? 1 : -1;
       const vx = side * (0.55 + rng() * 0.75) * power;
       const vy = -(1.05 + rng() * 0.75) * power;
-      out.push({ vx, vy, size: 5 + rng() * 8, color: SWATCHES[Math.floor(rng() * 5)], spin: (rng() - 0.5) * 1500, round: rng() > 0.55, drift: (rng() - 0.5) * 40, wob: rng() * Math.PI * 2 });
+      out.push({ vx, vy, size: 5 + rng() * 8, color: pick(5), spin: (rng() - 0.5) * 1500, round: rng() > 0.55, drift: (rng() - 0.5) * 40, wob: rng() * Math.PI * 2 });
     }
     return out;
   }
@@ -622,7 +628,7 @@ export function confettiParticles(obj) {
     for (let i = 0; i < P.count; i++) {
       const ang = -Math.PI / 2 + (rng() - 0.5) * Math.PI * 0.34;
       const speed = (0.85 + rng() * 1.15) * power;
-      out.push({ vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, size: 4 + rng() * 7, color: SWATCHES[Math.floor(rng() * 5)], spin: (rng() - 0.5) * 1100, round: rng() > 0.5, drift: (rng() - 0.5) * 90, wob: rng() * Math.PI * 2 });
+      out.push({ vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, size: 4 + rng() * 7, color: pick(5), spin: (rng() - 0.5) * 1100, round: rng() > 0.5, drift: (rng() - 0.5) * 90, wob: rng() * Math.PI * 2 });
     }
     return out;
   }
@@ -633,7 +639,7 @@ export function confettiParticles(obj) {
       const ang = rng() * Math.PI * 2;
       const speed = (0.4 + rng() * 1.05) * power;
       const big = rng() > 0.72;
-      out.push({ vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed - 0.25 * power, size: big ? 9 + rng() * 8 : 3.5 + rng() * 5.5, color: SWATCHES[Math.floor(rng() * 6)], spin: (rng() - 0.5) * 1600, round: rng() > 0.45, drift: (rng() - 0.5) * 70, wob: rng() * Math.PI * 2 });
+      out.push({ vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed - 0.25 * power, size: big ? 9 + rng() * 8 : 3.5 + rng() * 5.5, color: pick(6), spin: (rng() - 0.5) * 1600, round: rng() > 0.45, drift: (rng() - 0.5) * 70, wob: rng() * Math.PI * 2 });
     }
     return out;
   }
@@ -669,7 +675,7 @@ export function confettiParticles(obj) {
     for (let i = 0; i < P.count; i++) {
       out.push({
         ox: (rng() - 0.5) * 660, vy: (0.22 + rng() * 0.3) * power,
-        size: 7 + rng() * 11, color: SWATCHES[Math.floor(rng() * 5)],
+        size: 7 + rng() * 11, color: pick(5),
         spin: (rng() - 0.5) * 1500, round: false,
         swayA: 22 + rng() * 40, swayF: 1.6 + rng() * 2.4, wob: rng() * Math.PI * 2,
       });
@@ -684,7 +690,7 @@ export function confettiParticles(obj) {
       out.push({
         th0: rng() * Math.PI * 2, om: 4.5 + rng() * 3.5,
         r0: 4 + rng() * 20, vr: (60 + rng() * 130) * power,
-        size: 3.5 + rng() * 6, color: SWATCHES[Math.floor(rng() * 5)],
+        size: 3.5 + rng() * 6, color: pick(5),
         spin: (rng() - 0.5) * 1100, round: rng() > 0.5, wob: rng() * Math.PI * 2,
       });
     }
@@ -706,7 +712,7 @@ export function confettiParticles(obj) {
     for (let i = 0; i < P.count; i++) {
       out.push({
         ox: (rng() - 0.5) * 740, vy: (0.05 + rng() * 0.085) * power,
-        size: 4 + rng() * 5.5, color: SWATCHES[Math.floor(rng() * 5)],
+        size: 4 + rng() * 5.5, color: pick(5),
         spin: 0, round: rng() > 0.4,
         swayA: 20 + rng() * 42, swayF: 0.5 + rng() * 1.1, wob: rng() * Math.PI * 2,
       });
@@ -717,7 +723,7 @@ export function confettiParticles(obj) {
   for (let i = 0; i < P.count; i++) {
     const ang = (i / Math.max(1, P.count)) * Math.PI * 2 + (rng() - 0.5) * 0.24;
     const speed = (0.9 + rng() * 0.5) * power;
-    out.push({ vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, size: 4 + rng() * 5, color: SWATCHES[Math.floor(rng() * 5)], spin: (rng() - 0.5) * 900, round: rng() > 0.5 });
+    out.push({ vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, size: 4 + rng() * 5, color: pick(5), spin: (rng() - 0.5) * 900, round: rng() > 0.5 });
   }
   return out;
 }
@@ -875,6 +881,11 @@ export function chartModel(P, time) {
   const n = rows.length;
   const W = Math.max(60, Number(P && P.w) || 560);
   const H = Math.max(60, Number(P && P.h) || 340);
+  /* series palette: an explicit colors[] prop (e.g. seeded from the active
+     brand at insert) wins; absent → the fixed SWATCHES rotation, so every
+     old project renders byte-identically */
+  const pal = Array.isArray(P && P.colors) && P.colors.length ? P.colors : null;
+  const sw = (s) => (pal ? pal[s % pal.length] : SWATCHES[s % 5]);
   const showVals = !!(P && P.showVals);
   const Wm = chartWindows(P);
   const all = chartProgress(P, time, 0, 1); /* whole-chart driver (grid/chrome/dial) */
@@ -907,7 +918,7 @@ export function chartModel(P, time) {
       const pr = chartProgress(P, time, i, n);
       const cx = padL + slot * (i + 0.5);
       const h = Math.max(0, (v / vmax) * plotH * pr.scale);
-      items.push({ k: "path", role: "bar", d: topBarD(cx - bw / 2, base - h, bw, h, Math.min(8, bw / 2.6)), fill: SWATCHES[i % 5], op: r3(pr.op) });
+      items.push({ k: "path", role: "bar", d: topBarD(cx - bw / 2, base - h, bw, h, Math.min(8, bw / 2.6)), fill: sw(i), op: r3(pr.op) });
       if (showVals) {
         const vy = base - h - 9;
         txt("val", cx, vy, Math.round(v * pr.cnt), { op: valPopOp(pr), tr: scaleTr(cx, vy, Math.max(0, pr.scale)) });
@@ -927,7 +938,7 @@ export function chartModel(P, time) {
         const v = row.vals[s] || 0;
         const pr = chartProgress(P, time, i * m + s, tot); /* group-then-series stagger */
         const h = Math.max(0, (v / vmax) * plotH * pr.scale);
-        items.push({ k: "path", role: "bar", d: topBarD(gx + s * bw, base - h, Math.max(2, bw - 2.5), h, Math.min(6, bw / 3)), fill: SWATCHES[s % 5], op: r3(pr.op) });
+        items.push({ k: "path", role: "bar", d: topBarD(gx + s * bw, base - h, Math.max(2, bw - 2.5), h, Math.min(6, bw / 3)), fill: sw(s), op: r3(pr.op) });
         if (showVals && v > 0) txt("val", gx + s * bw + Math.max(2, bw - 2.5) / 2, base - h - 6, Math.round(v * pr.cnt), { size: 9.5, op: valPopOp(pr) });
       }
       axisTxt(padL + slot * (i + 0.5), H - 7, row.l, "middle", 0.92 * all.op);
@@ -949,7 +960,7 @@ export function chartModel(P, time) {
         const sc = EASE.easeOutBack(su) * (1 - EASE.easeInCubic(sv));
         const hh = Math.max(0, (v / vmaxT) * plotH * sc);
         yCur -= hh;
-        items.push({ k: "path", role: "seg", d: topBarD(cx - bw / 2, yCur, bw, hh, s === row.vals.length - 1 ? Math.min(8, bw / 2.6) : 0), fill: SWATCHES[s % 5], op: r3(pr.op) });
+        items.push({ k: "path", role: "seg", d: topBarD(cx - bw / 2, yCur, bw, hh, s === row.vals.length - 1 ? Math.min(8, bw / 2.6) : 0), fill: sw(s), op: r3(pr.op) });
       });
       if (showVals) {
         const vy = yCur - 9;
@@ -968,7 +979,7 @@ export function chartModel(P, time) {
       const cx = padL + slot * (i + 0.5);
       const h = Math.max(0, (v / vmax) * plotH * pr.scale);
       const tip = base - h;
-      const col = SWATCHES[i % 5];
+      const col = sw(i);
       items.push({ k: "line", role: "stem", x1: r2(cx), y1: r2(base), x2: r2(cx), y2: r2(tip), stroke: col, sw: 2.5, cap: "round", op: r3(pr.op) });
       /* head pops with a spring once the stem is ~60% grown */
       const hp = EASE.easeOutBack(clamp01(pr.u * 1.55 - 0.55)) * pr.shrink;
@@ -983,7 +994,7 @@ export function chartModel(P, time) {
 
   if ((type === "line" || type === "area") && n > 1) {
     const vmax = Math.max(1, ...rows.map(lastVal));
-    const accent = type === "line" ? SWATCHES[2] : SWATCHES[3];
+    const accent = pal ? pal[1 % pal.length] : type === "line" ? SWATCHES[2] : SWATCHES[3];
     const pts = rows.map((row, i) => [padL + (plotW * i) / (n - 1), base - (lastVal(row) / vmax) * plotH]);
     const dStr = pts.map((p, i) => (i ? "L" : "M") + r2(p[0]) + " " + r2(p[1])).join("");
     /* draw-on reveal: 0→1 eased, retracts (accelerating) on exit */
@@ -1002,7 +1013,7 @@ export function chartModel(P, time) {
   }
   if ((type === "line" || type === "area") && n === 1) {
     /* degenerate single reading — one springy dot, no path */
-    const accent = type === "line" ? SWATCHES[2] : SWATCHES[3];
+    const accent = pal ? pal[1 % pal.length] : type === "line" ? SWATCHES[2] : SWATCHES[3];
     const cx = padL + plotW / 2, cy = base - plotH * 0.5 * clamp01(lastVal(rows[0]) / 100);
     const s = all.grow * all.shrink;
     items.push({ k: "circle", role: "pt", cx: r2(cx), cy: r2(cy), r: r2(Math.max(0, 5 * s)), fill: "#FFFFFF", stroke: accent, sw: 2.5, op: r3(all.op) });
@@ -1021,7 +1032,7 @@ export function chartModel(P, time) {
       const pr = chartProgress(P, time, i, n);
       const w = Math.max(0, (v / vmax) * maxW * pr.scale);
       const y = padT + slotH * (i + 0.5) - bh / 2;
-      items.push({ k: "path", role: "bar", d: rightBarD(gx, y, w, bh, Math.min(8, bh / 2.4)), fill: SWATCHES[i % 5], op: r3(pr.op) });
+      items.push({ k: "path", role: "bar", d: rightBarD(gx, y, w, bh, Math.min(8, bh / 2.4)), fill: sw(i), op: r3(pr.op) });
       axisTxt(gx - 10, y + bh / 2 + 3.5, row.l, "end", 0.92 * all.op);
       if (showVals) txt("val", gx + w + 9, y + bh / 2 + 4, Math.round(v * pr.cnt), { size: 11.5, anchor: "start", op: valPopOp(pr) });
     });
@@ -1044,7 +1055,7 @@ export function chartModel(P, time) {
       const a0 = (acc / total) * 360;
       acc += v;
       const a1 = (acc / total) * 360;
-      const col = SWATCHES[i % 5];
+      const col = sw(i);
       const vis = Math.min(a1, sweepAng);
       const sop = r3(clamp01((sweepAng - a0) / 14) * fadeOut);
       if (vis > a0 + 0.01) {
@@ -1073,7 +1084,7 @@ export function chartModel(P, time) {
     rows.forEach((row, i) => {
       const pr = chartProgress(P, time, i, n); /* legend rows stagger with the sweep */
       const ly = cy - ((n - 1) * 19) / 2 + i * 19;
-      items.push({ k: "circle", role: "legend", cx: 12, cy: r2(ly - 3.5), r: 4.2, fill: SWATCHES[i % 5], op: r3(pr.op) });
+      items.push({ k: "circle", role: "legend", cx: 12, cy: r2(ly - 3.5), r: 4.2, fill: sw(i), op: r3(pr.op) });
       txt("legend", 23, ly, row.l.toUpperCase(), { fill: CH_DIM, size: 10, fam: "'Inter'", ls: 0.9, tnum: false, anchor: "start", op: r3(pr.op * 0.95) });
     });
   }
@@ -1084,7 +1095,7 @@ export function chartModel(P, time) {
     const R = Math.max(10, Math.min(W, plotH) / 2 - 6);
     const th = Math.max(10, R * 0.17), rArc = R - th / 2;
     const A0 = type === "ring" ? -90 : 135, SPAN = type === "ring" ? 359.9 : 270;
-    const col = SWATCHES[0];
+    const col = pal ? pal[0] : SWATCHES[0];
     const prCap = chartProgress(P, time, 1, 2); /* caption trails the dial (stagger) */
     const progE = all.grow * all.shrink; /* overshoots past the target, settles */
     const ang = Math.min(SPAN, SPAN * pct * progE);

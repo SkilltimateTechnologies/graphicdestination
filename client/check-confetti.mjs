@@ -74,6 +74,18 @@ async function main() {
   check("17 styles registered (8 legacy + 9 new)", CONFETTI_STYLES.length === 17, ids.join(","));
   check("all 9 new style ids present", NEW_IDS.every((id) => ids.includes(id)), NEW_IDS.filter((id) => !ids.includes(id)).join(","));
   check("style ids unique", new Set(ids).size === ids.length);
+
+  /* ---------- 1b. brand palette (colors prop) ---------- */
+  console.log("\nbrand palette — colors[] prop recolors the generic picks");
+  {
+    const BRAND = ["#112233", "#445566"];
+    const withColors = (style, seed) => { const o = confettiObj(style, seed); o.props.colors = BRAND; return o; };
+    const branded = confettiParticles(withColors("burst", 7));
+    check("burst particles come ONLY from the brand palette", branded.length > 0 && branded.every((p) => BRAND.includes(p.color)), branded.slice(0, 3).map((p) => p.color).join(","));
+    check("brand palette is deterministic (same seed → same particles)", JSON.stringify(branded) === JSON.stringify(confettiParticles(withColors("burst", 7))));
+    check("the palette prop changes the colors (≠ legacy build)", JSON.stringify(branded.map((p) => p.color)) !== JSON.stringify(confettiParticles(confettiObj("burst", 7)).map((p) => p.color)));
+    check("no colors prop → the fixed swatches (back-compat)", confettiParticles(confettiObj("burst", 7)).some((p) => !BRAND.includes(p.color)));
+  }
   check("every style has a non-empty name", CONFETTI_STYLES.every((s) => typeof s.name === "string" && s.name.length > 0));
   check("every style has a non-empty glyph", CONFETTI_STYLES.every((s) => typeof s.glyph === "string" && s.glyph.length > 0));
   check("every style has a non-empty hint", CONFETTI_STYLES.every((s) => typeof s.hint === "string" && s.hint.length > 0));

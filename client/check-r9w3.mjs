@@ -30,7 +30,7 @@ import react from "@vitejs/plugin-react";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { TEXTFX_LIST } from "./src/components/editor/model.js";
+import { TEXTFX_LIST, brandDefaultFor } from "./src/components/editor/model.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tmpDir = path.join(here, ".r9w3-check-tmp");
@@ -128,6 +128,25 @@ async function main() {
     check("a project with content keeps its own saved bg", S.resolveLoadedStageBg({ objects: [{ id: "ob1" }], stage: { bg: "#101218" } }, { defaultBg: "#123456" }, "#000000") === "#101218");
     check("a blank project with a CUSTOM bg keeps it", S.resolveLoadedStageBg({ objects: [], stage: { bg: "#222222" } }, { defaultBg: "#123456" }, "#000000") === "#222222");
     check("missing bg keeps the current value (legacy projects)", S.resolveLoadedStageBg({ objects: [{ id: "ob1" }], stage: {} }, { defaultBg: "#123456" }, "#0B0E13") === "#0B0E13");
+  }
+
+  /* ================= A2 · brand colors by default (brandDefaultFor) ====== */
+  console.log("\nA2 · brand colors by default (insert defaults from the active brand)");
+  {
+    const brand = { colors: ["#112233", "#445566", "#778899", "#AABBCC", "#DDEEFF"] };
+    check("shape → fill primary + stroke accent", (() => { const d = brandDefaultFor("shape", brand); return d.fill === "#112233" && d.sC === "#445566"; })());
+    check("chart → series palette seeded from the brand", JSON.stringify(brandDefaultFor("chart", brand).colors) === JSON.stringify(brand.colors));
+    check("confetti → particle palette from the brand", JSON.stringify(brandDefaultFor("confetti", brand).colors) === JSON.stringify(brand.colors));
+    check("counter ring → accent", brandDefaultFor("number", brand).ringC === "#445566");
+    check("map → accent stroke + primary fill", (() => { const d = brandDefaultFor("map", brand); return d.stroke === "#445566" && d.fillC === "#112233"; })());
+    check("kit → accent", brandDefaultFor("kit", brand).accent === "#445566");
+    check("text/image/clip → untouched (own paths)", !Object.keys(brandDefaultFor("text", brand)).length && !Object.keys(brandDefaultFor("image", brand)).length && !Object.keys(brandDefaultFor("clip", brand)).length);
+    check("NO brand → {} everywhere (fixed swatches win, old behavior)", ["shape", "chart", "confetti", "number", "map", "kit"].every((t) => !Object.keys(brandDefaultFor(t, null)).length));
+    check("GDM addObject applies brandDefaultFor between branch defaults and over.props", (() => {
+      const gdm = fs.readFileSync(path.join(here, "src", "components", "GraphicDestinationMotion.jsx"), "utf8");
+      const at = gdm.indexOf("brandDefaultFor(type, brand)");
+      return at > 0 && gdm.indexOf("Object.assign(o.props, over.props || {})") > at;
+    })());
   }
 
   /* ================= B · text presets (pure) ================= */

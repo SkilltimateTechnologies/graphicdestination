@@ -16,6 +16,30 @@ export const STAGE_PAD = 120; /* workspace margin (screen px) around the canvas 
    emoji insert uses it directly. */
 export const DEFAULT_INSERT_SIZE = 100;
 
+/* brand-aware insert defaults: when a brand kit is ACTIVE, every new object
+   picks up its colors by DEFAULT (the user can still recolor per object).
+   brand = the kitToBrand shape { colors: [primary, accent, bridge, tint, text] };
+   null/no colors → {} (the fixed swatches win, old behavior).
+   Consumed by addObject (between the makeObject branch defaults and the
+   explicit over.props, which always win) and insertKitClip. */
+export function brandDefaultFor(type, brand) {
+  const cols = brand && Array.isArray(brand.colors) ? brand.colors.filter(Boolean) : [];
+  if (!cols.length) return {};
+  const [primary, accent, bridge, tint, text] = cols;
+  const palette = [primary, accent, bridge, tint, text].filter(Boolean);
+  switch (type) {
+    case "shape": return { fill: primary, sC: accent };
+    case "chart": return { colors: palette }; /* chartModel's series palette (accent slot drives line/area) */
+    case "confetti": return { colors: palette }; /* confettiParticles' generic picks */
+    case "number": return { ringC: accent };
+    case "map": return { stroke: accent, fillC: primary };
+    case "continent": return { stroke: accent, hiFill: tint || accent };
+    case "world": return { stroke: accent, hiFill: primary };
+    case "kit": return { accent };
+    default: return {};
+  }
+}
+
 export const C = {
   bg0: "#0A0C10", bg1: "#10131A", bg2: "#171B24", bg3: "#1E2330",
   line: "#232936", lineStrong: "#2E3546", txt: "#E9ECF3", dim: "#939BAD", faint: "#5D667A",

@@ -233,6 +233,18 @@ async function main() {
     }
   }
 
+  /* ---------- 4b. brand series palette (colors prop) ---------- */
+  console.log("\nbrand palette — colors[] prop recolors series, absent = legacy swatches");
+  {
+    const BRAND = ["#112233", "#445566", "#778899"];
+    const branded = chartModel({ ...chartObj("bar", DATA.multi).props, colors: BRAND }, 1000);
+    check("bar fills use the brand palette in series order", branded.items.filter((it) => it.role === "bar").every((b, i) => b.fill === BRAND[i % BRAND.length]), branded.items.filter((it) => it.role === "bar").map((b) => b.fill).join(","));
+    const brandedLine = chartModel({ ...chartObj("line", DATA.line).props, colors: BRAND }, 1000);
+    check("line accent comes from the brand accent slot", brandedLine.items.filter((it) => it.role === "line").every((l) => l.stroke === BRAND[1]), BRAND[1]);
+    const legacy = chartModel(chartObj("bar", DATA.multi).props, 1000);
+    check("no colors prop → the fixed swatch rotation (back-compat, byte-identical)", legacy.items.filter((it) => it.role === "bar").some((b) => b.fill === "#FFB224"));
+  }
+
   /* ---------- 5. design markers ---------- */
   console.log("\ndesign — gridlines, rounded tops, small caps, tabular numerals, count-ups");
   const barM = chartModel(chartObj("bar", DATA.multi).props, 1000);

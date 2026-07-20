@@ -10,7 +10,7 @@ import { cameraAt, cameraTransform, cameraFromJson, cameraToJson, clampZoom, dep
 import { normHi } from "../engine/maps.js";
 import { FONT_IMPORT } from "../engine/fx.js";
 import { kitRenderSpec } from "../engine/kits.js";
-import { C, KF_PROPS, STAGE_PRESETS, kfAt, layerOut, layerSpan, packRows, objSize, reframeClipToContent, objectsInRect, DEFAULT_INSERT_SIZE } from "./editor/model";
+import { C, KF_PROPS, STAGE_PRESETS, kfAt, layerOut, layerSpan, packRows, objSize, reframeClipToContent, objectsInRect, DEFAULT_INSERT_SIZE, brandDefaultFor } from "./editor/model";
 import { svgDataUri, iconInsertSize } from "../engine/svgIcon.js";
 import { computeSnap, SNAP_THRESHOLD } from "./editor/snapping";
 import TopBar from "./editor/TopBar";
@@ -809,6 +809,10 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
       o.props.dur = Math.max(600, Math.min(3000, ctxDur - o.props.start));
     }
     if (type === "text") { o.props.fontFamily = brand.headFont; o.props.fill = brand.colors[4] || "#F9F9F9"; }
+    /* brand kit active → its colors become the insert DEFAULTS (shapes fill /
+       stroke, chart + confetti palettes, counter ring, map strokes). Sits
+       between the branch defaults and the explicit over.props, which win. */
+    Object.assign(o.props, brandDefaultFor(type, brand));
     Object.assign(o.props, over.props || {});
     setLayers((ls) => [...ls, o]);
     setSelIds([o.id]);
@@ -872,7 +876,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
         kit: kit.id,
         variant: opts.variant === "static" ? "static" : "animated",
         color: typeof opts.color === "string" && opts.color ? opts.color : null,
-        accent: typeof opts.accent === "string" && opts.accent ? opts.accent : "#FFB224",
+        accent: typeof opts.accent === "string" && opts.accent ? opts.accent : (brand.colors?.[1] || "#FFB224"), /* default: the active brand's accent (was fixed amber) */
         w, h,
       },
     });
