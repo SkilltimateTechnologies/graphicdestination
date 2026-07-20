@@ -6,9 +6,20 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import { fileURLToPath } from "url";
+import { enforceConfig } from "./config.js";
 import { db, initSchema, usingTurso } from "./db.js";
 import { hashPassword, verifyPassword, signSession, requireAuth, COOKIE_NAME, COOKIE_OPTS } from "./auth.js";
 import { authLimiter, shareLimiter, createRateLimiter } from "./ratelimit.js";
+import { logger } from "./logger.js";
+import { initErrorTracking, captureError } from "./errorTracking.js";
+import { recordHttp, renderMetrics } from "./metrics.js";
+
+// Validate env & fail-fast in production before the app starts serving traffic.
+enforceConfig();
+
+// Optional error tracking (no-op unless SENTRY_DSN set + @sentry/node installed).
+const tracking = await initErrorTracking();
+logger.info("error_tracking", tracking);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CRED_FILE = path.join(__dirname, "data", "admin-credentials.json");
@@ -29,6 +40,28 @@ app.use((req, res, next) => {
   next();
 });
 
+// Per-request id + structured access log. The id is echoed in the response
+// header and stamped on every log line for that request, so a client-reported
+// failure can be traced end-to-end. Bodies are never logged (the logger redacts
+// sensitive keys regardless).
+app.use((req, res, next) => {
+  const id = String(req.headers["x-request-id"] || crypto.randomUUID());
+  req.id = id;
+  req.log = logger.child({ reqId: id });
+  res.setHeader("X-Request-Id", id);
+  const start = Date.now();
+  res.on("finish", () => {
+    const ms = Date.now() - start;
+    const level = res.statusCode >= 500 ? "error" : res.statusCode >= 400 ? "warn" : "info";
+    req.log[level]("request", { method: req.method, path: req.path, status: res.statusCode, ms });
+    // Skip infra endpoints so scrapes/probes don't drown the request signal.
+    if (!(req.path === "/metrics" || req.path === "/api/health" || req.path === "/api/ready")) {
+      recordHttp(req.method, res.statusCode, ms);
+    }
+  });
+  next();
+});
+
 // Raised 8mb -> 12mb: audio assets up to 5 MB decoded arrive as base64 inside
 // the JSON envelope (~6.7 MB) plus field overhead, so 8mb would 413 valid
 // uploads; 12mb keeps headroom for sizable project JSON payloads too.
@@ -45,12 +78,38 @@ await db.execute(`CREATE TABLE IF NOT EXISTS user_settings (
   json TEXT NOT NULL,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 )`);
-console.log(`Database: ${usingTurso ? "Turso cloud (remote HTTPS)" : "local SQLite file (no Turso env vars set)"}`);
+logger.info("database_ready", { backend: usingTurso ? "turso" : "local" });
 
-/* ---------------- health (no auth) ---------------- */
+/* ---------------- health (no auth) ----------------
+ * /api/health  — liveness: the process is up and answering (no I/O).
+ * /api/ready    — readiness: the DB is actually reachable. Load balancers /
+ *                 orchestrators should gate traffic on readiness, not liveness.
+ */
 
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, db: usingTurso ? "turso" : "local" });
+});
+
+/* Prometheus metrics (RED + process). Optionally gate with METRICS_TOKEN:
+   when set, scrapers must send `Authorization: Bearer <token>`. Left open
+   (internal-network scraping) when unset — the payload carries no secrets. */
+app.get("/metrics", (req, res) => {
+  const token = process.env.METRICS_TOKEN;
+  if (token && req.headers.authorization !== `Bearer ${token}`) {
+    return res.status(401).type("text/plain").send("Unauthorized\n");
+  }
+  res.setHeader("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+  res.send(renderMetrics());
+});
+
+app.get("/api/ready", async (req, res) => {
+  try {
+    await db.execute("SELECT 1");
+    res.json({ ready: true, db: usingTurso ? "turso" : "local" });
+  } catch (err) {
+    req.log?.error("readiness_check_failed", { err: String(err?.message || err) });
+    res.status(503).json({ ready: false });
+  }
 });
 
 /* ---------------- auth ---------------- */
@@ -529,5 +588,56 @@ if (fs.existsSync(CLIENT_DIST)) {
   });
 }
 
+/* ---------------- centralized error handling ----------------
+ * Last middleware: catches synchronous throws and any `next(err)`. It never
+ * leaks a stack trace to the client — the reqId in the response header ties the
+ * user-visible 500 back to the full server-side log line.
+ */
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  // Body-parser and other middleware errors carry their own status (malformed
+  // JSON -> 400, payload too large -> 413). Preserve those; only truly
+  // unexpected errors (no status) become a 500. Client-facing 4xx get a short
+  // reason; 5xx never leak internals.
+  const status = Number(err?.status || err?.statusCode) || 500;
+  const level = status >= 500 ? "error" : "warn";
+  req.log?.[level]("request_error", { path: req.path, status, err: String(err?.stack || err) });
+  if (status >= 500) {
+    captureError(err, { requestId: req.id, path: req.path, method: req.method });
+    return res.status(500).json({ error: "Internal server error", requestId: req.id });
+  }
+  res.status(status).json({ error: err.type === "entity.too.large" ? "Payload too large" : "Bad request", requestId: req.id });
+});
+
 const PORT = process.env.PORT || 8787;
-app.listen(PORT, () => console.log(`Server listening on http://localhost:${PORT}`));
+const server = app.listen(PORT, () => logger.info("listening", { port: Number(PORT), url: `http://localhost:${PORT}` }));
+
+/* Graceful shutdown: stop accepting connections, let in-flight requests drain,
+   then exit. A hard 10s deadline guarantees the process can't hang forever. */
+let shuttingDown = false;
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.warn("shutdown_initiated", { signal });
+  server.close(() => {
+    logger.info("shutdown_complete", {});
+    process.exit(0);
+  });
+  setTimeout(() => {
+    logger.error("shutdown_forced", { reason: "drain timeout exceeded" });
+    process.exit(1);
+  }, 10_000).unref();
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+
+// Last-resort guards: log (don't silently swallow) async faults that escaped a
+// route. These indicate a bug to fix, not normal flow.
+process.on("unhandledRejection", (reason) => {
+  logger.error("unhandled_rejection", { err: String(reason?.stack || reason) });
+  captureError(reason, { kind: "unhandledRejection" });
+});
+process.on("uncaughtException", (err) => {
+  logger.error("uncaught_exception", { err: String(err?.stack || err) });
+  captureError(err, { kind: "uncaughtException" });
+});

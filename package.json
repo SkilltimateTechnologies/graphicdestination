@@ -9,7 +9,14 @@
     "start": "node server/index.js",
     "dev:server": "cd server && npm start",
     "dev:client": "cd client && npm run dev",
-    "test": "cd server && node test-api.mjs"
+    "test": "node scripts/run-checks.mjs",
+    "test:client": "node scripts/run-checks.mjs --group client",
+    "test:export": "node scripts/run-checks.mjs --group export",
+    "test:server": "node scripts/run-checks.mjs --group server",
+    "test:list": "node scripts/run-checks.mjs --list",
+    "test:api": "cd server && node test-api.mjs",
+    "lint": "cd client && npm run lint",
+    "audit": "npm audit --prefix client --omit=dev; npm audit --prefix server --omit=dev"
   },
   "engines": { "node": ">=20" }
 }

@@ -1,0 +1,77 @@
+name: CI
+
+# Enforces AGENTS.md golden rules on every push/PR:
+#   #2 full check battery green · #3 lint 0 errors / build passes.
+# Nothing here can install `hyperframes` or a Chromium binary, so the
+# server-side MP4 render path is intentionally NOT exercised (it degrades
+# gracefully by design and is covered by server/hyperframes/test-compile.mjs,
+# which is pure and dependency-free).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A newer push to the same branch/PR cancels the older, still-running job.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: build · lint · test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            client/package-lock.json
+            server/package-lock.json
+
+      - name: Install client deps
+        working-directory: client
+        run: npm ci --no-audit --no-fund
+
+      - name: Install server deps
+        working-directory: server
+        run: npm ci --no-audit --no-fund
+
+      - name: Lint (client) — 0 errors required
+        working-directory: client
+        run: npm run lint
+
+      - name: Build client
+        working-directory: client
+        run: npm run build
+
+      - name: Run full test battery
+        run: node scripts/run-checks.mjs
+
+  audit:
+    name: dependency audit (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Advisory: surfaces known CVEs without blocking merges. Promote to a hard
+    # gate (remove continue-on-error) once the tree is clean at high severity.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Audit client (prod deps)
+        working-directory: client
+        run: npm audit --omit=dev --audit-level=high
+      - name: Audit server (prod deps)
+        working-directory: server
+        run: npm audit --omit=dev --audit-level=high
