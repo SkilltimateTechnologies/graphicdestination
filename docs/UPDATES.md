@@ -53,6 +53,18 @@ independently, each needs its guard updated in the same change).
    again morph into another shape. (Engine likely intact — this is probably a UI
    regression, exactly the class AGENTS warns about.)
 
+6. **Group/ungroup as inline icons + real nesting (3 levels).** Grouping exists
+   (⌘G / Inspector / timeline / right-click) but it's tucked into buttons. Put
+   **small group + ungroup icons right at the layers section** (e.g. at the top
+   of the timeline lane list / beside the selection), always visible and acting
+   on the current selection — one glyph to group, one to ungroup, no hunting.
+   Support **nested groups up to 3 levels deep** (a group inside a group inside a
+   group): the clip system already nests (`groupSelection` makes a clip; grouping
+   a selection that includes a clip should nest it), so verify 3-level nesting
+   works end-to-end (create, enter/exit each level, ungroup one level at a time,
+   render + export). Show the current nesting level in the lane label / crumb so
+   the user always knows how deep they are.
+
 ---
 
 ## 💡 AI Asset Studio — "upload a photo → get an animated asset"
