@@ -74,6 +74,22 @@ export async function initSchema() {
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       )`,
+      // Editable templates: scope "global" (admin-authored, visible to all) or
+      // "user" (personal). A global row whose slug matches a built-in
+      // templates.js id is an OVERRIDE of that built-in — code is never mutated.
+      `CREATE TABLE IF NOT EXISTS templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        slug TEXT NOT NULL,
+        scope TEXT NOT NULL CHECK (scope IN ('global','user')),
+        owner_id INTEGER REFERENCES users(id),
+        name TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'Custom',
+        description TEXT NOT NULL DEFAULT '',
+        accent TEXT NOT NULL DEFAULT '#5B8CFF',
+        data TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_templates_scope ON templates(scope, owner_id)`,
     ],
     "write"
   );

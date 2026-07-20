@@ -10,6 +10,7 @@ import { enforceConfig } from "./config.js";
 import { db, initSchema, usingTurso } from "./db.js";
 import { hashPassword, verifyPassword, signSession, requireAuth, COOKIE_NAME, COOKIE_OPTS } from "./auth.js";
 import { sanitizeSvg } from "./svgSanitize.js";
+import { validateTemplateData } from "./templateValidate.js";
 import { authLimiter, shareLimiter, createRateLimiter } from "./ratelimit.js";
 import { logger } from "./logger.js";
 import { initErrorTracking, captureError } from "./errorTracking.js";
@@ -509,6 +510,123 @@ app.put("/api/svg-icons/:id", requireAuth, requireAdmin, async (req, res) => {
 app.delete("/api/svg-icons/:id", requireAuth, requireAdmin, async (req, res) => {
   const result = await db.execute({ sql: "DELETE FROM svg_icons WHERE id = ?", args: [req.params.id] });
   if (result.rowsAffected === 0) return res.status(404).json({ error: "Not found" });
+  res.json({ ok: true });
+});
+
+/* ---------------- editable templates ----------------
+ * Template store: scope "global" (admin-authored, visible to everyone —
+ * a row whose slug matches a built-in templates.js id OVERRIDES it in the
+ * panel) and "user" (personal, owner-scoped). templates.js stays the
+ * built-in baseline; the client merges global > built-in + personal.
+ * Writes are validated (templateValidate) — stored JSON must always
+ * round-trip through the normal project render path.
+ */
+
+const tplMeta = (row) => ({
+  id: row.id,
+  slug: row.slug,
+  scope: row.scope,
+  name: row.name,
+  category: row.category,
+  description: row.description,
+  accent: row.accent,
+  data: JSON.parse(row.data),
+  updatedAt: row.updated_at,
+});
+
+const validTplBody = (body) => {
+  const { slug, scope, name, category, description, accent, data } = body || {};
+  if (scope !== "global" && scope !== "user") return { error: 'scope must be "global" or "user"' };
+  if (typeof name !== "string" || !name.trim() || name.length > 80) return { error: "name must be 1-80 characters" };
+  if (slug != null && (typeof slug !== "string" || !/^[a-z0-9][a-z0-9-]{0,60}$/.test(slug))) return { error: "slug must be lowercase kebab-case (≤61 chars)" };
+  if (category != null && (typeof category !== "string" || !category.trim() || category.length > 40)) return { error: "category must be 1-40 characters" };
+  if (description != null && (typeof description !== "string" || description.length > 240)) return { error: "description must be ≤240 characters" };
+  if (accent != null && (typeof accent !== "string" || !/^#[0-9a-f]{6}$/i.test(accent))) return { error: "accent must be #rrggbb" };
+  const v = validateTemplateData(data);
+  if (!v.ok) return { error: v.error };
+  return {
+    slug: slug || null,
+    scope,
+    name: name.trim(),
+    category: (category || "Custom").trim() || "Custom",
+    description: (description || "").slice(0, 240),
+    accent: accent || "#5B8CFF",
+    data: v.data,
+  };
+};
+
+app.get("/api/templates", requireAuth, async (req, res) => {
+  const result = await db.execute({
+    sql: "SELECT * FROM templates WHERE scope = 'global' OR (scope = 'user' AND owner_id = ?) ORDER BY updated_at DESC, id DESC",
+    args: [req.user.sub],
+  });
+  res.json(result.rows.map(tplMeta));
+});
+
+app.post("/api/templates", requireAuth, async (req, res) => {
+  try {
+    const v = validTplBody(req.body);
+    if (v.error) return res.status(400).json({ error: v.error });
+    if (v.scope === "global" && req.user.role !== "admin") return res.status(403).json({ error: "Global templates are admin-only" });
+    const owner = v.scope === "user" ? req.user.sub : null;
+    const slug = v.slug || `${v.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50) || "template"}-${Date.now().toString(36)}`;
+    /* upsert on (scope, slug, owner): re-saving the same slug (e.g. an admin's
+       override of a built-in) updates in place instead of duplicating */
+    const existing = await db.execute({
+      sql: "SELECT id FROM templates WHERE scope = ? AND slug = ? AND owner_id IS ?",
+      args: [v.scope, slug, owner],
+    });
+    if (existing.rows.length) {
+      await db.execute({
+        sql: "UPDATE templates SET name = ?, category = ?, description = ?, accent = ?, data = ?, updated_at = datetime('now') WHERE id = ?",
+        args: [v.name, v.category, v.description, v.accent, JSON.stringify(v.data), existing.rows[0].id],
+      });
+      const updated = await db.execute({ sql: "SELECT * FROM templates WHERE id = ?", args: [existing.rows[0].id] });
+      return res.json({ ...tplMeta(updated.rows[0]), upserted: true });
+    }
+    const result = await db.execute({
+      sql: "INSERT INTO templates (slug, scope, owner_id, name, category, description, accent, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      args: [slug, v.scope, owner, v.name, v.category, v.description, v.accent, JSON.stringify(v.data)],
+    });
+    const created = await db.execute({ sql: "SELECT * FROM templates WHERE id = ?", args: [result.lastInsertRowid] });
+    res.status(201).json(tplMeta(created.rows[0]));
+  } catch (e) {
+    console.error("POST /api/templates failed:", e.message);
+    res.status(500).json({ error: "Could not save the template" });
+  }
+});
+
+app.put("/api/templates/:id", requireAuth, async (req, res) => {
+  try {
+    const found = await db.execute({ sql: "SELECT * FROM templates WHERE id = ?", args: [req.params.id] });
+    const row = found.rows[0];
+    if (!row) return res.status(404).json({ error: "Not found" });
+    if (row.scope === "global" ? req.user.role !== "admin" : row.owner_id !== req.user.sub) {
+      return res.status(403).json({ error: "Not your template" });
+    }
+    const merged = { slug: row.slug, scope: row.scope, name: req.body?.name ?? row.name, category: req.body?.category ?? row.category, description: req.body?.description ?? row.description, accent: req.body?.accent ?? row.accent, data: req.body?.data ?? JSON.parse(row.data) };
+    const v = validTplBody(merged);
+    if (v.error) return res.status(400).json({ error: v.error });
+    await db.execute({
+      sql: "UPDATE templates SET name = ?, category = ?, description = ?, accent = ?, data = ?, updated_at = datetime('now') WHERE id = ?",
+      args: [v.name, v.category, v.description, v.accent, JSON.stringify(v.data), req.params.id],
+    });
+    const updated = await db.execute({ sql: "SELECT * FROM templates WHERE id = ?", args: [req.params.id] });
+    res.json(tplMeta(updated.rows[0]));
+  } catch (e) {
+    console.error("PUT /api/templates/:id failed:", e.message);
+    res.status(500).json({ error: "Could not update the template" });
+  }
+});
+
+app.delete("/api/templates/:id", requireAuth, async (req, res) => {
+  const found = await db.execute({ sql: "SELECT scope, owner_id FROM templates WHERE id = ?", args: [req.params.id] });
+  const row = found.rows[0];
+  if (!row) return res.status(404).json({ error: "Not found" });
+  if (row.scope === "global" ? req.user.role !== "admin" : row.owner_id !== req.user.sub) {
+    return res.status(403).json({ error: "Not your template" });
+  }
+  await db.execute({ sql: "DELETE FROM templates WHERE id = ?", args: [req.params.id] });
   res.json({ ok: true });
 });
 
