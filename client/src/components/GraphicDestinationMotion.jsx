@@ -10,7 +10,7 @@ import { cameraAt, cameraTransform, cameraFromJson, cameraToJson, clampZoom, dep
 import { normHi } from "../engine/maps.js";
 import { FONT_IMPORT } from "../engine/fx.js";
 import { kitRenderSpec } from "../engine/kits.js";
-import { C, KF_PROPS, STAGE_PRESETS, kfAt, layerOut, layerSpan, objSize, reframeClipToContent, objectsInRect, DEFAULT_INSERT_SIZE, normalizeTracks, renumberTracks, trackRows, zOrder, nextTrack, trackSnap } from "./editor/model";
+import { C, KF_PROPS, STAGE_PRESETS, kfAt, layerOut, layerSpan, packRows, objSize, reframeClipToContent, objectsInRect, DEFAULT_INSERT_SIZE } from "./editor/model";
 import { computeSnap, SNAP_THRESHOLD } from "./editor/snapping";
 import TopBar from "./editor/TopBar";
 import IconRail from "./editor/IconRail";
@@ -297,7 +297,7 @@ function audioErrorText(err) {
    APP
    ============================================================ */
 export default function GraphicDestinationMotion({ initialProject, onChange, saveState, onSaveNow, user, onLogout, onProfile, onDashboard, onSettings } = {}) {
-  const [objects, setObjects] = useState(() => normalizeTracks(demoProject())); /* tracks: old projects carry no `track` field → array index (one-layer-per-row layout preserved) */
+  const [objects, setObjects] = useState(demoProject);
   const [stage, setStage] = useState({ w: 1280, h: 720 });
   const [compDur, setCompDur] = useState(6000);
   const [brands, setBrands] = useState([DEFAULT_BRAND]);
@@ -800,7 +800,6 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     const o = makeObject(type, over);
     o.props.x = stage.w / 2; o.props.y = stage.h / 2;
     o.props.outT = o.type === "clip" ? null : ctxDur;
-    o.track = nextTrack(ctxLayers); /* new lane at the bottom of the lane list (foreground) */
     if (type === "confetti") o.props.burst = Math.round(timeRef.current / 10) * 10;
     if (type === "clip" && !over.children) {
       const ends = ctxLayers.filter((c) => c.type === "clip").map((c) => c.props.start + c.props.dur / (c.props.speed || 1));
@@ -847,7 +846,6 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     const built = cloneLayer(tpl.buildClip());
     const { clip } = reframeClipToContent(built, stage);
     clip.locked = false;
-    clip.track = nextTrack(ctxLayers);
     clip.props.start = Math.max(0, Math.min(Math.max(0, ctxDur - 400), Math.round(timeRef.current / 10) * 10));
     setLayers((ls) => [...ls, clip]);
     setSelIds([clip.id]);
@@ -879,7 +877,6 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     });
     o.props.x = stage.w / 2; o.props.y = stage.h / 2;
     o.props.outT = ctxDur;
-    o.track = nextTrack(ctxLayers);
     setLayers((ls) => [...ls, o]);
     setSelIds([o.id]);
     setIconsOpen(false);
@@ -898,7 +895,6 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     });
     o.props.x = stage.w / 2; o.props.y = stage.h / 2;
     o.props.outT = ctxDur;
-    o.track = nextTrack(ctxLayers);
     setLayers((ls) => [...ls, o]);
     setSelIds([o.id]);
     setIconsOpen(false);
@@ -906,8 +902,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
   const copySelection = () => { if (!selMany.length) return; clipboardRef.current = selMany.map((o) => JSON.parse(JSON.stringify(o))); setClipCount(clipboardRef.current.length); };
   const pasteClipboard = () => {
     if (!clipboardRef.current.length) return;
-    let lane = nextTrack(ctxLayers); /* pasted clones each get a fresh lane (rule a) */
-    const clones = clipboardRef.current.map((o) => { const c = cloneLayer(o); c.locked = false; c.track = lane++; c.props = { ...c.props, x: c.props.x + 28, y: c.props.y + 28 }; if (c.props.path) c.props.path = { ...c.props.path, pts: c.props.path.pts.map(([px, py]) => [px + 28, py + 28]) }; return c; });
+    const clones = clipboardRef.current.map((o) => { const c = cloneLayer(o); c.locked = false; c.props = { ...c.props, x: c.props.x + 28, y: c.props.y + 28 }; if (c.props.path) c.props.path = { ...c.props.path, pts: c.props.path.pts.map(([px, py]) => [px + 28, py + 28]) }; return c; });
     setLayers((ls) => [...ls, ...clones]);
     setSelIds(clones.map((c) => c.id));
   };
@@ -937,32 +932,13 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     setLayers((ls) => [...ls, ...clones]);
     setSelIds(clones.map((c) => c.id));
   };
-  /* move object `id` to track `t`, keeping rule (a) — it snaps off any
-     same-track neighbour (shared by front/back + the bar-drop reassignment).
-     Lanes renumber contiguous afterwards. */
-  const moveToTrack = (ls, id, t) => {
-    const mates = ls.filter((x) => x.id !== id && (x.track ?? 0) === t).map((x) => { const [s0, s1] = layerSpan(x, ctxDur); return { id: x.id, start: s0, end: s1 }; });
-    return renumberTracks(ls.map((x) => {
-      if (x.id !== id) return x;
-      const n = JSON.parse(JSON.stringify(x));
-      n.track = t;
-      const [s0, s1] = layerSpan(n, ctxDur);
-      const ns = trackSnap(mates, id, s0, s1, ctxDur);
-      const dt = ns - s0;
-      if (!dt) return n;
-      if (n.type === "clip") { n.props.start += dt; Object.keys(n.tracks).forEach((p) => (n.tracks[p] = n.tracks[p].map((k) => ({ ...k, t: k.t + dt })))); return n; }
-      return shiftLayerTimes(n, dt, ctxDur);
-    }));
-  };
-  /* front/back = explicit track move (z is track-major: a higher track paints
-     on top). ▲ front = up one track, ▼ back = down; lanes renumber contiguous. */
   const reorder = (id, dir) => setLayers((ls) => {
-    const o = ls.find((x) => x.id === id);
-    if (!o) return ls;
-    const hi = ls.reduce((m, x) => Math.max(m, x.track ?? 0), 0);
-    const t = (o.track ?? 0) + dir;
-    if (t < 0 || t > hi) return ls;
-    return moveToTrack(ls, id, t);
+    const i = ls.findIndex((o) => o.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= ls.length) return ls;
+    const next = [...ls];
+    [next[i], next[j]] = [next[j], next[i]];
+    return next;
   });
   const toggleLock = (id) => patchObject(id, (o) => ({ ...o, locked: !o.locked }));
   const toggleHide = (id) => patchObject(id, (o) => ({ ...o, hidden: !o.hidden }));
@@ -983,7 +959,6 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     const c = cloneLayer(o);
     c.name = o.name + " copy";
     c.locked = false;
-    c.track = nextTrack(ctxLayers); /* its own lane — a copy on the SAME track would overlap in time (rule a) */
     c.props = { ...c.props, x: c.props.x + 24, y: c.props.y + 24 };
     if (c.props.path) c.props.path = { ...c.props.path, pts: c.props.path.pts.map(([px, py]) => [px + 24, py + 24]) };
     setLayers((ls) => [...ls, c]);
@@ -1015,9 +990,8 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     const g = selGap;
     if (!g) return;
     const spans = ctxLayers.map((o) => { const [start, end] = layerSpan(o, ctxDur); return { id: o.id, start, end }; });
-    const anchor = ctxLayers.find((o) => o.id === g.leftId || o.id === g.rightId);
-    const rowIds = anchor ? ctxLayers.filter((o) => (o.track ?? 0) === (anchor.track ?? 0)).map((o) => o.id) : null; /* gap lives between two clips of ONE track */
-    if (rowIds && rowIds.includes(g.leftId) && rowIds.includes(g.rightId)) {
+    const rowIds = packRows(spans).find((ids) => ids.includes(g.leftId) && ids.includes(g.rightId));
+    if (rowIds) {
       const shifts = rippleShift(rowIds.map((id) => spans.find((s) => s.id === id)), g);
       if (shifts.length) {
         const dtById = new Map(shifts.map((s) => [s.id, s.dt]));
@@ -1032,13 +1006,12 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     const members = ctxLayers.filter((o) => selIds.includes(o.id));
     if (!members.length) return;
     const clip = makeObject("clip", { name: "Clip " + (_uid % 100), children: members, props: { start: 0, dur: ctxDur, x: stage.w / 2, y: stage.h / 2 } });
-    clip.track = Math.min(...members.map((m) => m.track ?? 0)); /* the group takes the topmost member's lane; the rest collapse */
     const memberIds = members.map((m) => m.id);
     setLayers((ls) => {
       const at = ls.findIndex((o) => o.id === memberIds[0]);
       const rest = ls.filter((o) => !memberIds.includes(o.id));
       rest.splice(Math.min(at < 0 ? rest.length : at, rest.length), 0, clip);
-      return renumberTracks(rest);
+      return rest;
     });
     setSelIds([clip.id]);
   };
@@ -1065,13 +1038,9 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     setLayers((ls) => {
       const at = ls.findIndex((o) => o.id === id);
       if (at < 0) return ls;
-      /* released kids get their OWN lanes (rule a — they would overlap in time
-         on the clip's old lane): the first keeps it, the rest land below */
-      let lane = nextTrack(ls);
-      const tracked = kids.map((k, i) => ({ ...k, track: i === 0 ? (c.track ?? 0) : lane++ }));
       const next = ls.filter((o) => o.id !== id);
-      next.splice(at, 0, ...tracked);
-      return renumberTracks(next);
+      next.splice(at, 0, ...kids);
+      return next;
     });
     setSelIds(kids.map((k) => k.id));
   };
@@ -1263,7 +1232,7 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
       if (!Array.isArray(data.objects)) throw new Error("no objects array");
       const walk = (l) => { const m = /^ob(\d+)$/.exec(l.id || ""); if (m) _uid = Math.max(_uid, parseInt(m[1]) + 1); (l.children || []).forEach(walk); };
       data.objects.forEach(walk);
-      setObjects(normalizeTracks(data.objects)); /* tracks back-compat: trackless objects get their array index */
+      setObjects(data.objects);
       if (data.stage) {
         setStage({ w: data.stage.w || 1280, h: data.stage.h || 720 });
         if (data.stage.dur) setCompDur(data.stage.dur);
@@ -1779,24 +1748,22 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     if (obj.locked) return;
     const r = rulerRef.current.getBoundingClientRect();
     const sx = e.clientX;
-    /* TRACK DRAG (move drags only): the gesture pins the bar to its current
-       track row; crossing a row boundary with intent (rowJumpTarget deadzone:
-       ≥85% into another row or ≥44px past the edge) aims at that lane. On
-       pointer-up a different target = an EXPLICIT track reassignment persisted
-       via moveToTrack (with the rule-(a) sequential snap) — never time-based
-       auto-packing. */
+    /* ROW-JUMP DEADZONE (move drags only): pin the bar to its current packed
+       row for the gesture. The pin changes only when the pointer crosses a
+       row boundary with intent (rowJumpTarget: ≥60% into another row or ≥20px
+       past the edge) — a purely horizontal drag can no longer hop lanes just
+       because the bar re-packs over a neighbour. Display-only: the pin is
+       released on pointer-up and normal packing resumes. */
     if (mode === "move") {
-      const rows = trackRows(ctxLayers);
-      const startRow = Math.max(0, rows.findIndex((row) => row.some((o) => o.id === obj.id)));
-      barDragRef.current = { id: obj.id, row: startRow, rowCount: rows.length };
+      const startSpans = ctxLayers.map((o) => { const [s0, s1] = layerSpan(o, ctxDur); return { id: o.id, start: s0, end: s1 }; });
+      const startRows = packRows(startSpans, { stable: true });
+      const startRow = Math.max(0, startRows.findIndex((ids) => ids.includes(obj.id)));
+      barDragRef.current = { id: obj.id, row: startRow, rowCount: startRows.length };
       setBarDrag({ id: obj.id, row: startRow });
     }
     const isClip = obj.type === "clip";
     const startIn = isClip ? obj.props.start : obj.props.inT || 0;
     const startOut = isClip ? obj.props.start + obj.props.dur / (obj.props.speed || 1) : layerOut(obj, ctxDur);
-    /* same-track neighbours — a retime clamps against them (rule a: sequential) */
-    const trackMates = ctxLayers.filter((o) => o.id !== obj.id && (o.track ?? 0) === (obj.track ?? 0))
-      .map((o) => { const [s0, s1] = layerSpan(o, ctxDur); return { id: o.id, start: s0, end: s1 }; });
     const base = JSON.parse(JSON.stringify(obj));
     let applied = 0;
     const remap = (ni, no) => {
@@ -1829,19 +1796,16 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
       if (mode === "move" && barDragRef.current && rowsRef.current) {
         const rr = rowsRef.current.getBoundingClientRect();
         const b = barDragRef.current;
-        /* vertical drag = the PRIMARY track gesture: the standard deadzone
-           (60% into another row, or 20px past the edge) — intentional but
-           reachable; a purely horizontal drag with a little drift stays put. */
-        const target = Math.max(0, Math.min(b.rowCount, rowJumpTarget(ev.clientY - rr.top, TL_ROW_H, b.row, 20, 0.6)));
+        /* stickier deadzone than the default (0.85 into the next row, or 44px
+           past the edge) so a horizontal drag with a little vertical drift no
+           longer hops lanes — professional-timeline feel. */
+        const target = Math.max(0, Math.min(b.rowCount, rowJumpTarget(ev.clientY - rr.top, TL_ROW_H, b.row, 44, 0.85)));
         if (target !== b.row) { b.row = target; setBarDrag({ id: b.id, row: target }); }
       }
       const dt = Math.round(((ev.clientX - sx) / r.width) * ctxDur / 10) * 10;
       if (mode === "move") {
         if (Math.abs(dt) < 10) return;
-        let lim = Math.max(-startIn, Math.min(ctxDur - startOut, dt));
-        /* rule (a) clamp: the bar can't be retimed OVER a same-track neighbour */
-        if (lim > 0) { const block = trackMates.filter((m) => m.start >= startOut - 1).sort((a, b) => a.start - b.start)[0]; if (block) lim = Math.min(lim, Math.max(0, block.start - startOut)); }
-        else if (lim < 0) { const block = trackMates.filter((m) => m.end <= startIn + 1).sort((a, b) => b.end - a.end)[0]; if (block) lim = Math.max(lim, Math.min(0, block.end - startIn)); }
+        const lim = Math.max(-startIn, Math.min(ctxDur - startOut, dt));
         const step = lim - applied;
         if (!step) return;
         applied = lim;
@@ -1858,21 +1822,8 @@ export default function GraphicDestinationMotion({ initialProject, onChange, sav
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
-      const b = barDragRef.current;
       barDragRef.current = null;
-      setBarDrag(null);
-      /* drop: a different target lane = an explicit TRACK reassignment,
-         persisted (never time-based auto-packing). moveToTrack also snaps the
-         bar off any same-track neighbour it now overlaps (rule a). */
-      if (mode === "move" && b) {
-        setLayers((ls) => {
-          const rows = trackRows(ls);
-          const curRow = rows.findIndex((row) => row.some((o) => o.id === obj.id));
-          if (b.row === curRow || b.row < 0 || b.row > rows.length) return ls;
-          const t = b.row >= rows.length ? nextTrack(ls) : b.row; /* drop BELOW the last lane = a new track */
-          return moveToTrack(ls, obj.id, t);
-        });
-      }
+      setBarDrag(null); /* release the row pin — natural packing resumes */
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);

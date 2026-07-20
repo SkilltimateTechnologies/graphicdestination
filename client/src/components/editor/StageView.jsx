@@ -7,7 +7,7 @@
    so its guide + grips track parallax; camera frame corners show while the
    camera lane is selected. The camera never applies inside clip editing.
    ============================================================ */
-import { C, STAGE_PAD, zoomCtlBtn, zOrder } from "./model";
+import { C, STAGE_PAD, zoomCtlBtn } from "./model";
 import { StageObject } from "../StageObject";
 import { PathEditor } from "./PathEditor";
 import { cameraTransform, camTransformCss } from "../../engine/camera.js";
@@ -41,7 +41,7 @@ export default function StageView({ stageWrapRef, stageScrollRef, stageElRef, ma
           <div style={zoomed ? { width: stage.w * stageScale + STAGE_PAD * 2, height: stage.h * stageScale + STAGE_PAD * 2, margin: "auto", flexShrink: 0, position: "relative", overflow: "hidden" } : { display: "contents" }}>
           <div ref={stageElRef} style={{ width: stage.w, height: stage.h, transform: `scale(${stageScale})`, background: stageBg, borderRadius: 6, boxShadow: inClip ? `0 0 0 2px ${C.amber}55, 0 8px 50px rgba(0,0,0,.55)` : "0 8px 50px rgba(0,0,0,.55)", position: zoomed ? "absolute" : "relative", overflow: overflowShow ? "visible" : "hidden", flexShrink: 0, backgroundImage: "radial-gradient(rgba(255,255,255,.045) 1px, transparent 1px)", backgroundSize: "36px 36px", ...(zoomed ? { left: STAGE_PAD, top: STAGE_PAD, transformOrigin: "0 0" } : null) }}>
             {inClip && ctx.clip?.props.bg && <div style={{ position: "absolute", inset: 0, background: ctx.clip.props.bg, pointerEvents: "none" }} />}
-            {zOrder(ctxLayers).map((obj) => ( /* track-major paint: a higher track renders on top (stable — array order for migrated projects) */
+            {ctxLayers.map((obj) => (
               <StageObject key={obj.id} obj={obj} time={time} stage={stage} camera={cam} selected={selIds.includes(obj.id)} onDown={onObjectDown} onEnterClip={enterClip} displayValue={displayValue} onResize={onResizeDown} onRotate={onRotateDown} onClipScale={onClipScaleDown} stageScale={stageScale} playing={playing} selCount={selIds.length} rotLive={rotLive} interactive />
             ))}
             {/* alignment GRID overlay (enable-grid toggle in the timeline bar):

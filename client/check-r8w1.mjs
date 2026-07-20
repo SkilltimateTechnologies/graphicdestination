@@ -75,18 +75,15 @@ console.log("row-jump deadzone (rowJumpTarget)");
   check("thresholds are parameters (px, frac) with 20 / 0.6 defaults", rowJumpTarget(79, R, 1, 100, 0.9) === 1 && rowJumpTarget(79, R, 1) === 2);
 }
 check("Timeline.jsx exports the TL_ROW_H lane constant (30)", /export const TL_ROW_H = 30;/.test(TL));
-check("GDM aims move-drags at a track row via rowJumpTarget + rowsRef (standard 20px/0.6 deadzone)", (() => {
+check("GDM pins the row on bar move-drags via rowJumpTarget + rowsRef (stickier 44px/0.85 deadzone)", (() => {
   const gdm = read("src/components/GraphicDestinationMotion.jsx");
-  return gdm.includes("rowJumpTarget(ev.clientY - rr.top, TL_ROW_H, b.row, 20, 0.6)") && gdm.includes("const rows = trackRows(ctxLayers);");
+  return gdm.includes("rowJumpTarget(ev.clientY - rr.top, TL_ROW_H, b.row, 44, 0.85)") && gdm.includes("barDragRef.current = { id: obj.id, row: startRow, rowCount: startRows.length }");
 })());
-check("the drop persists an EXPLICIT track reassignment via moveToTrack (never auto-packing)", (() => {
-  const gdm = read("src/components/GraphicDestinationMotion.jsx");
-  return gdm.includes("setBarDrag(null);") && gdm.includes("moveToTrack(ls, obj.id, t)") && gdm.includes("const t = b.row >= rows.length ? nextTrack(ls) : b.row");
-})());
-/* Timeline runs on TRACKS (CapCut model): every object has a persistent
-   `track` field; lanes are the ascending track groups (multi-clip lanes stay
-   sequential). Vertical bar drag = explicit track reassignment on drop. */
-check("Timeline lanes come from trackRows (track groups, not one-row-per-layer)", TL.includes("const rows = trackRows(ctxLayers);") && !TL.includes("const rows = ctxLayers.map((o) => [o]);"));
+check("the pin releases on pointer-up (packing resumes)", read("src/components/GraphicDestinationMotion.jsx").includes("setBarDrag(null); /* release the row pin"));
+/* Timeline is now ONE LAYER PER ROW (After-Effects/CapCut model): no packing,
+   so there is no mid-drag re-pack to fight and the display re-pin was removed.
+   A clip's row is simply its layer-order index. */
+check("Timeline uses one row per layer (no packing / no re-pin)", TL.includes("const rows = ctxLayers.map((o) => [o]);") && !TL.includes("byId.has(barDrag.id)"));
 
 /* ================= 2. gap pills ================= */
 console.log("gap pills — detection + ripple-close math");

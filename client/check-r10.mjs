@@ -183,7 +183,7 @@ console.log("\n#A4 StageView receives hidden-filtered ctxLayers");
   check("StageView gets ctxLayers={ctxLayers.filter((o) => !o.hidden)}", sv.includes("ctxLayers={ctxLayers.filter((o) => !o.hidden)}"));
   const tl = jsxProps(GDM, "Timeline");
   check("Timeline still gets the UNFILTERED ctxLayers (hidden lanes stay listed)", /\bctxLayers=\{ctxLayers\}/.test(tl));
-  check("StageView maps ctxLayers to <StageObject> nodes (track-major zOrder)", SV.includes("zOrder(ctxLayers).map((obj)") && SV.includes("<StageObject"));
+  check("StageView maps ctxLayers to <StageObject> nodes", SV.includes("ctxLayers.map((obj)") && SV.includes("<StageObject"));
   check("StageObject's non-interactive (export) path drops hidden layers outright", SO.includes("if (obj.hidden && !(interactive && selected)) return null"));
 }
 
