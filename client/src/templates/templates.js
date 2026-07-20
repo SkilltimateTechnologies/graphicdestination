@@ -1387,4 +1387,45 @@ export const TEMPLATES = [
   { id: "bold-color-list", name: "Bold Color List", description: "Swiss poster list: the active row rolls in, the whole stage turns its color.", accent: AMBER, category: "Text FX", buildProject: buildBoldColorList, buildClip: () => templateClip("Bold Color List", boldColorListObjects()) },
 ];
 
+/* ============================================================
+   EDITABLE TEMPLATES (store-backed) — templates.js stays the built-in
+   baseline; the server store overlays scope "global" (admin, visible to
+   all; a row whose slug matches a built-in id OVERRIDES it) and "user"
+   (personal). Both helpers stay pure for the node check suites.
+   ============================================================ */
+
+/* pack a STORED template's project JSON as the same insert clip the
+   built-ins use (the editor re-times it to the playhead; "hide" + fade out
+   = a scene that leaves cleanly; fresh ids via reid so store data can carry
+   any ids at all) */
+export function clipFromProject(data, name = "Template") {
+  const objects = Array.isArray(data?.objects) ? data.objects : [];
+  return layer("clip", name, {
+    start: 0, dur: Number.isFinite(data?.stage?.dur) ? data.stage.dur : DUR, speed: 1, end: "hide",
+    tIn: "fade", tOut: "fade", tDur: 500,
+    x: STAGE_W / 2, y: STAGE_H / 2,
+  }, {}, objects.map(reid));
+}
+
+/* merge the built-in gallery with the store rows: a global row whose slug
+   matches a built-in id REPLACES it (code is never mutated); global customs
+   and personal rows append after, scope-tagged. Every entry keeps the
+   { id, name, description, accent, category, buildClip } shape the panel
+   consumes, plus scope + optional overridden/storeId markers. */
+export function mergeTemplates(storeRows = []) {
+  const asEntry = (r) => ({
+    id: r.slug, storeId: r.id, name: r.name, description: r.description || "",
+    accent: r.accent || BLUE, category: r.category || "Custom",
+    scope: r.scope, buildClip: () => clipFromProject(r.data, r.name),
+  });
+  const globals = (storeRows || []).filter((r) => r && r.scope === "global");
+  const personal = (storeRows || []).filter((r) => r && r.scope === "user");
+  const bySlug = new Map(globals.map((r) => [r.slug, r]));
+  const builtinIds = new Set(TEMPLATES.map((t) => t.id));
+  const builtins = TEMPLATES.map((t) => (bySlug.has(t.id) ? { ...asEntry(bySlug.get(t.id)), overridden: true } : { ...t, scope: "builtin" }));
+  const customs = globals.filter((r) => !builtinIds.has(r.slug)).map(asEntry);
+  const mine = personal.map(asEntry);
+  return [...builtins, ...customs, ...mine];
+}
+
 export default TEMPLATES;

@@ -10,7 +10,7 @@ import react from "@vitejs/plugin-react";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { TEMPLATES, blankProject } from "./src/templates/templates.js";
+import { TEMPLATES, blankProject, clipFromProject, mergeTemplates } from "./src/templates/templates.js";
 import { BACKDROP_VARIANT_IDS, BACKDROP_THEMES } from "./src/engine/backdrops.js";
 import { CHART_TYPES } from "./src/engine/fx.js";
 
@@ -324,6 +324,44 @@ async function checkThumbs() {
   else if (!bh.includes("data-thumb-fallback") || !bh.includes(">B<") || !bh.includes("#FF6B6B")) fail("broken template did not render the accent placeholder with its initial");
   else ok("broken template → accent-tinted placeholder with initial");
   fs.rmSync(tmpDir, { recursive: true, force: true });
+}
+
+/* ---------- editable templates: clipFromProject + mergeTemplates ---------- */
+console.log("\n• editable templates (clipFromProject + mergeTemplates)");
+{
+  const storeRow = (slug, scope, name, extra = {}) => ({ id: slug.length + 100, slug, scope, name, category: "Custom", description: "stored", accent: "#5B8CFF", data: { app: "graphic-destination-motion", v: 5, stage: { w: 1280, h: 720, dur: 4200, bg: "#101218" }, objects: [{ id: "x1", type: "shape", name: "X", tracks: {}, locked: false, hidden: false, props: { x: 640, y: 360, w: 120, h: 120, inT: 0, outT: null, scale: 1, rotation: 0, opacity: 1, shape: "rect", fill: "#FFB224" } }] }, ...extra });
+  const clip = clipFromProject(storeRow("promo-x", "global", "Promo X").data, "Promo X");
+  if (clip.type !== "clip" || !Array.isArray(clip.children) || clip.children.length !== 1) fail("clipFromProject must pack the stored objects as clip children");
+  else ok("clipFromProject packs stored objects as clip children");
+  if (clip.props.dur !== 4200 || clip.props.start !== 0 || clip.props.end !== "hide") fail(`clipFromProject must carry the stored stage.dur + leave cleanly — got ${JSON.stringify({ dur: clip.props.dur, start: clip.props.start, end: clip.props.end })}`);
+  else ok("clipFromProject carries the stored stage.dur + ends hide");
+  if (clip.children[0].id === "x1") fail("clipFromProject must re-id the stored layers (reid), not keep raw ids");
+  else ok("clipFromProject re-ids the stored layers");
+  const noDur = clipFromProject({ objects: [{ id: "y", type: "shape", name: "y", tracks: {}, props: {} }] }, "Y");
+  if (noDur.props.dur !== 5000) fail(`clipFromProject without stage.dur must default to 5000 — got ${noDur.props.dur}`);
+  else ok("clipFromProject defaults dur to 5000 without stage data");
+
+  const merged = mergeTemplates([
+    storeRow("lower-third", "global", "Lower Third (agency cut)"),
+    storeRow("promo-x", "global", "Promo X"),
+    storeRow("my-card", "user", "My Card"),
+  ]);
+  const lt = merged.find((t) => t.id === "lower-third");
+  if (!lt || lt.name !== "Lower Third (agency cut)" || lt.scope !== "global" || !lt.overridden) fail("a global row with a built-in slug must OVERRIDE the built-in (same id, overridden marker)");
+  else ok("global override replaces the built-in card (same slug, overridden)");
+  const builtCount = merged.filter((t) => t.scope === "builtin").length;
+  if (builtCount !== TEMPLATES.length - 1) fail(`override must NOT duplicate the built-in (${TEMPLATES.length} slots, got ${builtCount + 1})`);
+  else ok("override keeps the gallery slot count (no duplicates)");
+  const promo = merged.find((t) => t.id === "promo-x");
+  if (!promo || promo.scope !== "global" || promo.overridden) fail("a global custom (no built-in slug) appends as a normal global card");
+  else ok("global custom appends after the built-ins");
+  const mine = merged.find((t) => t.id === "my-card");
+  if (!mine || mine.scope !== "user" || mine.name !== "My Card") fail("a personal row must land in the merge with scope 'user'");
+  else ok("personal row merges with scope 'user' (Mine badge source)");
+  if (typeof promo.buildClip !== "function" || promo.buildClip().type !== "clip") fail("every merged entry must carry a working buildClip()");
+  else ok("store-backed entries carry a working buildClip()");
+  if (mergeTemplates([]).length !== TEMPLATES.length) fail("an empty store must leave the built-in gallery untouched");
+  else ok("empty store → the plain built-in gallery (back-compat)");
 }
 
 checkThumbs().then(() => {
